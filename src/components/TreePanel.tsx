@@ -1,5 +1,9 @@
 import { FileTree, useFileTree } from "@pierre/trees/react";
-import type { GitStatusEntry } from "@pierre/trees";
+import type {
+  FileTreeDirectoryHandle,
+  FileTreeItemHandle,
+  GitStatusEntry,
+} from "@pierre/trees";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { TreeFile } from "../lib/api";
 
@@ -31,13 +35,12 @@ export function TreePanel({
 
     return {
       paths,
-      expandedPaths: parentDirectoryPaths(paths),
       selectablePaths: new Set(paths),
       gitStatus,
     };
   }, [files]);
 
-  const { paths, expandedPaths, selectablePaths, gitStatus } = treeData;
+  const { paths, selectablePaths, gitStatus } = treeData;
   const selectablePathsRef = useRef(selectablePaths);
   const onSelectPathRef = useRef(onSelectPath);
 
@@ -47,7 +50,7 @@ export function TreePanel({
   const { model } = useFileTree({
     paths,
     gitStatus,
-    initialExpansion: 2,
+    initialExpansion: "closed",
     initialSelectedPaths: selectedPath ? [selectedPath] : [],
     density: "compact",
     search: true,
@@ -63,6 +66,12 @@ export function TreePanel({
       return;
     }
 
+    for (const directoryPath of ancestorDirectoryPaths(selectedPath)) {
+      const item = model.getItem(directoryPath);
+      if (item && isDirectoryHandle(item)) {
+        item.expand();
+      }
+    }
     for (const selected of model.getSelectedPaths()) {
       model.getItem(selected)?.deselect();
     }
@@ -72,7 +81,7 @@ export function TreePanel({
 
   useEffect(() => {
     model.resetPaths(paths, {
-      initialExpandedPaths: expandedPaths,
+      initialExpandedPaths: [],
     });
     model.setGitStatus(gitStatus);
     model.setSearch(null);
@@ -105,15 +114,19 @@ export function TreePanel({
   );
 }
 
-function parentDirectoryPaths(paths: string[]): string[] {
-  const directories = new Set<string>();
+function ancestorDirectoryPaths(path: string): string[] {
+  const parts = path.split("/").filter(Boolean);
+  const directories: string[] = [];
 
-  for (const path of paths) {
-    const parts = path.split("/").filter(Boolean);
-    for (let index = 1; index < parts.length; index += 1) {
-      directories.add(`${parts.slice(0, index).join("/")}/`);
-    }
+  for (let index = 1; index < parts.length; index += 1) {
+    directories.push(`${parts.slice(0, index).join("/")}/`);
   }
 
-  return Array.from(directories);
+  return directories;
+}
+
+function isDirectoryHandle(
+  item: FileTreeItemHandle,
+): item is FileTreeDirectoryHandle {
+  return item.isDirectory();
 }

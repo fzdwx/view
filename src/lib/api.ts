@@ -76,6 +76,13 @@ export interface FileContent {
   tooLarge: boolean;
 }
 
+export interface FileSearchResult {
+  path: string;
+  score: number;
+  lineNumber: number | null;
+  lineText: string | null;
+}
+
 export async function loadRepository(
   path: string,
   commit?: string | null,
@@ -129,6 +136,18 @@ export async function getFileContent(
   filePath: string,
 ): Promise<FileContent> {
   return invoke<FileContent>("get_file_content", { path, filePath });
+}
+
+export async function searchFiles(
+  path: string,
+  query: string,
+  limit?: number,
+): Promise<FileSearchResult[]> {
+  return invoke<FileSearchResult[]>("search_files", {
+    path,
+    query,
+    limit: limit ?? null,
+  });
 }
 
 export async function fetchRemotes(path: string): Promise<void> {

@@ -3,6 +3,7 @@ import {
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -37,6 +38,7 @@ import {
   type FileContent,
   type RepositoryPayload,
   type TagInfo,
+  type FileSearchResult,
   fetchRemotes,
   getCommits,
   getFileContent,
@@ -44,6 +46,7 @@ import {
   getProjectFiles,
   isTauriRuntime,
   loadRepository,
+  searchFiles,
 } from "./lib/api";
 import {
   buildCommitGraph,
@@ -58,6 +61,20 @@ import {
   upsertProject,
 } from "./lib/projects";
 
+type PreviewMode = "file" | "diff";
+
+interface PreviewTab {
+  id: string;
+  mode: PreviewMode;
+  path: string;
+  commit: string | null;
+}
+
+interface PreviewTarget {
+  line: number;
+  requestId: number;
+}
+
 export function App() {
   const [projects, setProjects] = useState<SavedProject[]>(() =>
     loadSavedProjects(),
@@ -69,16 +86,24 @@ export function App() {
   const [activeCommit, setActiveCommit] = useState<string | null>(null);
   const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(null);
   const [selectedChangePath, setSelectedChangePath] = useState<string | null>(null);
-  const [previewMode, setPreviewMode] = useState<"file" | "diff">("file");
+  const [previewMode, setPreviewMode] = useState<PreviewMode>("file");
+  const [previewTabs, setPreviewTabs] = useState<PreviewTab[]>([]);
+  const [activePreviewTabId, setActivePreviewTabId] = useState<string | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<PreviewTarget | null>(null);
   const [commitFilter, setCommitFilter] = useState("");
+  const [commandOpen, setCommandOpen] = useState(false);
+  const [commandQuery, setCommandQuery] = useState("");
+  const [debouncedCommandQuery, setDebouncedCommandQuery] = useState("");
+  const [commandSelectionIndex, setCommandSelectionIndex] = useState(0);
   const [panelSizes, setPanelSizes] = useState({
     rail: 292,
     tree: 300,
     log: 280,
     branch: 260,
-    details: 320,
+    details: 280,
   });
   const remoteFetchInFlightRef = useRef(false);
+  const previewRequestIdRef = useRef(0);
 
   useEffect(() => {
     saveProjects(projects);
@@ -154,6 +179,21 @@ export function App() {
     retry: false,
   });
 
+  const fileSearchQuery = useQuery({
+    queryKey: [
+      "file-search",
+      activeProject?.activePath,
+      debouncedCommandQuery,
+    ],
+    queryFn: () =>
+      searchFiles(activeProject!.activePath, debouncedCommandQuery, 80),
+    enabled: Boolean(
+      activeProject && commandOpen && debouncedCommandQuery.trim(),
+    ),
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+
   useEffect(() => {
     const payload = repositoryQuery.data;
     if (!payload || !activeProject) {
@@ -207,6 +247,10 @@ export function App() {
   const selectedBranchRef = activeBranchRef ?? currentBranchRef;
   const selectedCommit =
     commits.find((commit) => commit.hash === activeCommit) ?? null;
+  const commandResults =
+    debouncedCommandQuery.trim().length > 0
+      ? (fileSearchQuery.data ?? [])
+      : [];
   const appShellStyle = {
     gridTemplateColumns: `${panelSizes.rail}px 6px minmax(0, 1fr)`,
   };
@@ -219,6 +263,10 @@ export function App() {
   };
 
   useEffect(() => {
+    if (projectFilesQuery.isPlaceholderData) {
+      return;
+    }
+
     if (!selectedProjectPath) {
       return;
     }
@@ -233,9 +281,54 @@ export function App() {
     if (!stillExists) {
       setSelectedProjectPath(null);
     }
-  }, [projectFilesQuery.data, selectedProjectPath]);
+  }, [
+    projectFilesQuery.data,
+    projectFilesQuery.isPlaceholderData,
+    selectedProjectPath,
+  ]);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedCommandQuery(commandQuery.trim());
+    }, 120);
+
+    return () => window.clearTimeout(timer);
+  }, [commandQuery]);
+
+  useEffect(() => {
+    setCommandSelectionIndex(0);
+  }, [debouncedCommandQuery, activeProject?.activePath]);
+
+  useEffect(() => {
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      const editableTarget =
+        event.target instanceof HTMLElement &&
+        (event.target.matches("input, textarea, [contenteditable='true']") ||
+          event.target.closest("[data-command-panel]"));
+
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "p") {
+        event.preventDefault();
+        if (activeProject) {
+          openCommandPanel();
+        }
+        return;
+      }
+
+      if (event.key === "Escape" && commandOpen && !editableTarget) {
+        event.preventDefault();
+        closeCommandPanel();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeProject, commandOpen]);
+
+  useEffect(() => {
+    if (repositoryQuery.isPlaceholderData) {
+      return;
+    }
+
     if (!selectedChangePath) {
       return;
     }
@@ -250,7 +343,7 @@ export function App() {
     if (!stillExists) {
       setSelectedChangePath(files[0]?.path ?? null);
     }
-  }, [payload?.files, selectedChangePath]);
+  }, [payload?.files, repositoryQuery.isPlaceholderData, selectedChangePath]);
 
   useEffect(() => {
     if (previewMode !== "diff" || selectedChangePath || !payload?.files.length) {
@@ -313,6 +406,7 @@ export function App() {
     setSelectedProjectPath(null);
     setSelectedChangePath(null);
     setPreviewMode("file");
+    clearPreviewTabs();
 
     const nextProjects = upsertProject(projects, selected);
     setProjects(nextProjects);
@@ -333,7 +427,85 @@ export function App() {
       setSelectedProjectPath(null);
       setSelectedChangePath(null);
       setPreviewMode("file");
+      clearPreviewTabs();
     }
+  }
+
+  function clearPreviewTabs() {
+    setPreviewTabs([]);
+    setActivePreviewTabId(null);
+    setPreviewTarget(null);
+  }
+
+  function openCommandPanel() {
+    setCommandOpen(true);
+    setCommandQuery("");
+    setDebouncedCommandQuery("");
+    setCommandSelectionIndex(0);
+  }
+
+  function closeCommandPanel() {
+    setCommandOpen(false);
+    setCommandQuery("");
+    setDebouncedCommandQuery("");
+    setCommandSelectionIndex(0);
+  }
+
+  function openPreviewTab(mode: PreviewMode, path: string, targetLine: number | null = null) {
+    const commit = mode === "diff" ? activeCommit : null;
+    const id = previewTabId(mode, path, commit);
+    const nextTab: PreviewTab = { id, mode, path, commit };
+
+    setPreviewTabs((tabs) => {
+      if (tabs.some((tab) => tab.id === id)) {
+        return tabs;
+      }
+      return [...tabs, nextTab].slice(-10);
+    });
+    activatePreviewTab(nextTab);
+    setPreviewTarget(
+      mode === "file" && targetLine
+        ? { line: targetLine, requestId: ++previewRequestIdRef.current }
+        : null,
+    );
+  }
+
+  function activatePreviewTab(tab: PreviewTab) {
+    setActivePreviewTabId(tab.id);
+    setPreviewMode(tab.mode);
+    setPreviewTarget(null);
+
+    if (tab.mode === "file") {
+      setSelectedProjectPath(tab.path);
+      setSelectedChangePath(null);
+      return;
+    }
+
+    setSelectedProjectPath(null);
+    setActiveCommit(tab.commit);
+    setSelectedChangePath(tab.path);
+  }
+
+  function closePreviewTab(tabId: string) {
+    const closedIndex = previewTabs.findIndex((tab) => tab.id === tabId);
+    const nextTabs = previewTabs.filter((tab) => tab.id !== tabId);
+    setPreviewTabs(nextTabs);
+
+    if (activePreviewTabId !== tabId) {
+      return;
+    }
+
+    const nextTab =
+      nextTabs[Math.max(0, closedIndex - 1)] ?? nextTabs[0] ?? null;
+    if (nextTab) {
+      activatePreviewTab(nextTab);
+      return;
+    }
+
+    setActivePreviewTabId(null);
+    setSelectedProjectPath(null);
+    setSelectedChangePath(null);
+    setPreviewTarget(null);
   }
 
   function resizePanel(
@@ -346,6 +518,11 @@ export function App() {
       ...current,
       [key]: clamp(current[key] + delta, min, max),
     }));
+  }
+
+  function openFileSearchResult(result: FileSearchResult) {
+    openPreviewTab("file", result.path, result.lineNumber);
+    closeCommandPanel();
   }
 
   return (
@@ -388,6 +565,7 @@ export function App() {
                 setSelectedProjectPath(null);
                 setSelectedChangePath(null);
                 setPreviewMode("file");
+                clearPreviewTabs();
               }}
               onRemove={() => removeProject(project.id)}
             />
@@ -406,6 +584,7 @@ export function App() {
           payload={payload}
           activeProject={activeProject}
           loading={repositoryQuery.isFetching || commitsQuery.isFetching}
+          onOpenCommandPanel={openCommandPanel}
           onRefresh={() => {
             void Promise.all([
               repositoryQuery.refetch(),
@@ -446,8 +625,7 @@ export function App() {
                   emptyTitle="No project files"
                   emptyCopy="Tracked and untracked files will appear here."
                   onSelectPath={(path) => {
-                    setSelectedProjectPath(path);
-                    setPreviewMode("file");
+                    openPreviewTab("file", path);
                   }}
                 />
               ) : (
@@ -462,35 +640,22 @@ export function App() {
             />
 
             <section className="diff-panel">
-              <div className="diff-topbar">
-                <div>
-                  <div className="panel-title">
-                    {previewMode === "diff"
-                      ? selectedChangePath ?? "Diff preview"
-                      : selectedProjectPath ?? "File preview"}
-                  </div>
-                  <div className="panel-kicker">
-                    {previewMode === "diff"
-                      ? activeCommit
-                        ? selectedCommit?.shortHash
-                        : "staged + unstaged"
-                      : "read-only workspace file"}
-                  </div>
-                </div>
-                <div className="diff-topbar-meta">
-                  {previewMode === "diff" && diffStats.files > 0 ? (
-                    <div className="diff-stat-strip" aria-label="Diff line counts">
-                      <span className="addition">+{diffStats.additions}</span>
-                      <span className="deletion">-{diffStats.deletions}</span>
-                    </div>
-                  ) : null}
-                  {repositoryQuery.isFetching ||
+              <PreviewTabBar
+                activeTabId={activePreviewTabId}
+                diffStats={diffStats}
+                loading={
+                  repositoryQuery.isFetching ||
                   fileDiffQuery.isFetching ||
-                  fileContentQuery.isFetching ? (
-                    <Loader2 className="spin" size={16} />
-                  ) : null}
-                </div>
-              </div>
+                  fileContentQuery.isFetching
+                }
+                onCloseTab={closePreviewTab}
+                onSelectTab={activatePreviewTab}
+                previewMode={previewMode}
+                selectedPath={
+                  previewMode === "diff" ? selectedChangePath : selectedProjectPath
+                }
+                tabs={previewTabs}
+              />
               {previewMode === "file" ? (
                 <FilePreview
                   error={
@@ -505,6 +670,7 @@ export function App() {
                       !currentFileContent,
                   )}
                   selectedPath={selectedProjectPath}
+                  target={previewTarget}
                 />
               ) : payload && fileDiffQuery.isFetching && !currentFileDiff ? (
                 <div className="diff-loading">
@@ -546,6 +712,7 @@ export function App() {
                       setActiveCommit(null);
                       setSelectedChangePath(null);
                       setPreviewMode("diff");
+                      setActivePreviewTabId(null);
                     }}
                   />
                 ) : (
@@ -573,6 +740,7 @@ export function App() {
                       setActiveCommit(null);
                       setSelectedChangePath(null);
                       setPreviewMode("diff");
+                      setActivePreviewTabId(null);
                     }}
                   >
                     <CheckCircle2 size={15} />
@@ -597,6 +765,7 @@ export function App() {
                     setActiveCommit(hash);
                     setSelectedChangePath(null);
                     setPreviewMode("diff");
+                    setActivePreviewTabId(null);
                   }}
                 />
               </section>
@@ -604,7 +773,7 @@ export function App() {
                 axis="x"
                 className="history-detail-splitter"
                 label="Resize details panel"
-                onResize={(delta) => resizePanel("details", -delta, 220, 560)}
+                onResize={(delta) => resizePanel("details", -delta, 200, 460)}
               />
 
               <CommitInspector
@@ -621,14 +790,30 @@ export function App() {
                 files={payload?.files ?? []}
                 selectedPath={selectedChangePath}
                 onSelectPath={(path) => {
-                  setSelectedChangePath(path);
-                  setPreviewMode("diff");
+                  openPreviewTab("diff", path);
                 }}
               />
             </section>
           </div>
         )}
       </section>
+      <CommandPanel
+        activeIndex={commandSelectionIndex}
+        error={
+          fileSearchQuery.isError
+            ? String(fileSearchQuery.error.message)
+            : null
+        }
+        loading={fileSearchQuery.isFetching}
+        open={commandOpen}
+        projectName={activeProject?.name}
+        query={commandQuery}
+        results={commandResults}
+        onChangeQuery={setCommandQuery}
+        onClose={closeCommandPanel}
+        onOpenResult={openFileSearchResult}
+        onSelectIndex={setCommandSelectionIndex}
+      />
     </main>
   );
 }
@@ -638,12 +823,50 @@ function FilePreview({
   file,
   loading,
   selectedPath,
+  target,
 }: {
   error: string | null;
   file: FileContent | null;
   loading: boolean;
   selectedPath: string | null;
+  target: PreviewTarget | null;
 }) {
+  const frameRef = useRef<HTMLElement | null>(null);
+  const targetLineRef = useRef<HTMLDivElement | null>(null);
+  const lines = useMemo(() => {
+    if (!file) {
+      return [];
+    }
+
+    return file.content.length > 0 ? file.content.split(/\r?\n/) : [""];
+  }, [file]);
+
+  useLayoutEffect(() => {
+    if (!target || !file) {
+      return;
+    }
+
+    const frame = frameRef.current;
+    const line = targetLineRef.current;
+    if (!frame || !line) {
+      return;
+    }
+
+    const frameRect = frame.getBoundingClientRect();
+    const lineRect = line.getBoundingClientRect();
+    const nextTop =
+      frame.scrollTop +
+      lineRect.top -
+      frameRect.top -
+      (frame.clientHeight - lineRect.height) / 2;
+
+    frame.scrollTo({
+      top: Math.max(0, nextTop),
+      left: frame.scrollLeft,
+      behavior: "auto",
+    });
+  }, [file, target]);
+
   if (loading) {
     return (
       <div className="diff-loading">
@@ -697,9 +920,261 @@ function FilePreview({
   }
 
   return (
-    <section className="file-preview-frame" aria-label={file.path}>
-      <pre className="file-preview-code">{file.content}</pre>
+    <section ref={frameRef} className="file-preview-frame" aria-label={file.path}>
+      <div className="file-preview-code" role="presentation">
+        {lines.map((line, index) => {
+          const lineNumber = index + 1;
+          const active = target?.line === lineNumber;
+
+          return (
+            <div
+              key={lineNumber}
+              ref={active ? targetLineRef : undefined}
+              className={
+                active
+                  ? "file-preview-line active"
+                  : "file-preview-line"
+              }
+            >
+              <span className="file-preview-line-number">{lineNumber}</span>
+              <span className="file-preview-line-code">
+                {line.length > 0 ? line : " "}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </section>
+  );
+}
+
+function PreviewTabBar({
+  activeTabId,
+  diffStats,
+  loading,
+  onCloseTab,
+  onSelectTab,
+  previewMode,
+  selectedPath,
+  tabs,
+}: {
+  activeTabId: string | null;
+  diffStats: { additions: number; deletions: number; files: number };
+  loading: boolean;
+  onCloseTab(tabId: string): void;
+  onSelectTab(tab: PreviewTab): void;
+  previewMode: PreviewMode;
+  selectedPath: string | null;
+  tabs: PreviewTab[];
+}) {
+  return (
+    <div className="preview-tabbar">
+      <div className="preview-tabs" role="tablist" aria-label="Open files">
+        {tabs.length > 0 ? (
+          tabs.map((tab) => (
+            <div
+              key={tab.id}
+              className={
+                tab.id === activeTabId ? "preview-tab active" : "preview-tab"
+              }
+              title={tab.path}
+            >
+              <button
+                className="preview-tab-select"
+                role="tab"
+                aria-selected={tab.id === activeTabId}
+                onClick={() => onSelectTab(tab)}
+              >
+                <span className="preview-tab-kind">
+                  {tab.mode === "diff" ? "D" : "F"}
+                </span>
+                <span className="preview-tab-name">{fileNameFromPath(tab.path)}</span>
+              </button>
+              <button
+                className="preview-tab-close"
+                aria-label={`Close ${tab.path}`}
+                onClick={() => onCloseTab(tab.id)}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))
+        ) : (
+          <div className="preview-tab-placeholder">
+            {selectedPath
+              ? `${previewMode === "diff" ? "Diff" : "File"}: ${fileNameFromPath(
+                  selectedPath,
+                )}`
+              : "No file open"}
+          </div>
+        )}
+      </div>
+      <div className="preview-tabbar-meta">
+        {previewMode === "diff" && diffStats.files > 0 ? (
+          <div className="diff-stat-strip" aria-label="Diff line counts">
+            <span className="addition">+{diffStats.additions}</span>
+            <span className="deletion">-{diffStats.deletions}</span>
+          </div>
+        ) : null}
+        {loading ? <Loader2 className="spin" size={15} /> : null}
+      </div>
+    </div>
+  );
+}
+
+function CommandPanel({
+  activeIndex,
+  error,
+  loading,
+  open,
+  projectName,
+  query,
+  results,
+  onChangeQuery,
+  onClose,
+  onOpenResult,
+  onSelectIndex,
+}: {
+  activeIndex: number;
+  error: string | null;
+  loading: boolean;
+  open: boolean;
+  projectName?: string;
+  query: string;
+  results: FileSearchResult[];
+  onChangeQuery(query: string): void;
+  onClose(): void;
+  onOpenResult(result: FileSearchResult): void;
+  onSelectIndex(index: number): void;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const hasQuery = query.trim().length > 0;
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [open]);
+
+  if (!open) {
+    return null;
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      onSelectIndex(results.length === 0 ? 0 : (activeIndex + 1) % results.length);
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      onSelectIndex(
+        results.length === 0
+          ? 0
+          : (activeIndex - 1 + results.length) % results.length,
+      );
+      return;
+    }
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      const selected = results[activeIndex];
+      if (selected) {
+        onOpenResult(selected);
+      }
+    }
+  }
+
+  return (
+    <div className="command-overlay" data-command-panel onMouseDown={onClose}>
+      <section
+        className="command-panel"
+        aria-label="Command panel"
+        onKeyDown={handleKeyDown}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="command-input-row">
+          <Search size={17} />
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(event) => onChangeQuery(event.target.value)}
+            placeholder="Search files"
+          />
+          {loading ? <Loader2 className="spin" size={16} /> : null}
+        </div>
+        <div className="command-context">
+          <span>{projectName ?? "No project"}</span>
+          <kbd>Enter</kbd>
+          <kbd>Esc</kbd>
+        </div>
+        <div className="command-results">
+          {error ? (
+            <div className="command-empty">
+              <div className="empty-title">Search failed</div>
+              <div className="empty-copy">{error}</div>
+            </div>
+          ) : !hasQuery ? (
+            <div className="command-empty">
+              <div className="empty-title">Type a file name or path</div>
+              <div className="empty-copy">
+                Fuzzy search scans tracked and untracked files in the active worktree.
+              </div>
+            </div>
+          ) : results.length === 0 && !loading ? (
+            <div className="command-empty">
+              <div className="empty-title">No files found</div>
+              <div className="empty-copy">Try another filename or path segment.</div>
+            </div>
+          ) : (
+            results.map((result, index) => {
+              const hasLineMatch = Boolean(result.lineNumber && result.lineText);
+
+              return (
+                <button
+                  key={`${result.path}:${result.lineNumber ?? "file"}`}
+                  className={
+                    index === activeIndex
+                      ? "command-result active"
+                      : "command-result"
+                  }
+                  onMouseEnter={() => onSelectIndex(index)}
+                  onClick={() => onOpenResult(result)}
+                >
+                  <span className="command-result-icon">
+                    {fileExtension(result.path) || "file"}
+                  </span>
+                  <span className="command-result-main">
+                    <span>{fileNameFromPath(result.path)}</span>
+                    <small className={hasLineMatch ? "command-result-match" : undefined}>
+                      {hasLineMatch
+                        ? `${result.lineNumber}: ${result.lineText}`
+                        : parentPathFromPath(result.path) || "./"}
+                    </small>
+                  </span>
+                  <span className="command-result-score">
+                    {hasLineMatch ? "line" : result.score}
+                  </span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -1201,69 +1676,52 @@ function CommitDetails({
 }) {
   return (
     <section className="commit-details-section">
-      <div className="panel-toolbar compact-toolbar">
-        <div>
-          <div className="panel-title">Details</div>
-          <div className="panel-kicker">
-            {commit ? commit.shortHash : "Working tree"}
-          </div>
-        </div>
-      </div>
-
       {commit ? (
         <div className="commit-detail-body">
-          <div className="detail-summary">
-            <div className="detail-subject">{commit.subject}</div>
-            <div className="detail-hash-pill">{commit.shortHash}</div>
+          <div className="compact-commit-heading">
+            <span className="compact-commit-subject">{commit.subject}</span>
+            <span className="compact-detail-pill mono-value">{commit.shortHash}</span>
           </div>
-          <DetailRow label="Hash" value={commit.hash} mono />
-          {commit.parents.length > 1 ? (
-            <DetailRow label="Type" value="Merge commit" />
-          ) : null}
-          {commit.parents.length > 0 ? (
-            <DetailRow
-              label={commit.parents.length > 1 ? "Parents" : "Parent"}
-              value={commit.parents
-                .map((parent) => parent.slice(0, 8))
-                .join(", ")}
-              mono
-            />
-          ) : null}
-          <DetailRow label="Author" value={commit.author} />
-          <DetailRow label="Date" value={formatDate(commit.date)} mono />
-          <DetailRow label="Branch" value={branchName ?? "current"} />
-          <DetailRow label="Files" value={String(fileCount)} mono />
-          <DetailRow label="Selected" value={selectedPath ?? "none"} mono />
+          <div className="compact-detail-grid">
+            <span className="compact-detail-chip">
+              <GitBranch size={12} />
+              <span>{branchName ?? "current"}</span>
+            </span>
+            <span className="compact-detail-chip">
+              <span>{commit.author}</span>
+            </span>
+            <span className="compact-detail-chip mono-value">
+              <span>{formatDate(commit.date)}</span>
+            </span>
+            <span className="compact-detail-chip">
+              <span>{fileCount} files</span>
+            </span>
+            <span className="compact-detail-chip selected-file">
+              <span>{selectedPath ?? "No file selected"}</span>
+            </span>
+          </div>
         </div>
       ) : (
         <div className="commit-detail-body">
-          <div className="detail-summary">
-            <div className="detail-subject">Working tree changes</div>
-            <div className="detail-hash-pill">live</div>
+          <div className="compact-commit-heading">
+            <span className="compact-commit-subject">Working tree changes</span>
+            <span className="compact-detail-pill">live</span>
           </div>
-          <DetailRow label="Branch" value={branchName ?? "current"} />
-          <DetailRow label="Files" value={String(fileCount)} mono />
-          <DetailRow label="Selected" value={selectedPath ?? "none"} mono />
+          <div className="compact-detail-grid">
+            <span className="compact-detail-chip">
+              <GitBranch size={12} />
+              <span>{branchName ?? "current"}</span>
+            </span>
+            <span className="compact-detail-chip">
+              <span>{fileCount} files</span>
+            </span>
+            <span className="compact-detail-chip selected-file">
+              <span>{selectedPath ?? "No file selected"}</span>
+            </span>
+          </div>
         </div>
       )}
     </section>
-  );
-}
-
-function DetailRow({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <div className="detail-row">
-      <span>{label}</span>
-      <strong className={mono ? "mono-value" : undefined}>{value}</strong>
-    </div>
   );
 }
 
@@ -1295,52 +1753,83 @@ function HeaderBar({
   payload,
   activeProject,
   loading,
+  onOpenCommandPanel,
   onRefresh,
 }: {
   payload?: RepositoryPayload;
   activeProject?: SavedProject;
   loading: boolean;
+  onOpenCommandPanel(): void;
   onRefresh(): void;
 }) {
   const counts = payload?.summary.statusCounts;
+  const activePath = payload?.summary.root ?? activeProject?.activePath ?? "";
+  const pathParts = activePath.split("/").filter(Boolean);
+  const compactPath =
+    pathParts.length > 3
+      ? ["...", ...pathParts.slice(pathParts.length - 3)]
+      : pathParts;
+  const activeWorktree =
+    payload?.summary.worktrees.find(
+      (worktree) => worktree.path === activeProject?.activePath,
+    ) ?? payload?.summary.worktrees[0];
   const appWindow = isTauriRuntime() ? getCurrentWindow() : null;
 
   return (
     <header className="workspace-header">
-      <div className="repo-heading" data-tauri-drag-region>
-        <div className="repo-name">
-          {activeProject?.name ?? "No repository selected"}
+      <div className="ide-header-main" data-tauri-drag-region>
+        <div className="ide-project-chip">
+          <Folder size={14} />
+          <span>{activeProject?.name ?? "No project"}</span>
         </div>
-        <div className="repo-meta">
-          {payload ? (
-            <>
-              <span>
-                <GitBranch size={13} />
-                {payload.summary.branch}
+        <div className="ide-path-trail" aria-label="Current workspace path">
+          {compactPath.length > 0 ? (
+            compactPath.map((part, index) => (
+              <span key={`${part}-${index}`}>
+                {index > 0 ? <ChevronRight size={12} /> : null}
+                {part}
               </span>
-              <span>
-                <GitCommitHorizontal size={13} />
-                {payload.summary.head}
-              </span>
-              <span>{payload.summary.root}</span>
-            </>
+            ))
           ) : (
-            <span>{activeProject?.activePath ?? "Choose a folder to start"}</span>
+            <span>Choose a folder</span>
           )}
         </div>
       </div>
-      <div className="header-actions">
+      <div className="ide-header-context" data-tauri-drag-region>
+        <div className="ide-context-item strong">
+          <GitBranch size={13} />
+          <span>{payload?.summary.branch ?? "no branch"}</span>
+        </div>
+        <div className="ide-context-item">
+          <GitCommitHorizontal size={13} />
+          <span>{payload?.summary.head ?? "no commit"}</span>
+        </div>
+        <div className="ide-context-item">
+          <FolderOpen size={13} />
+          <span>{activeWorktree?.branch ?? "workspace"}</span>
+        </div>
+      </div>
+      <div className="ide-header-actions">
         {counts ? (
-          <div className="status-strip">
-            <span>+{counts.added}</span>
-            <span>~{counts.modified}</span>
-            <span>-{counts.deleted}</span>
-            <span>?{counts.untracked}</span>
+          <div className="ide-status-strip" aria-label="Working tree status">
+            <span className="added">A {counts.added}</span>
+            <span className="modified">M {counts.modified}</span>
+            <span className="deleted">D {counts.deleted}</span>
+            <span className="untracked">U {counts.untracked}</span>
           </div>
         ) : null}
-        <button className="ghost-button" onClick={onRefresh}>
+        <button
+          className="ghost-button ide-search-button"
+          disabled={!activeProject}
+          onClick={onOpenCommandPanel}
+        >
+          <Search size={15} />
+          <span>Files</span>
+          <kbd>⌘P</kbd>
+        </button>
+        <button className="ghost-button ide-refresh-button" onClick={onRefresh}>
           {loading ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
-          Refresh
+          <span>Sync</span>
         </button>
         <div className="window-controls" aria-label="Window controls">
           <button
@@ -1721,6 +2210,24 @@ function countDiffStats(files: ReturnType<typeof parseRepositoryDiff>["files"]) 
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function previewTabId(mode: PreviewMode, path: string, commit: string | null): string {
+  return `${mode}:${commit ?? "worktree"}:${path}`;
+}
+
+function fileNameFromPath(path: string): string {
+  return path.split("/").filter(Boolean).at(-1) ?? path;
+}
+
+function parentPathFromPath(path: string): string {
+  return path.split("/").filter(Boolean).slice(0, -1).join("/");
+}
+
+function fileExtension(path: string): string {
+  const fileName = fileNameFromPath(path);
+  const extension = fileName.includes(".") ? fileName.split(".").pop() : null;
+  return extension ? extension.slice(0, 4).toLowerCase() : "";
 }
 
 function projectRootFromPayload(payload: RepositoryPayload): string {

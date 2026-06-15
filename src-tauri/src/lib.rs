@@ -1,11 +1,19 @@
+use fff_search::{
+    FFFMode, FilePicker, FilePickerOptions, FuzzySearchOptions, GrepConfig, GrepMode,
+    GrepSearchOptions, PaginationArgs, QueryParser, SharedFilePicker, SharedFrecency,
+};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 const MAX_TEXT_FILE_BYTES: u64 = 1_048_576;
+const DEFAULT_FILE_SEARCH_LIMIT: usize = 50;
+const MAX_FILE_SEARCH_LIMIT: usize = 200;
+const FILE_SEARCH_SCAN_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -93,6 +101,15 @@ struct FileContent {
     too_large: bool,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileSearchResult {
+    path: String,
+    score: i32,
+    line_number: Option<usize>,
+    line_text: Option<String>,
+}
+
 #[tauri::command]
 fn default_start_path() -> Result<String, String> {
     env::current_dir()
@@ -157,6 +174,16 @@ fn get_project_files(path: String) -> Result<Vec<TreeFile>, String> {
 fn get_file_content(path: String, file_path: String) -> Result<FileContent, String> {
     let root = repository_root(&path)?;
     read_file_content(&root, &file_path)
+}
+
+#[tauri::command]
+fn search_files(
+    path: String,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<FileSearchResult>, String> {
+    let root = repository_root(&path)?;
+    search_project_files(&root, &query, limit)
 }
 
 #[tauri::command]
@@ -564,6 +591,128 @@ fn read_file_content(root: &Path, file_path: &str) -> Result<FileContent, String
     })
 }
 
+fn search_project_files(
+    root: &Path,
+    query: &str,
+    limit: Option<usize>,
+) -> Result<Vec<FileSearchResult>, String> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let limit = limit
+        .unwrap_or(DEFAULT_FILE_SEARCH_LIMIT)
+        .clamp(1, MAX_FILE_SEARCH_LIMIT);
+    let shared_picker = SharedFilePicker::default();
+    let shared_frecency = SharedFrecency::default();
+
+    FilePicker::new_with_shared_state(
+        shared_picker.clone(),
+        shared_frecency,
+        FilePickerOptions {
+            base_path: root.to_string_lossy().to_string(),
+            mode: FFFMode::Ai,
+            watch: false,
+            ..Default::default()
+        },
+    )
+    .map_err(|error| error.to_string())?;
+
+    if !shared_picker.wait_for_scan(FILE_SEARCH_SCAN_TIMEOUT) {
+        return Err("Timed out while indexing files for search".to_string());
+    }
+
+    let parsed_query = QueryParser::default().parse(query);
+    let grep_query = QueryParser::new(GrepConfig).parse(query);
+    let picker_guard = shared_picker.read().map_err(|error| error.to_string())?;
+    let picker = picker_guard
+        .as_ref()
+        .ok_or_else(|| "File search index was not initialized".to_string())?;
+    let file_results = picker.fuzzy_search(
+        &parsed_query,
+        None,
+        FuzzySearchOptions {
+            max_threads: 0,
+            current_file: None,
+            project_path: Some(root),
+            pagination: PaginationArgs { offset: 0, limit },
+            ..Default::default()
+        },
+    );
+    let grep_results = picker.grep(
+        &grep_query,
+        &GrepSearchOptions {
+            max_matches_per_file: 1,
+            page_limit: limit,
+            mode: GrepMode::PlainText,
+            time_budget_ms: 400,
+            trim_whitespace: true,
+            ..Default::default()
+        },
+    );
+    let mut grep_matches_by_path: HashMap<String, (usize, String, i32)> = HashMap::new();
+    for matched in &grep_results.matches {
+        let Some(file) = grep_results.files.get(matched.file_index) else {
+            continue;
+        };
+        let path = file.relative_path(picker).replace('\\', "/");
+        grep_matches_by_path.entry(path).or_insert_with(|| {
+            (
+                matched.line_number as usize,
+                matched.line_content.clone(),
+                matched.fuzzy_score.map(i32::from).unwrap_or(0),
+            )
+        });
+    }
+
+    let mut combined = file_results
+        .items
+        .iter()
+        .zip(file_results.scores.iter())
+        .map(|(item, score)| FileSearchResult {
+            path: item.relative_path(picker).replace('\\', "/"),
+            score: score.total,
+            line_number: None,
+            line_text: None,
+        })
+        .map(|mut result| {
+            if let Some((line_number, line_text, _)) = grep_matches_by_path.get(&result.path) {
+                result.line_number = Some(*line_number);
+                result.line_text = Some(line_text.clone());
+            }
+            result
+        })
+        .fold(Vec::<FileSearchResult>::new(), |mut results, result| {
+            if results.iter().all(|current| current.path != result.path) {
+                results.push(result);
+            }
+            results
+        });
+
+    for matched in &grep_results.matches {
+        let Some(file) = grep_results.files.get(matched.file_index) else {
+            continue;
+        };
+        let path = file.relative_path(picker).replace('\\', "/");
+        if combined.iter().any(|result| result.path == path) {
+            continue;
+        }
+        combined.push(FileSearchResult {
+            path,
+            score: matched.fuzzy_score.map(i32::from).unwrap_or(0),
+            line_number: Some(matched.line_number as usize),
+            line_text: Some(matched.line_content.clone()),
+        });
+        if combined.len() >= limit {
+            break;
+        }
+    }
+
+    combined.truncate(limit);
+    Ok(combined)
+}
+
 fn git_diff(root: &Path) -> Result<String, String> {
     let unstaged = git(root, &["diff", "--no-ext-diff", "--unified=80"])?;
     let staged = git(root, &["diff", "--cached", "--no-ext-diff", "--unified=80"])?;
@@ -938,6 +1087,77 @@ mod tests {
     }
 
     #[test]
+    fn file_search_returns_ranked_paths_for_query() {
+        let repo = create_basic_repo();
+        fs::create_dir_all(repo.join("src").join("components")).expect("create components");
+        fs::write(
+            repo.join("src").join("App.tsx"),
+            "export function App() {}\n",
+        )
+        .expect("write app");
+        fs::write(
+            repo.join("src").join("components").join("TreePanel.tsx"),
+            "export function TreePanel() {}\n",
+        )
+        .expect("write tree panel");
+        fs::write(repo.join("README.md"), "# View\n").expect("write readme");
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-m", "files"]);
+
+        let results = search_project_files(&repo, "tree panel", Some(5)).expect("search files");
+        assert!(
+            results
+                .iter()
+                .any(|result| result.path == "src/components/TreePanel.tsx"),
+            "fuzzy file search should find matching repository paths"
+        );
+        assert!(
+            results.len() <= 5,
+            "file search should respect the requested limit"
+        );
+
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn file_search_returns_content_matches_with_line_preview() {
+        let repo = create_basic_repo();
+        fs::create_dir_all(repo.join("src")).expect("create src");
+        fs::write(
+            repo.join("src").join("alpha.ts"),
+            "const needleSymbol = true;\nexport const value = needleSymbol;\n",
+        )
+        .expect("write source");
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-m", "content"]);
+
+        let results = search_project_files(&repo, "needleSymbol", Some(5)).expect("search files");
+        let result = results
+            .iter()
+            .find(|result| result.path == "src/alpha.ts")
+            .expect("content search should find matching file contents");
+
+        assert_eq!(result.line_number, Some(1));
+        assert_eq!(
+            result.line_text.as_deref(),
+            Some("const needleSymbol = true;")
+        );
+
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn file_search_empty_query_returns_no_results() {
+        let repo = create_basic_repo();
+        fs::write(repo.join("note.txt"), "hello\n").expect("write text");
+
+        let results = search_project_files(&repo, "   ", Some(5)).expect("empty search");
+        assert!(results.is_empty());
+
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
     fn branch_tracking_counts_remote_ahead_of_current_branch() {
         let remote = create_basic_repo();
         fs::write(remote.join("base.txt"), "base\n").expect("write base");
@@ -1074,6 +1294,7 @@ pub fn run() {
             get_commits,
             get_project_files,
             get_file_content,
+            search_files,
             fetch_remotes
         ])
         .run(tauri::generate_context!())
