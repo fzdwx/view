@@ -1,5 +1,5 @@
 import type { FileDiffMetadata } from "@pierre/diffs";
-import { FileDiff } from "@pierre/diffs/react";
+import { FileDiff, Virtualizer } from "@pierre/diffs/react";
 
 interface DiffPanelProps {
   error: string | null;
@@ -30,27 +30,37 @@ export function DiffPanel({ error, files, title }: DiffPanelProps) {
   }
 
   return (
-    <section className="diff-shell" aria-label={title}>
-      {files.map((fileDiff, index) => (
-        <FileDiff
-          key={`${fileDiff.name}-${fileDiff.prevName ?? ""}-${index}`}
-          fileDiff={fileDiff}
-          className="diff-view"
-          options={{
-            diffStyle: "split",
-            overflow: "scroll",
-            hunkSeparators: "line-info",
-            lineDiffType: "none",
-            tokenizeMaxLineLength: 400,
-            collapsedContextThreshold: 4,
-            theme: {
-              light: "github-light",
-              dark: "github-dark",
-            },
-            themeType: "light",
-          }}
-        />
-      ))}
+    <section className="diff-shell-frame" aria-label={title}>
+      <Virtualizer
+        className="diff-shell"
+        contentClassName="diff-shell-content"
+        config={{
+          overscrollSize: 900,
+          intersectionObserverMargin: 1200,
+        }}
+      >
+        {files.map((fileDiff, index) => (
+          <FileDiff
+            key={`${fileDiff.name}-${fileDiff.prevName ?? ""}-${index}`}
+            fileDiff={fileDiff}
+            className="diff-view"
+            options={{
+              diffStyle: "split",
+              overflow: "scroll",
+              hunkSeparators: "line-info",
+              lineDiffType: "none",
+              disableFileHeader: true,
+              tokenizeMaxLineLength: 400,
+              collapsedContextThreshold: 4,
+              theme: {
+                light: "github-light",
+                dark: "github-dark",
+              },
+              themeType: "light",
+            }}
+          />
+        ))}
+      </Virtualizer>
     </section>
   );
 }

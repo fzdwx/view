@@ -21,6 +21,9 @@ export interface BranchInfo {
   refName: string;
   branchType: "local" | "remote";
   current: boolean;
+  ahead: number | null;
+  behind: number | null;
+  upstream: string | null;
 }
 
 export interface TagInfo {
@@ -41,6 +44,7 @@ export interface RepositorySummary {
 export interface CommitInfo {
   hash: string;
   shortHash: string;
+  parents: string[];
   author: string;
   date: string;
   subject: string;
@@ -97,6 +101,10 @@ export async function getFileDiff(
     commit: commit ?? null,
     filePath,
   });
+}
+
+export async function fetchRemotes(path: string): Promise<void> {
+  return invoke<void>("fetch_remotes", { path });
 }
 
 export function isTauriRuntime(): boolean {

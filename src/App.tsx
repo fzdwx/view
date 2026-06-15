@@ -10,8 +10,8 @@ import {
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
-  Boxes,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -21,9 +21,11 @@ import {
   GitCommitHorizontal,
   GitPullRequestArrow,
   Loader2,
+  Minus,
   Plus,
   RefreshCw,
   Search,
+  Square,
   Tag,
   X,
 } from "lucide-react";
@@ -34,11 +36,16 @@ import {
   type CommitInfo,
   type RepositoryPayload,
   type TagInfo,
+  fetchRemotes,
   getFileDiff,
   isTauriRuntime,
   loadRepository,
 } from "./lib/api";
-import { parseRepositoryDiff } from "./lib/diff";
+import {
+  buildCommitGraph,
+  type CommitGraphRow,
+} from "./lib/commitGraph";
+import { filterDiffFiles, parseRepositoryDiff } from "./lib/diff";
 import {
   type SavedProject,
   loadSavedProjects,
@@ -65,6 +72,7 @@ export function App() {
     branch: 260,
     details: 320,
   });
+  const remoteFetchInFlightRef = useRef(false);
 
   useEffect(() => {
     saveProjects(projects);
@@ -95,8 +103,18 @@ export function App() {
       activeCommit,
       selectedPath,
     ],
-    queryFn: () =>
-      getFileDiff(activeProject!.activePath, selectedPath!, activeCommit),
+    queryFn: async () => {
+      const rootPath = activeProject!.activePath;
+      const commit = activeCommit ?? null;
+      const filePath = selectedPath!;
+
+      return {
+        rootPath,
+        commit,
+        filePath,
+        diff: await getFileDiff(rootPath, filePath, commit),
+      };
+    },
     enabled: Boolean(activeProject && selectedPath),
     placeholderData: keepPreviousData,
     retry: false,
@@ -122,9 +140,23 @@ export function App() {
   }, [activeProject, repositoryQuery.data]);
 
   const payload = repositoryQuery.data;
+  const currentFileDiff =
+    fileDiffQuery.data?.rootPath === activeProject?.activePath &&
+    fileDiffQuery.data?.commit === (activeCommit ?? null) &&
+    fileDiffQuery.data?.filePath === selectedPath
+      ? fileDiffQuery.data
+      : null;
   const parsedDiff = useMemo(
-    () => parseRepositoryDiff(fileDiffQuery.data ?? ""),
-    [fileDiffQuery.data],
+    () => parseRepositoryDiff(currentFileDiff?.diff ?? ""),
+    [currentFileDiff?.diff],
+  );
+  const visibleDiffFiles = useMemo(
+    () => filterDiffFiles(parsedDiff.files, selectedPath),
+    [parsedDiff.files, selectedPath],
+  );
+  const diffStats = useMemo(
+    () => countDiffStats(visibleDiffFiles),
+    [visibleDiffFiles],
   );
   const filteredCommits = useMemo(
     () => filterCommits(payload?.commits ?? [], commitFilter),
@@ -171,6 +203,31 @@ export function App() {
     }
     setSelectedPath(payload.files[0].path);
   }, [payload?.files, selectedPath]);
+
+  useEffect(() => {
+    if (!activeProject || !isTauriRuntime()) {
+      return;
+    }
+
+    const refreshRemoteRefs = async () => {
+      if (remoteFetchInFlightRef.current) {
+        return;
+      }
+
+      remoteFetchInFlightRef.current = true;
+      try {
+        await fetchRemotes(activeProject.activePath);
+        await repositoryQuery.refetch();
+      } catch (error) {
+        console.warn("Failed to fetch remotes", error);
+      } finally {
+        remoteFetchInFlightRef.current = false;
+      }
+    };
+    const timer = window.setInterval(refreshRemoteRefs, 120_000);
+
+    return () => window.clearInterval(timer);
+  }, [activeProject?.activePath, repositoryQuery.refetch]);
 
   async function chooseRepository() {
     if (!isTauriRuntime()) {
@@ -236,12 +293,15 @@ export function App() {
           </div>
         </div>
 
-        <button className="primary-action" onClick={chooseRepository}>
+        <button className="primary-action rail-action" onClick={chooseRepository}>
           <Plus size={16} />
           Open repository
         </button>
 
-        <div className="rail-section-title">Projects</div>
+        <div className="rail-section-title">
+          <span>Projects</span>
+          <span>{projects.length}</span>
+        </div>
         <div className="project-list">
           {projects.length === 0 ? (
             <div className="rail-empty">
@@ -331,11 +391,19 @@ export function App() {
                       : "staged + unstaged"}
                   </div>
                 </div>
-                {repositoryQuery.isFetching || fileDiffQuery.isFetching ? (
-                  <Loader2 className="spin" size={16} />
-                ) : null}
+                <div className="diff-topbar-meta">
+                  {diffStats.files > 0 ? (
+                    <div className="diff-stat-strip" aria-label="Diff line counts">
+                      <span className="addition">+{diffStats.additions}</span>
+                      <span className="deletion">-{diffStats.deletions}</span>
+                    </div>
+                  ) : null}
+                  {repositoryQuery.isFetching || fileDiffQuery.isFetching ? (
+                    <Loader2 className="spin" size={16} />
+                  ) : null}
+                </div>
               </div>
-              {payload && fileDiffQuery.isFetching && !fileDiffQuery.data ? (
+              {payload && fileDiffQuery.isFetching && !currentFileDiff ? (
                 <div className="diff-loading">
                   <Loader2 className="spin" size={18} />
                 </div>
@@ -347,7 +415,7 @@ export function App() {
                       ? String(fileDiffQuery.error.message)
                       : null)
                   }
-                  files={parsedDiff.files}
+                  files={visibleDiffFiles}
                   title={selectedPath ?? "Repository diff"}
                 />
               ) : (
@@ -533,26 +601,55 @@ function BranchTree({
   activeRef: string | null;
   onSelect(refName: string): void;
 }) {
-  const localBranches = branches.filter(
-    (branch) => branch.branchType === "local",
+  const [branchFilter, setBranchFilter] = useState("");
+  const localBranches = useMemo(
+    () =>
+      filterRefs(
+        branches.filter((branch) => branch.branchType === "local"),
+        branchFilter,
+      ),
+    [branches, branchFilter],
   );
-  const remoteBranches = branches.filter(
-    (branch) => branch.branchType === "remote",
+  const remoteBranches = useMemo(
+    () =>
+      filterRefs(
+        branches.filter((branch) => branch.branchType === "remote"),
+        branchFilter,
+      ),
+    [branches, branchFilter],
+  );
+  const visibleTags = useMemo(
+    () => filterRefs(tags, branchFilter),
+    [tags, branchFilter],
   );
   const currentBranch = branches.find((branch) => branch.current);
+  const showCurrentBranch =
+    currentBranch && filterRefs([currentBranch], branchFilter).length > 0;
   const refCount = branches.length + tags.length;
+  const visibleRefCount = localBranches.length + remoteBranches.length + visibleTags.length;
 
   return (
     <div className="branch-tree">
       <div className="panel-toolbar compact-toolbar">
         <div>
           <div className="panel-title">Branches</div>
-          <div className="panel-kicker">{refCount} refs</div>
+          <div className="panel-kicker">
+            {branchFilter.trim() ? `${visibleRefCount} / ${refCount} refs` : `${refCount} refs`}
+          </div>
         </div>
       </div>
 
+      <label className="search-field branch-search">
+        <Search size={15} />
+        <input
+          value={branchFilter}
+          onChange={(event) => setBranchFilter(event.target.value)}
+          placeholder="Filter branches"
+        />
+      </label>
+
       <div className="branch-scroll">
-        {currentBranch ? (
+        {showCurrentBranch ? (
           <button
             className={
               currentBranch.refName === activeRef
@@ -561,22 +658,25 @@ function BranchTree({
             }
             onClick={() => onSelect(currentBranch.refName)}
           >
-            HEAD (Current Branch)
+            <span>HEAD</span>
+            <small>{currentBranch.name}</small>
           </button>
         ) : null}
         <BranchGroup
           title="Local"
           branches={localBranches}
+          filtering={branchFilter.trim().length > 0}
           activeRef={activeRef}
           onSelect={onSelect}
         />
         <BranchGroup
           title="Remote"
           branches={remoteBranches}
+          filtering={branchFilter.trim().length > 0}
           activeRef={activeRef}
           onSelect={onSelect}
         />
-        <TagGroup tags={tags} activeRef={activeRef} onSelect={onSelect} />
+        <TagGroup tags={visibleTags} activeRef={activeRef} onSelect={onSelect} />
       </div>
     </div>
   );
@@ -585,21 +685,20 @@ function BranchTree({
 function BranchGroup({
   title,
   branches,
+  filtering,
   activeRef,
   onSelect,
 }: {
   title: string;
   branches: BranchInfo[];
+  filtering: boolean;
   activeRef: string | null;
   onSelect(refName: string): void;
 }) {
-  if (branches.length === 0) {
-    return null;
-  }
-
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(
     () => new Set(),
   );
+  const [collapsed, setCollapsed] = useState(false);
   const tree = useMemo(
     () =>
       buildRefTree(
@@ -607,11 +706,18 @@ function BranchGroup({
           name: branch.name,
           refName: branch.refName,
           current: branch.current,
+          ahead: branch.ahead,
+          behind: branch.behind,
+          upstream: branch.upstream,
           kind: "branch" as const,
         })),
       ),
     [branches],
   );
+
+  if (branches.length === 0) {
+    return null;
+  }
 
   function toggleFolder(key: string) {
     setCollapsedFolders((current) => {
@@ -627,22 +733,47 @@ function BranchGroup({
 
   return (
     <div className="branch-group">
-      <div className="branch-group-title">
-        <ChevronDown size={14} />
+      <button
+        className="branch-group-title"
+        aria-expanded={!collapsed || filtering}
+        onClick={() => setCollapsed((current) => !current)}
+      >
+        {collapsed && !filtering ? (
+          <ChevronRight size={14} />
+        ) : (
+          <ChevronDown size={14} />
+        )}
         <span>{title}</span>
-      </div>
-      {tree.map((node) => (
-        <RefTreeNode
-          key={node.key}
-          node={node}
-          activeRef={activeRef}
-          depth={0}
-          onSelect={onSelect}
-          collapsedFolders={collapsedFolders}
-          onToggleFolder={toggleFolder}
-        />
-      ))}
+      </button>
+      {collapsed && !filtering
+        ? null
+        : tree.map((node) => (
+            <RefTreeNode
+              key={node.key}
+              node={node}
+              activeRef={activeRef}
+              depth={0}
+              filtering={filtering}
+              onSelect={onSelect}
+              collapsedFolders={collapsedFolders}
+              onToggleFolder={toggleFolder}
+            />
+          ))}
     </div>
+  );
+}
+
+function filterRefs<T extends { name: string; refName: string }>(
+  refs: T[],
+  filter: string,
+): T[] {
+  const normalized = filter.trim().toLowerCase();
+  if (!normalized) {
+    return refs;
+  }
+
+  return refs.filter((ref) =>
+    `${ref.name} ${ref.refName}`.toLowerCase().includes(normalized),
   );
 }
 
@@ -684,6 +815,9 @@ type RefLeaf = {
   name: string;
   refName: string;
   current: boolean;
+  ahead: number | null;
+  behind: number | null;
+  upstream: string | null;
   kind: "branch";
 };
 
@@ -698,6 +832,7 @@ function RefTreeNode({
   node,
   activeRef,
   depth,
+  filtering,
   onSelect,
   collapsedFolders,
   onToggleFolder,
@@ -705,6 +840,7 @@ function RefTreeNode({
   node: RefNode;
   activeRef: string | null;
   depth: number;
+  filtering: boolean;
   onSelect(refName: string): void;
   collapsedFolders: Set<string>;
   onToggleFolder(key: string): void;
@@ -720,12 +856,12 @@ function RefTreeNode({
       >
         <GitBranch size={13} />
         <span>{node.name}</span>
-        {node.leaf.current ? <small>HEAD</small> : null}
+        <BranchTrackingBadge branch={node.leaf} />
       </button>
     );
   }
 
-  const collapsed = collapsedFolders.has(node.key);
+  const collapsed = !filtering && collapsedFolders.has(node.key);
 
   return (
     <div className="branch-folder">
@@ -745,6 +881,7 @@ function RefTreeNode({
           node={child}
           activeRef={activeRef}
           depth={depth + 1}
+          filtering={filtering}
           onSelect={onSelect}
           collapsedFolders={collapsedFolders}
           onToggleFolder={onToggleFolder}
@@ -808,6 +945,31 @@ function sortRefNodes(nodes: RefNode[]) {
   nodes.forEach((node) => sortRefNodes(node.children));
 }
 
+function BranchTrackingBadge({ branch }: { branch: RefLeaf }) {
+  const hasAhead = Boolean(branch.ahead && branch.ahead > 0);
+  const hasBehind = Boolean(branch.behind && branch.behind > 0);
+
+  if (branch.current || hasAhead || hasBehind) {
+    return (
+      <small className="branch-badges">
+        {hasBehind ? (
+          <span className="branch-behind" title="Remote branch is ahead">
+            ↙ {branch.behind}
+          </span>
+        ) : null}
+        {hasAhead ? (
+          <span className="branch-ahead" title="Local branch is ahead">
+            ↗ {branch.ahead}
+          </span>
+        ) : null}
+        {branch.current ? <span className="branch-head-badge">HEAD</span> : null}
+      </small>
+    );
+  }
+
+  return null;
+}
+
 function CommitDetails({
   commit,
   branchName,
@@ -832,8 +994,23 @@ function CommitDetails({
 
       {commit ? (
         <div className="commit-detail-body">
-          <div className="detail-subject">{commit.subject}</div>
+          <div className="detail-summary">
+            <div className="detail-subject">{commit.subject}</div>
+            <div className="detail-hash-pill">{commit.shortHash}</div>
+          </div>
           <DetailRow label="Hash" value={commit.hash} mono />
+          {commit.parents.length > 1 ? (
+            <DetailRow label="Type" value="Merge commit" />
+          ) : null}
+          {commit.parents.length > 0 ? (
+            <DetailRow
+              label={commit.parents.length > 1 ? "Parents" : "Parent"}
+              value={commit.parents
+                .map((parent) => parent.slice(0, 8))
+                .join(", ")}
+              mono
+            />
+          ) : null}
           <DetailRow label="Author" value={commit.author} />
           <DetailRow label="Date" value={formatDate(commit.date)} mono />
           <DetailRow label="Branch" value={branchName ?? "current"} />
@@ -842,7 +1019,10 @@ function CommitDetails({
         </div>
       ) : (
         <div className="commit-detail-body">
-          <div className="detail-subject">Working tree changes</div>
+          <div className="detail-summary">
+            <div className="detail-subject">Working tree changes</div>
+            <div className="detail-hash-pill">live</div>
+          </div>
           <DetailRow label="Branch" value={branchName ?? "current"} />
           <DetailRow label="Files" value={String(fileCount)} mono />
           <DetailRow label="Selected" value={selectedPath ?? "none"} mono />
@@ -882,16 +1062,13 @@ function ProjectItem({
 }) {
   return (
     <div className={active ? "project-item active" : "project-item"}>
-      <div className="project-main">
-        <button className="project-button" onClick={onSelect}>
-          <Boxes size={15} />
-          <span>{project.name}</span>
-        </button>
-        <button className="icon-button" onClick={onRemove} aria-label="Remove">
-          <X size={14} />
-        </button>
-      </div>
-      <div className="project-path">{project.activePath}</div>
+      <button className="project-button" onClick={onSelect}>
+        <span className="project-name">{project.name}</span>
+        <span className="project-path">{project.activePath}</span>
+      </button>
+      <button className="project-remove" onClick={onRemove} aria-label="Remove">
+        <X size={14} />
+      </button>
     </div>
   );
 }
@@ -908,10 +1085,11 @@ function HeaderBar({
   onRefresh(): void;
 }) {
   const counts = payload?.summary.statusCounts;
+  const appWindow = isTauriRuntime() ? getCurrentWindow() : null;
 
   return (
     <header className="workspace-header">
-      <div className="repo-heading">
+      <div className="repo-heading" data-tauri-drag-region>
         <div className="repo-name">
           {activeProject?.name ?? "No repository selected"}
         </div>
@@ -946,6 +1124,29 @@ function HeaderBar({
           {loading ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
           Refresh
         </button>
+        <div className="window-controls" aria-label="Window controls">
+          <button
+            className="window-control"
+            aria-label="Minimize"
+            onClick={() => appWindow?.minimize()}
+          >
+            <Minus size={14} />
+          </button>
+          <button
+            className="window-control"
+            aria-label="Maximize"
+            onClick={() => appWindow?.toggleMaximize()}
+          >
+            <Square size={12} />
+          </button>
+          <button
+            className="window-control close"
+            aria-label="Close"
+            onClick={() => appWindow?.close()}
+          >
+            <X size={15} />
+          </button>
+        </div>
       </div>
     </header>
   );
@@ -963,8 +1164,20 @@ function VirtualCommitList({
   onSelectCommit(hash: string): void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const graphRows = useMemo(() => buildCommitGraph(commits), [commits]);
+  const commitGraphWidth = useMemo(
+    () =>
+      Math.max(
+        30,
+        ...graphRows.map((row) => getCommitGraphWidth(row.laneCount)),
+      ),
+    [graphRows],
+  );
+  const tableStyle = {
+    "--commit-graph-width": `${commitGraphWidth}px`,
+  } as CSSProperties;
   const virtualizer = useVirtualizer({
-    count: commits.length,
+    count: graphRows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 28,
     overscan: 16,
@@ -974,63 +1187,280 @@ function VirtualCommitList({
 
   if (loading) {
     return (
-      <div className="commit-list">
-        <LoadingRows />
+      <div className="commit-table" style={tableStyle}>
+        <CommitListHeader />
+        <div className="commit-list">
+          <LoadingRows />
+        </div>
       </div>
     );
   }
 
-  if (commits.length === 0) {
+  if (graphRows.length === 0) {
     return (
-      <div className="commit-list empty-list">
-        <div className="empty-inline">No commits match the current filter.</div>
+      <div className="commit-table" style={tableStyle}>
+        <CommitListHeader />
+        <div className="commit-list empty-list">
+          <div className="empty-inline">No commits match the current filter.</div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div ref={scrollRef} className="commit-list">
-      <div className="commit-list-spacer" ref={virtualizer.containerRef}>
-        {virtualizer.getVirtualItems().map((virtualItem) => {
-          const commit = commits[virtualItem.index];
-          return (
-            <div
-              key={commit.hash}
-              className="commit-list-virtual-row"
-              data-index={virtualItem.index}
-              ref={virtualizer.measureElement}
-            >
-              <CommitRow
-                commit={commit}
-                active={activeCommit === commit.hash}
-                onClick={() => onSelectCommit(commit.hash)}
-              />
-            </div>
-          );
-        })}
+    <div className="commit-table" style={tableStyle}>
+      <CommitListHeader />
+      <div ref={scrollRef} className="commit-list">
+        <div className="commit-list-spacer" ref={virtualizer.containerRef}>
+          {virtualizer.getVirtualItems().map((virtualItem) => {
+            const graphRow = graphRows[virtualItem.index];
+            const commit = graphRow.commit;
+            return (
+              <div
+                key={commit.hash}
+                className="commit-list-virtual-row"
+                data-index={virtualItem.index}
+                ref={virtualizer.measureElement}
+              >
+                <CommitRow
+                  row={graphRow}
+                  active={activeCommit === commit.hash}
+                  onClick={() => onSelectCommit(commit.hash)}
+                />
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
 }
 
+function CommitListHeader() {
+  return (
+    <div className="commit-list-header" aria-hidden="true">
+      <span />
+      <span>Commit</span>
+      <span>Author</span>
+      <span>Date</span>
+      <span>Hash</span>
+    </div>
+  );
+}
+
 function CommitRow({
-  commit,
+  row,
   active,
   onClick,
 }: {
-  commit: CommitInfo;
+  row: CommitGraphRow;
   active: boolean;
   onClick(): void;
 }) {
+  const { commit } = row;
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onClick();
+    }
+  }
+
   return (
-    <button className={active ? "commit-row active" : "commit-row"} onClick={onClick}>
-      <span className="commit-graph-dot" />
-      <span className="commit-subject">{commit.subject}</span>
+    <div
+      role="button"
+      tabIndex={0}
+      title={`${commit.subject} (${commit.shortHash})`}
+      className={active ? "commit-row active" : "commit-row"}
+      onClick={onClick}
+      onKeyDown={handleKeyDown}
+    >
+      <span className="commit-graph-cell">
+        <CommitGraph row={row} />
+      </span>
+      <span className="commit-subject">
+        <span>{commit.subject}</span>
+      </span>
       <span className="commit-author">{commit.author}</span>
       <span className="commit-date">{formatDate(commit.date)}</span>
       <span className="commit-hash">{commit.shortHash}</span>
-    </button>
+    </div>
   );
+}
+
+function CommitGraph({ row }: { row: CommitGraphRow }) {
+  const width = getCommitGraphWidth(row.laneCount);
+  const height = COMMIT_GRAPH_ROW_HEIGHT;
+  const laneX = (lane: number) =>
+    lane * COMMIT_GRAPH_LANE_GAP + COMMIT_GRAPH_LEFT_INSET;
+  const dotX = laneX(row.lane);
+  const graphColor = (colorKey: string) => ({
+    "--commit-graph-color": commitGraphColor(colorKey),
+  } as CSSProperties);
+  const dotRadius = row.commit.parents.length > 1 ? 3.12 : 2.9;
+  const dotGap = dotRadius + 0.08;
+  const parentCurves = row.parentLanes.filter(
+    (parentLane) => parentLane.index !== row.lane,
+  );
+
+  return (
+    <span className="commit-graph" aria-hidden="true">
+      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+        {row.throughLanes.map((throughLane) => (
+          <path
+            key={`through-${throughLane.fromIndex}-${throughLane.toIndex}`}
+            className="commit-graph-line commit-graph-through-line"
+            d={commitGraphThroughPath(
+              laneX(throughLane.fromIndex),
+              laneX(throughLane.toIndex),
+            )}
+            style={graphColor(throughLane.colorKey)}
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+        {parentCurves.map((parentLane, curveIndex) => {
+          const parentX = laneX(parentLane.index);
+          return (
+            <path
+              key={`parent-${parentLane.index}-${curveIndex}`}
+              className="commit-graph-line commit-graph-parent-line"
+              d={commitGraphCurvePath(
+                dotX,
+                parentX,
+                dotGap,
+                curveIndex,
+                parentCurves.length,
+              )}
+              style={graphColor(parentLane.colorKey)}
+              vectorEffect="non-scaling-stroke"
+            />
+          );
+        })}
+        {row.beforeLanes.map((lane) => (
+          <line
+            key={`before-${lane.index}`}
+            className={
+              lane.index === row.lane
+                ? "commit-graph-line commit-graph-trunk commit-graph-node-trunk"
+                : "commit-graph-line commit-graph-trunk"
+            }
+            x1={laneX(lane.index)}
+            y1="-2"
+            x2={laneX(lane.index)}
+            y2={
+              lane.index === row.lane
+                ? COMMIT_GRAPH_MID_Y - dotGap
+                : COMMIT_GRAPH_MID_Y
+            }
+            style={graphColor(lane.colorKey)}
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+        {row.afterLanes.map((lane) => (
+          <line
+            key={`after-${lane.index}`}
+            className={
+              lane.index === row.lane
+                ? "commit-graph-line commit-graph-trunk commit-graph-node-trunk"
+                : "commit-graph-line commit-graph-trunk"
+            }
+            x1={laneX(lane.index)}
+            y1={
+              lane.index === row.lane
+                ? COMMIT_GRAPH_MID_Y + dotGap
+                : COMMIT_GRAPH_MID_Y
+            }
+            x2={laneX(lane.index)}
+            y2={height + 2}
+            style={graphColor(lane.colorKey)}
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+        <circle
+          className="commit-graph-node-outline"
+          cx={dotX}
+          cy={COMMIT_GRAPH_MID_Y}
+          r={dotRadius + 0.24}
+        />
+        <circle
+          className={
+            row.commit.parents.length > 1
+              ? "commit-graph-node merge"
+              : "commit-graph-node"
+          }
+          cx={dotX}
+          cy={COMMIT_GRAPH_MID_Y}
+          r={dotRadius}
+          style={graphColor(row.colorKey)}
+        />
+      </svg>
+    </span>
+  );
+}
+
+const COMMIT_GRAPH_ROW_HEIGHT = 28;
+const COMMIT_GRAPH_MID_Y = 14;
+const COMMIT_GRAPH_LANE_GAP = 13;
+const COMMIT_GRAPH_LEFT_INSET = 10.5;
+
+function commitGraphCurvePath(
+  sourceX: number,
+  targetX: number,
+  sourceGap: number,
+  curveIndex: number,
+  curveCount: number,
+) {
+  const bottomY = COMMIT_GRAPH_ROW_HEIGHT + 2;
+  const sweep = Math.abs(targetX - sourceX);
+  const fanOffset = (curveIndex - (curveCount - 1) / 2) * 0.75;
+  const startX = sourceX + fanOffset;
+  const startY = COMMIT_GRAPH_MID_Y + sourceGap;
+  const controlY1 =
+    startY + (sweep > COMMIT_GRAPH_LANE_GAP ? 3.35 : 3.8);
+  const controlY2 =
+    bottomY - (sweep > COMMIT_GRAPH_LANE_GAP ? 5.15 : 4.65) +
+    curveIndex * 0.22;
+
+  return `M ${startX} ${startY} C ${startX} ${controlY1}, ${targetX} ${controlY2}, ${targetX} ${bottomY}`;
+}
+
+function commitGraphThroughPath(sourceX: number, targetX: number) {
+  const bottomY = COMMIT_GRAPH_ROW_HEIGHT + 2;
+
+  return `M ${sourceX} ${COMMIT_GRAPH_MID_Y} C ${sourceX} 18.85, ${targetX} 25.55, ${targetX} ${bottomY}`;
+}
+
+function getCommitGraphWidth(laneCount: number) {
+  return Math.ceil(
+    Math.max(
+      36,
+      COMMIT_GRAPH_LEFT_INSET + (laneCount - 1) * COMMIT_GRAPH_LANE_GAP + 20,
+    ),
+  );
+}
+
+function commitGraphColor(colorKey: string) {
+  const colors = [
+    "oklch(49% 0.108 255)",
+    "oklch(49% 0.105 152)",
+    "oklch(51% 0.112 42)",
+    "oklch(50% 0.108 332)",
+    "oklch(49% 0.104 286)",
+    "oklch(50% 0.095 205)",
+    "oklch(49% 0.112 25)",
+    "oklch(51% 0.096 110)",
+  ];
+  const laneColorMatch = /^lane-(\d+)$/.exec(colorKey);
+  if (laneColorMatch) {
+    return colors[Number(laneColorMatch[1]) % colors.length];
+  }
+
+  let hash = 0;
+  for (let index = 0; index < colorKey.length; index += 1) {
+    hash = (hash * 31 + colorKey.charCodeAt(index)) >>> 0;
+  }
+
+  return colors[hash % colors.length];
 }
 
 function LoadingRows() {
@@ -1057,6 +1487,20 @@ function filterCommits(commits: CommitInfo[], filter: string): CommitInfo[] {
   );
 }
 
+function countDiffStats(files: ReturnType<typeof parseRepositoryDiff>["files"]) {
+  return files.reduce(
+    (total, file) => {
+      for (const hunk of file.hunks) {
+        total.additions += hunk.additionLines;
+        total.deletions += hunk.deletionLines;
+      }
+      total.files += 1;
+      return total;
+    },
+    { additions: 0, deletions: 0, files: 0 },
+  );
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -1070,10 +1514,44 @@ function formatDate(value: string): string {
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "2-digit",
+
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfDate = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+  );
+  const daysAgo = Math.round(
+    (startOfToday.getTime() - startOfDate.getTime()) / 86_400_000,
+  );
+
+  if (daysAgo === 0) {
+    return formatTime(date);
+  }
+
+  if (daysAgo === 1) {
+    return `Yesterday ${formatTime(date)}`;
+  }
+
+  if (date.getFullYear() === now.getFullYear()) {
+    return `${formatMonthDay(date)} ${formatTime(date)}`;
+  }
+
+  return `${formatMonthDay(date)} ${date.getFullYear()} ${formatTime(date)}`;
+}
+
+function formatTime(date: Date): string {
+  return new Intl.DateTimeFormat("en-US", {
     hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function formatMonthDay(date: Date): string {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
   }).format(date);
 }
