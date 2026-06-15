@@ -520,13 +520,33 @@ body.is-resizing-y * {
 }
 
 .commit-list {
-  display: flex;
-  flex-direction: column;
   grid-column: 1 / -1;
-  gap: 0;
+  position: relative;
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
+}
+
+.commit-list-spacer {
+  position: relative;
+  width: 100%;
+}
+
+.commit-list-virtual-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+
+.empty-list {
+  display: grid;
+  place-items: center;
+}
+
+.empty-inline {
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .commit-row {
@@ -537,7 +557,7 @@ body.is-resizing-y * {
   gap: 10px;
   width: 100%;
   min-width: 0;
-  min-height: 28px;
+  height: 28px;
   border-color: transparent;
   border-radius: 0;
   background: transparent;

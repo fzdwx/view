@@ -4,9 +4,11 @@ import {
   type PointerEvent as ReactPointerEvent,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   Boxes,
@@ -414,22 +416,12 @@ export function App() {
                 />
               </label>
 
-              <div className="commit-list">
-                {repositoryQuery.isLoading ? (
-                  <LoadingRows />
-                ) : (
-                  filteredCommits.map((commit) => (
-                    <CommitRow
-                      key={commit.hash}
-                      commit={commit}
-                      active={activeCommit === commit.hash}
-                      onClick={() => {
-                        setActiveCommit(commit.hash);
-                      }}
-                    />
-                  ))
-                )}
-              </div>
+              <VirtualCommitList
+                commits={filteredCommits}
+                activeCommit={activeCommit}
+                loading={repositoryQuery.isLoading}
+                onSelectCommit={setActiveCommit}
+              />
             </section>
               <ResizeHandle
                 axis="x"
@@ -956,6 +948,68 @@ function HeaderBar({
         </button>
       </div>
     </header>
+  );
+}
+
+function VirtualCommitList({
+  commits,
+  activeCommit,
+  loading,
+  onSelectCommit,
+}: {
+  commits: CommitInfo[];
+  activeCommit: string | null;
+  loading: boolean;
+  onSelectCommit(hash: string): void;
+}) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const virtualizer = useVirtualizer({
+    count: commits.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 28,
+    overscan: 16,
+    directDomUpdates: true,
+    useFlushSync: false,
+  });
+
+  if (loading) {
+    return (
+      <div className="commit-list">
+        <LoadingRows />
+      </div>
+    );
+  }
+
+  if (commits.length === 0) {
+    return (
+      <div className="commit-list empty-list">
+        <div className="empty-inline">No commits match the current filter.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div ref={scrollRef} className="commit-list">
+      <div className="commit-list-spacer" ref={virtualizer.containerRef}>
+        {virtualizer.getVirtualItems().map((virtualItem) => {
+          const commit = commits[virtualItem.index];
+          return (
+            <div
+              key={commit.hash}
+              className="commit-list-virtual-row"
+              data-index={virtualItem.index}
+              ref={virtualizer.measureElement}
+            >
+              <CommitRow
+                commit={commit}
+                active={activeCommit === commit.hash}
+                onClick={() => onSelectCommit(commit.hash)}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
