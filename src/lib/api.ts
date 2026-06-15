@@ -69,6 +69,13 @@ export interface RepositoryPayload {
   files: TreeFile[];
 }
 
+export interface FileContent {
+  path: string;
+  content: string;
+  binary: boolean;
+  tooLarge: boolean;
+}
+
 export async function loadRepository(
   path: string,
   commit?: string | null,
@@ -111,6 +118,17 @@ export async function getCommits(
     path,
     branch: branch ?? null,
   });
+}
+
+export async function getProjectFiles(path: string): Promise<TreeFile[]> {
+  return invoke<TreeFile[]>("get_project_files", { path });
+}
+
+export async function getFileContent(
+  path: string,
+  filePath: string,
+): Promise<FileContent> {
+  return invoke<FileContent>("get_file_content", { path, filePath });
 }
 
 export async function fetchRemotes(path: string): Promise<void> {

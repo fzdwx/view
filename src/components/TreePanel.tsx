@@ -6,12 +6,18 @@ import type { TreeFile } from "../lib/api";
 interface TreePanelProps {
   files: TreeFile[];
   selectedPath: string | null;
+  title?: string;
+  emptyTitle?: string;
+  emptyCopy?: string;
   onSelectPath(path: string): void;
 }
 
 export function TreePanel({
   files,
   selectedPath,
+  title = "Files",
+  emptyTitle = "No files",
+  emptyCopy = "There are no files to show.",
   onSelectPath,
 }: TreePanelProps) {
   const treeData = useMemo(() => {
@@ -76,13 +82,22 @@ export function TreePanel({
     syncSelectedPath();
   }, [syncSelectedPath]);
 
+  if (files.length === 0) {
+    return (
+      <div className="tree-empty-state">
+        <div className="empty-title">{emptyTitle}</div>
+        <div className="empty-copy">{emptyCopy}</div>
+      </div>
+    );
+  }
+
   return (
     <FileTree
       className="file-tree-host"
       model={model}
       header={
         <div className="tree-header">
-          <span>Files</span>
+          <span>{title}</span>
           <span>{files.length}</span>
         </div>
       }

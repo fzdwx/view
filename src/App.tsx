@@ -34,11 +34,14 @@ import { TreePanel } from "./components/TreePanel";
 import {
   type BranchInfo,
   type CommitInfo,
+  type FileContent,
   type RepositoryPayload,
   type TagInfo,
   fetchRemotes,
   getCommits,
+  getFileContent,
   getFileDiff,
+  getProjectFiles,
   isTauriRuntime,
   loadRepository,
 } from "./lib/api";
@@ -64,7 +67,9 @@ export function App() {
   );
   const [activeBranchRef, setActiveBranchRef] = useState<string | null>(null);
   const [activeCommit, setActiveCommit] = useState<string | null>(null);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(null);
+  const [selectedChangePath, setSelectedChangePath] = useState<string | null>(null);
+  const [previewMode, setPreviewMode] = useState<"file" | "diff">("file");
   const [commitFilter, setCommitFilter] = useState("");
   const [panelSizes, setPanelSizes] = useState({
     rail: 292,
@@ -100,17 +105,42 @@ export function App() {
     retry: false,
   });
 
+  const projectFilesQuery = useQuery({
+    queryKey: ["project-files", activeProject?.activePath],
+    queryFn: () => getProjectFiles(activeProject!.activePath),
+    enabled: Boolean(activeProject),
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+
+  const fileContentQuery = useQuery({
+    queryKey: ["file-content", activeProject?.activePath, selectedProjectPath],
+    queryFn: async () => {
+      const rootPath = activeProject!.activePath;
+      const filePath = selectedProjectPath!;
+
+      return {
+        rootPath,
+        filePath,
+        file: await getFileContent(rootPath, filePath),
+      };
+    },
+    enabled: Boolean(activeProject && selectedProjectPath),
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+
   const fileDiffQuery = useQuery({
     queryKey: [
       "file-diff",
       activeProject?.activePath,
       activeCommit,
-      selectedPath,
+      selectedChangePath,
     ],
     queryFn: async () => {
       const rootPath = activeProject!.activePath;
       const commit = activeCommit ?? null;
-      const filePath = selectedPath!;
+      const filePath = selectedChangePath!;
 
       return {
         rootPath,
@@ -119,7 +149,7 @@ export function App() {
         diff: await getFileDiff(rootPath, filePath, commit),
       };
     },
-    enabled: Boolean(activeProject && selectedPath),
+    enabled: Boolean(activeProject && selectedChangePath && previewMode === "diff"),
     placeholderData: keepPreviousData,
     retry: false,
   });
@@ -147,16 +177,21 @@ export function App() {
   const currentFileDiff =
     fileDiffQuery.data?.rootPath === activeProject?.activePath &&
     fileDiffQuery.data?.commit === (activeCommit ?? null) &&
-    fileDiffQuery.data?.filePath === selectedPath
+    fileDiffQuery.data?.filePath === selectedChangePath
       ? fileDiffQuery.data
+      : null;
+  const currentFileContent =
+    fileContentQuery.data?.rootPath === activeProject?.activePath &&
+    fileContentQuery.data?.filePath === selectedProjectPath
+      ? fileContentQuery.data.file
       : null;
   const parsedDiff = useMemo(
     () => parseRepositoryDiff(currentFileDiff?.diff ?? ""),
     [currentFileDiff?.diff],
   );
   const visibleDiffFiles = useMemo(
-    () => filterDiffFiles(parsedDiff.files, selectedPath),
-    [parsedDiff.files, selectedPath],
+    () => filterDiffFiles(parsedDiff.files, selectedChangePath),
+    [parsedDiff.files, selectedChangePath],
   );
   const diffStats = useMemo(
     () => countDiffStats(visibleDiffFiles),
@@ -184,30 +219,45 @@ export function App() {
   };
 
   useEffect(() => {
-    if (!selectedPath) {
+    if (!selectedProjectPath) {
+      return;
+    }
+
+    const files = projectFilesQuery.data ?? [];
+    if (files.length === 0) {
+      setSelectedProjectPath(null);
+      return;
+    }
+
+    const stillExists = files.some((file) => file.path === selectedProjectPath);
+    if (!stillExists) {
+      setSelectedProjectPath(null);
+    }
+  }, [projectFilesQuery.data, selectedProjectPath]);
+
+  useEffect(() => {
+    if (!selectedChangePath) {
       return;
     }
 
     const files = payload?.files ?? [];
     if (files.length === 0) {
-      setSelectedPath(null);
+      setSelectedChangePath(null);
       return;
     }
 
-    const stillExists = files.some(
-      (file) => file.path === selectedPath,
-    );
+    const stillExists = files.some((file) => file.path === selectedChangePath);
     if (!stillExists) {
-      setSelectedPath(files[0]?.path ?? null);
+      setSelectedChangePath(files[0]?.path ?? null);
     }
-  }, [payload?.files, selectedPath]);
+  }, [payload?.files, selectedChangePath]);
 
   useEffect(() => {
-    if (selectedPath || !payload?.files.length) {
+    if (previewMode !== "diff" || selectedChangePath || !payload?.files.length) {
       return;
     }
-    setSelectedPath(payload.files[0].path);
-  }, [payload?.files, selectedPath]);
+    setSelectedChangePath(payload.files[0].path);
+  }, [payload?.files, previewMode, selectedChangePath]);
 
   useEffect(() => {
     if (!activeProject || !isTauriRuntime()) {
@@ -222,7 +272,11 @@ export function App() {
       remoteFetchInFlightRef.current = true;
       try {
         await fetchRemotes(activeProject.activePath);
-        await Promise.all([repositoryQuery.refetch(), commitsQuery.refetch()]);
+        await Promise.all([
+          repositoryQuery.refetch(),
+          commitsQuery.refetch(),
+          projectFilesQuery.refetch(),
+        ]);
       } catch (error) {
         console.warn("Failed to fetch remotes", error);
       } finally {
@@ -232,7 +286,12 @@ export function App() {
     const timer = window.setInterval(refreshRemoteRefs, 120_000);
 
     return () => window.clearInterval(timer);
-  }, [activeProject?.activePath, commitsQuery.refetch, repositoryQuery.refetch]);
+  }, [
+    activeProject?.activePath,
+    commitsQuery.refetch,
+    projectFilesQuery.refetch,
+    repositoryQuery.refetch,
+  ]);
 
   async function chooseRepository() {
     if (!isTauriRuntime()) {
@@ -251,7 +310,9 @@ export function App() {
 
     setActiveCommit(null);
     setActiveBranchRef(null);
-    setSelectedPath(null);
+    setSelectedProjectPath(null);
+    setSelectedChangePath(null);
+    setPreviewMode("file");
 
     const nextProjects = upsertProject(projects, selected);
     setProjects(nextProjects);
@@ -269,7 +330,9 @@ export function App() {
       setActiveProjectId(remaining[0]?.id ?? null);
       setActiveCommit(null);
       setActiveBranchRef(null);
-      setSelectedPath(null);
+      setSelectedProjectPath(null);
+      setSelectedChangePath(null);
+      setPreviewMode("file");
     }
   }
 
@@ -322,7 +385,9 @@ export function App() {
                 setActiveProjectId(project.id);
                 setActiveCommit(null);
                 setActiveBranchRef(null);
-                setSelectedPath(null);
+                setSelectedProjectPath(null);
+                setSelectedChangePath(null);
+                setPreviewMode("file");
               }}
               onRemove={() => removeProject(project.id)}
             />
@@ -342,7 +407,11 @@ export function App() {
           activeProject={activeProject}
           loading={repositoryQuery.isFetching || commitsQuery.isFetching}
           onRefresh={() => {
-            void Promise.all([repositoryQuery.refetch(), commitsQuery.refetch()]);
+            void Promise.all([
+              repositoryQuery.refetch(),
+              commitsQuery.refetch(),
+              projectFilesQuery.refetch(),
+            ]);
           }}
         />
 
@@ -369,11 +438,17 @@ export function App() {
         ) : (
           <div className="content-grid" style={contentGridStyle}>
             <section className="tree-panel">
-              {payload ? (
+              {projectFilesQuery.data ? (
                 <TreePanel
-                  files={payload.files}
-                  selectedPath={selectedPath}
-                  onSelectPath={setSelectedPath}
+                  files={projectFilesQuery.data}
+                  selectedPath={selectedProjectPath}
+                  title="Project"
+                  emptyTitle="No project files"
+                  emptyCopy="Tracked and untracked files will appear here."
+                  onSelectPath={(path) => {
+                    setSelectedProjectPath(path);
+                    setPreviewMode("file");
+                  }}
                 />
               ) : (
                 <LoadingRows />
@@ -390,27 +465,48 @@ export function App() {
               <div className="diff-topbar">
                 <div>
                   <div className="panel-title">
-                    {selectedPath ?? "Repository diff"}
+                    {previewMode === "diff"
+                      ? selectedChangePath ?? "Diff preview"
+                      : selectedProjectPath ?? "File preview"}
                   </div>
                   <div className="panel-kicker">
-                    {activeCommit
-                      ? selectedCommit?.shortHash
-                      : "staged + unstaged"}
+                    {previewMode === "diff"
+                      ? activeCommit
+                        ? selectedCommit?.shortHash
+                        : "staged + unstaged"
+                      : "read-only workspace file"}
                   </div>
                 </div>
                 <div className="diff-topbar-meta">
-                  {diffStats.files > 0 ? (
+                  {previewMode === "diff" && diffStats.files > 0 ? (
                     <div className="diff-stat-strip" aria-label="Diff line counts">
                       <span className="addition">+{diffStats.additions}</span>
                       <span className="deletion">-{diffStats.deletions}</span>
                     </div>
                   ) : null}
-                  {repositoryQuery.isFetching || fileDiffQuery.isFetching ? (
+                  {repositoryQuery.isFetching ||
+                  fileDiffQuery.isFetching ||
+                  fileContentQuery.isFetching ? (
                     <Loader2 className="spin" size={16} />
                   ) : null}
                 </div>
               </div>
-              {payload && fileDiffQuery.isFetching && !currentFileDiff ? (
+              {previewMode === "file" ? (
+                <FilePreview
+                  error={
+                    fileContentQuery.isError
+                      ? String(fileContentQuery.error.message)
+                      : null
+                  }
+                  file={currentFileContent}
+                  loading={Boolean(
+                    selectedProjectPath &&
+                      fileContentQuery.isFetching &&
+                      !currentFileContent,
+                  )}
+                  selectedPath={selectedProjectPath}
+                />
+              ) : payload && fileDiffQuery.isFetching && !currentFileDiff ? (
                 <div className="diff-loading">
                   <Loader2 className="spin" size={18} />
                 </div>
@@ -423,7 +519,7 @@ export function App() {
                       : null)
                   }
                   files={visibleDiffFiles}
-                  title={selectedPath ?? "Repository diff"}
+                  title={selectedChangePath ?? "Repository diff"}
                 />
               ) : (
                 <div className="diff-loading">
@@ -448,6 +544,8 @@ export function App() {
                     onSelect={(refName) => {
                       setActiveBranchRef(refName);
                       setActiveCommit(null);
+                      setSelectedChangePath(null);
+                      setPreviewMode("diff");
                     }}
                   />
                 ) : (
@@ -461,42 +559,47 @@ export function App() {
                 onResize={(delta) => resizePanel("branch", delta, 180, 460)}
               />
 
-            <section className="history-panel">
-              <div className="panel-toolbar">
-                <div>
-                  <div className="panel-title">History</div>
-                  <div className="panel-kicker">
-                    {activeCommit ? "Commit diff" : "Working tree diff"}
+              <section className="history-panel">
+                <div className="panel-toolbar">
+                  <div>
+                    <div className="panel-title">History</div>
+                    <div className="panel-kicker">
+                      {activeCommit ? "Commit diff" : "Working tree diff"}
+                    </div>
                   </div>
+                  <button
+                    className={activeCommit ? "ghost-button" : "ghost-button active"}
+                    onClick={() => {
+                      setActiveCommit(null);
+                      setSelectedChangePath(null);
+                      setPreviewMode("diff");
+                    }}
+                  >
+                    <CheckCircle2 size={15} />
+                    Working tree
+                  </button>
                 </div>
-                <button
-                  className={activeCommit ? "ghost-button" : "ghost-button active"}
-                  onClick={() => {
-                    setActiveCommit(null);
-                    setSelectedPath(null);
+
+                <label className="search-field">
+                  <Search size={15} />
+                  <input
+                    value={commitFilter}
+                    onChange={(event) => setCommitFilter(event.target.value)}
+                    placeholder="Filter commits"
+                  />
+                </label>
+
+                <VirtualCommitList
+                  commits={filteredCommits}
+                  activeCommit={activeCommit}
+                  loading={commitsQuery.isLoading}
+                  onSelectCommit={(hash) => {
+                    setActiveCommit(hash);
+                    setSelectedChangePath(null);
+                    setPreviewMode("diff");
                   }}
-                >
-                  <CheckCircle2 size={15} />
-                  Working tree
-                </button>
-              </div>
-
-              <label className="search-field">
-                <Search size={15} />
-                <input
-                  value={commitFilter}
-                  onChange={(event) => setCommitFilter(event.target.value)}
-                  placeholder="Filter commits"
                 />
-              </label>
-
-              <VirtualCommitList
-                commits={filteredCommits}
-                activeCommit={activeCommit}
-                loading={commitsQuery.isLoading}
-                onSelectCommit={setActiveCommit}
-              />
-            </section>
+              </section>
               <ResizeHandle
                 axis="x"
                 className="history-detail-splitter"
@@ -504,8 +607,7 @@ export function App() {
                 onResize={(delta) => resizePanel("details", -delta, 220, 560)}
               />
 
-              <CommitDetails
-                commit={selectedCommit}
+              <CommitInspector
                 branchName={
                   payload?.summary.branches.find(
                     (branch) => branch.refName === selectedBranchRef,
@@ -515,14 +617,89 @@ export function App() {
                   )?.name ??
                   payload?.summary.branch
                 }
-                fileCount={payload?.files.length ?? 0}
-                selectedPath={selectedPath}
+                commit={selectedCommit}
+                files={payload?.files ?? []}
+                selectedPath={selectedChangePath}
+                onSelectPath={(path) => {
+                  setSelectedChangePath(path);
+                  setPreviewMode("diff");
+                }}
               />
             </section>
           </div>
         )}
       </section>
     </main>
+  );
+}
+
+function FilePreview({
+  error,
+  file,
+  loading,
+  selectedPath,
+}: {
+  error: string | null;
+  file: FileContent | null;
+  loading: boolean;
+  selectedPath: string | null;
+}) {
+  if (loading) {
+    return (
+      <div className="diff-loading">
+        <Loader2 className="spin" size={18} />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="empty-state">
+        <div className="empty-title">File could not be opened</div>
+        <div className="empty-copy">{error}</div>
+      </div>
+    );
+  }
+
+  if (!selectedPath) {
+    return (
+      <div className="empty-state">
+        <div className="empty-title">Select a file</div>
+        <div className="empty-copy">
+          The project tree shows tracked and untracked files from the repository.
+        </div>
+      </div>
+    );
+  }
+
+  if (!file) {
+    return null;
+  }
+
+  if (file.binary) {
+    return (
+      <div className="empty-state">
+        <div className="empty-title">Binary file</div>
+        <div className="empty-copy">{file.path} cannot be rendered as text.</div>
+      </div>
+    );
+  }
+
+  if (file.tooLarge) {
+    return (
+      <div className="empty-state">
+        <div className="empty-title">File is too large</div>
+        <div className="empty-copy">
+          Files larger than 1 MB are not opened in the preview.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <section className="file-preview-frame" aria-label={file.path}>
+      <pre className="file-preview-code">{file.content}</pre>
+    </section>
   );
 }
 
@@ -976,6 +1153,41 @@ function BranchTrackingBadge({ branch }: { branch: RefLeaf }) {
   return null;
 }
 
+function CommitInspector({
+  commit,
+  branchName,
+  files,
+  selectedPath,
+  onSelectPath,
+}: {
+  commit: CommitInfo | null;
+  branchName?: string;
+  files: RepositoryPayload["files"];
+  selectedPath: string | null;
+  onSelectPath(path: string): void;
+}) {
+  return (
+    <aside className="commit-detail-panel">
+      <div className="commit-changes-panel">
+        <TreePanel
+          files={files}
+          selectedPath={selectedPath}
+          title="Changes"
+          emptyTitle="No changed files"
+          emptyCopy="Select a commit with file changes, or inspect working tree changes."
+          onSelectPath={onSelectPath}
+        />
+      </div>
+      <CommitDetails
+        branchName={branchName}
+        commit={commit}
+        fileCount={files.length}
+        selectedPath={selectedPath}
+      />
+    </aside>
+  );
+}
+
 function CommitDetails({
   commit,
   branchName,
@@ -988,7 +1200,7 @@ function CommitDetails({
   selectedPath: string | null;
 }) {
   return (
-    <aside className="commit-detail-panel">
+    <section className="commit-details-section">
       <div className="panel-toolbar compact-toolbar">
         <div>
           <div className="panel-title">Details</div>
@@ -1034,7 +1246,7 @@ function CommitDetails({
           <DetailRow label="Selected" value={selectedPath ?? "none"} mono />
         </div>
       )}
-    </aside>
+    </section>
   );
 }
 

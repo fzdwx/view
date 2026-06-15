@@ -1,8 +1,11 @@
 use serde::Serialize;
 use std::collections::HashMap;
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+const MAX_TEXT_FILE_BYTES: u64 = 1_048_576;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -81,6 +84,15 @@ struct RepositoryPayload {
     files: Vec<TreeFile>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileContent {
+    path: String,
+    content: String,
+    binary: bool,
+    too_large: bool,
+}
+
 #[tauri::command]
 fn default_start_path() -> Result<String, String> {
     env::current_dir()
@@ -133,6 +145,18 @@ fn get_file_diff(
 fn get_commits(path: String, branch: Option<String>) -> Result<Vec<CommitInfo>, String> {
     let root = repository_root(&path)?;
     git_log(&root, branch.as_deref())
+}
+
+#[tauri::command]
+fn get_project_files(path: String) -> Result<Vec<TreeFile>, String> {
+    let root = repository_root(&path)?;
+    git_files(&root)
+}
+
+#[tauri::command]
+fn get_file_content(path: String, file_path: String) -> Result<FileContent, String> {
+    let root = repository_root(&path)?;
+    read_file_content(&root, &file_path)
 }
 
 #[tauri::command]
@@ -465,10 +489,9 @@ fn normalize_git_path(path: &str) -> String {
         .to_string()
 }
 
-#[allow(dead_code)]
 fn git_files(root: &Path) -> Result<Vec<TreeFile>, String> {
     let tracked = git(root, &["ls-files", "-co", "--exclude-standard"])?;
-    let status = git(root, &["status", "--porcelain=v1"]).unwrap_or_default();
+    let status = git(root, &["status", "--porcelain=v1", "-uall"]).unwrap_or_default();
     let statuses = parse_status_entries(&status);
 
     let mut files: Vec<TreeFile> = tracked
@@ -486,6 +509,59 @@ fn git_files(root: &Path) -> Result<Vec<TreeFile>, String> {
     files.sort_by(|left, right| left.path.cmp(&right.path));
     files.dedup_by(|left, right| left.path == right.path);
     Ok(files)
+}
+
+fn read_file_content(root: &Path, file_path: &str) -> Result<FileContent, String> {
+    let normalized = normalize_git_path(file_path);
+    if normalized.is_empty()
+        || normalized.starts_with("../")
+        || normalized == ".."
+        || Path::new(&normalized).is_absolute()
+    {
+        return Err("Invalid file path".to_string());
+    }
+
+    let root = root
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve repository root: {error}"))?;
+    let full_path = root.join(&normalized);
+    let canonical = full_path
+        .canonicalize()
+        .map_err(|error| format!("Failed to open file: {error}"))?;
+    if !canonical.starts_with(&root) {
+        return Err("File is outside the repository".to_string());
+    }
+    if !canonical.is_file() {
+        return Err("Selected path is not a file".to_string());
+    }
+
+    let metadata = fs::metadata(&canonical)
+        .map_err(|error| format!("Failed to read file metadata: {error}"))?;
+    if metadata.len() > MAX_TEXT_FILE_BYTES {
+        return Ok(FileContent {
+            path: normalized,
+            content: String::new(),
+            binary: false,
+            too_large: true,
+        });
+    }
+
+    let bytes = fs::read(&canonical).map_err(|error| format!("Failed to read file: {error}"))?;
+    if bytes.contains(&0) {
+        return Ok(FileContent {
+            path: normalized,
+            content: String::new(),
+            binary: true,
+            too_large: false,
+        });
+    }
+
+    Ok(FileContent {
+        path: normalized,
+        content: String::from_utf8_lossy(&bytes).to_string(),
+        binary: false,
+        too_large: false,
+    })
 }
 
 fn git_diff(root: &Path) -> Result<String, String> {
@@ -818,6 +894,50 @@ mod tests {
     }
 
     #[test]
+    fn project_files_include_tracked_and_untracked_files() {
+        let repo = create_basic_repo();
+        fs::create_dir_all(repo.join("src")).expect("create src");
+        fs::write(repo.join("src").join("main.rs"), "fn main() {}\n").expect("write tracked");
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-m", "tracked"]);
+        fs::write(repo.join("draft.txt"), "draft\n").expect("write untracked");
+
+        let files = git_files(&repo).expect("project files");
+        assert!(
+            files
+                .iter()
+                .any(|file| file.path == "src/main.rs" && file.status.is_none()),
+            "tracked files should appear in the project tree"
+        );
+        assert!(
+            files.iter().any(|file| file.path == "draft.txt"
+                && file.status.as_deref() == Some("untracked")),
+            "untracked files should appear in the project tree"
+        );
+
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn file_content_reads_text_and_rejects_outside_paths() {
+        let repo = create_basic_repo();
+        fs::write(repo.join("note.txt"), "hello\n").expect("write text");
+
+        let content = read_file_content(&repo, "note.txt").expect("file content");
+        assert_eq!(content.path, "note.txt");
+        assert_eq!(content.content, "hello\n");
+        assert!(!content.binary);
+        assert!(!content.too_large);
+
+        assert!(
+            read_file_content(&repo, "../note.txt").is_err(),
+            "file content should not read outside the repository"
+        );
+
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
     fn branch_tracking_counts_remote_ahead_of_current_branch() {
         let remote = create_basic_repo();
         fs::write(remote.join("base.txt"), "base\n").expect("write base");
@@ -952,6 +1072,8 @@ pub fn run() {
             get_diff,
             get_file_diff,
             get_commits,
+            get_project_files,
+            get_file_content,
             fetch_remotes
         ])
         .run(tauri::generate_context!())
