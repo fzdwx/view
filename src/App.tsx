@@ -37,6 +37,7 @@ import {
   type RepositoryPayload,
   type TagInfo,
   fetchRemotes,
+  getCommits,
   getFileDiff,
   isTauriRuntime,
   loadRepository,
@@ -83,14 +84,17 @@ export function App() {
   );
 
   const repositoryQuery = useQuery({
-    queryKey: [
-      "repository",
-      activeProject?.activePath,
-      activeCommit,
-      activeBranchRef,
-    ],
+    queryKey: ["repository", activeProject?.activePath, activeCommit],
     queryFn: () =>
-      loadRepository(activeProject!.activePath, activeCommit, activeBranchRef),
+      loadRepository(activeProject!.activePath, activeCommit, null),
+    enabled: Boolean(activeProject),
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+
+  const commitsQuery = useQuery({
+    queryKey: ["commits", activeProject?.activePath, activeBranchRef],
+    queryFn: () => getCommits(activeProject!.activePath, activeBranchRef),
     enabled: Boolean(activeProject),
     placeholderData: keepPreviousData,
     retry: false,
@@ -158,15 +162,16 @@ export function App() {
     () => countDiffStats(visibleDiffFiles),
     [visibleDiffFiles],
   );
+  const commits = commitsQuery.data ?? payload?.commits ?? [];
   const filteredCommits = useMemo(
-    () => filterCommits(payload?.commits ?? [], commitFilter),
-    [payload?.commits, commitFilter],
+    () => filterCommits(commits, commitFilter),
+    [commits, commitFilter],
   );
   const currentBranchRef =
     payload?.summary.branches.find((branch) => branch.current)?.refName ?? null;
   const selectedBranchRef = activeBranchRef ?? currentBranchRef;
   const selectedCommit =
-    payload?.commits.find((commit) => commit.hash === activeCommit) ?? null;
+    commits.find((commit) => commit.hash === activeCommit) ?? null;
   const appShellStyle = {
     gridTemplateColumns: `${panelSizes.rail}px 6px minmax(0, 1fr)`,
   };
@@ -217,7 +222,7 @@ export function App() {
       remoteFetchInFlightRef.current = true;
       try {
         await fetchRemotes(activeProject.activePath);
-        await repositoryQuery.refetch();
+        await Promise.all([repositoryQuery.refetch(), commitsQuery.refetch()]);
       } catch (error) {
         console.warn("Failed to fetch remotes", error);
       } finally {
@@ -227,7 +232,7 @@ export function App() {
     const timer = window.setInterval(refreshRemoteRefs, 120_000);
 
     return () => window.clearInterval(timer);
-  }, [activeProject?.activePath, repositoryQuery.refetch]);
+  }, [activeProject?.activePath, commitsQuery.refetch, repositoryQuery.refetch]);
 
   async function chooseRepository() {
     if (!isTauriRuntime()) {
@@ -335,8 +340,10 @@ export function App() {
         <HeaderBar
           payload={payload}
           activeProject={activeProject}
-          loading={repositoryQuery.isFetching}
-          onRefresh={() => repositoryQuery.refetch()}
+          loading={repositoryQuery.isFetching || commitsQuery.isFetching}
+          onRefresh={() => {
+            void Promise.all([repositoryQuery.refetch(), commitsQuery.refetch()]);
+          }}
         />
 
         {!activeProject ? (
@@ -441,7 +448,6 @@ export function App() {
                     onSelect={(refName) => {
                       setActiveBranchRef(refName);
                       setActiveCommit(null);
-                      setSelectedPath(null);
                     }}
                   />
                 ) : (
@@ -487,7 +493,7 @@ export function App() {
               <VirtualCommitList
                 commits={filteredCommits}
                 activeCommit={activeCommit}
-                loading={repositoryQuery.isLoading}
+                loading={commitsQuery.isLoading}
                 onSelectCommit={setActiveCommit}
               />
             </section>

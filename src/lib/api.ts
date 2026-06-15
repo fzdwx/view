@@ -103,6 +103,16 @@ export async function getFileDiff(
   });
 }
 
+export async function getCommits(
+  path: string,
+  branch?: string | null,
+): Promise<CommitInfo[]> {
+  return invoke<CommitInfo[]>("get_commits", {
+    path,
+    branch: branch ?? null,
+  });
+}
+
 export async function fetchRemotes(path: string): Promise<void> {
   return invoke<void>("fetch_remotes", { path });
 }

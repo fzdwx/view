@@ -130,6 +130,12 @@ fn get_file_diff(
 }
 
 #[tauri::command]
+fn get_commits(path: String, branch: Option<String>) -> Result<Vec<CommitInfo>, String> {
+    let root = repository_root(&path)?;
+    git_log(&root, branch.as_deref())
+}
+
+#[tauri::command]
 fn fetch_remotes(path: String) -> Result<(), String> {
     let root = repository_root(&path)?;
     git(&root, &["fetch", "--all", "--prune"])?;
@@ -945,6 +951,7 @@ pub fn run() {
             load_repository,
             get_diff,
             get_file_diff,
+            get_commits,
             fetch_remotes
         ])
         .run(tauri::generate_context!())
