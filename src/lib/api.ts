@@ -76,11 +76,31 @@ export interface FileContent {
   tooLarge: boolean;
 }
 
+export interface SaveConflict {
+  path: string;
+  baseContent: string;
+  currentContent: string;
+  proposedContent: string;
+}
+
+export interface SaveFileResponse {
+  status: "saved" | "conflict";
+  file: FileContent | null;
+  conflict: SaveConflict | null;
+}
+
 export interface FileSearchResult {
   path: string;
   score: number;
   lineNumber: number | null;
   lineText: string | null;
+}
+
+export interface TerminalSessionInfo {
+  id: string;
+  cwd: string;
+  pid: number | null;
+  wsUrl: string;
 }
 
 export async function loadRepository(
@@ -138,6 +158,22 @@ export async function getFileContent(
   return invoke<FileContent>("get_file_content", { path, filePath });
 }
 
+export async function saveFileContent(
+  path: string,
+  filePath: string,
+  baseContent: string,
+  content: string,
+): Promise<SaveFileResponse> {
+  return invoke<SaveFileResponse>("save_file_content", {
+    request: {
+      path,
+      filePath,
+      baseContent,
+      content,
+    },
+  });
+}
+
 export async function searchFiles(
   path: string,
   query: string,
@@ -152,6 +188,32 @@ export async function searchFiles(
 
 export async function fetchRemotes(path: string): Promise<void> {
   return invoke<void>("fetch_remotes", { path });
+}
+
+export async function terminalSpawn(
+  path: string,
+  cwd?: string | null,
+  cols?: number,
+  rows?: number,
+): Promise<TerminalSessionInfo> {
+  return invoke<TerminalSessionInfo>("terminal_spawn", {
+    path,
+    cwd: cwd ?? null,
+    cols: cols ?? null,
+    rows: rows ?? null,
+  });
+}
+
+export async function terminalResize(
+  id: string,
+  cols: number,
+  rows: number,
+): Promise<void> {
+  return invoke<void>("terminal_resize", { id, cols, rows });
+}
+
+export async function terminalKill(id: string): Promise<void> {
+  return invoke<void>("terminal_kill", { id });
 }
 
 export function isTauriRuntime(): boolean {

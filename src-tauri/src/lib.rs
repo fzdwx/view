@@ -1,19 +1,42 @@
+use alacritty_terminal::event::{Event as TerminalEvent, EventListener};
+use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::index::{Column, Line};
+use alacritty_terminal::term::cell::{Cell, Flags};
+use alacritty_terminal::term::test::TermSize;
+use alacritty_terminal::term::{Config as TerminalConfig, Term, TermMode};
+use alacritty_terminal::vte::ansi::{Color as TerminalColorValue, NamedColor};
+use alacritty_terminal::vte::ansi::{
+    Processor as TerminalProcessor, StdSyncHandler as TerminalSyncHandler,
+};
 use fff_search::{
     FFFMode, FilePicker, FilePickerOptions, FuzzySearchOptions, GrepConfig, GrepMode,
     GrepSearchOptions, PaginationArgs, QueryParser, SharedFilePicker, SharedFrecency,
 };
-use serde::Serialize;
-use std::collections::HashMap;
+use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::fs;
+use std::io::{ErrorKind, Read, Write};
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    mpsc, Arc, Mutex,
+};
+use std::thread;
 use std::time::Duration;
+use tauri::State;
+use tungstenite::{accept, Error as WsError, Message, WebSocket};
 
 const MAX_TEXT_FILE_BYTES: u64 = 1_048_576;
 const DEFAULT_FILE_SEARCH_LIMIT: usize = 50;
 const MAX_FILE_SEARCH_LIMIT: usize = 200;
 const FILE_SEARCH_SCAN_TIMEOUT: Duration = Duration::from_secs(10);
+const TERMINAL_WS_IDLE_SLEEP_MS: u64 = 1;
+const TERMINAL_WS_PENDING_OUTPUT_LIMIT: usize = 64;
+const TERMINAL_WS_OUTPUT_BURST_LIMIT: usize = 8;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -110,6 +133,132 @@ struct FileSearchResult {
     line_text: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveFileRequest {
+    path: String,
+    file_path: String,
+    base_content: String,
+    content: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveConflict {
+    path: String,
+    base_content: String,
+    current_content: String,
+    proposed_content: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveFileResponse {
+    status: String,
+    file: Option<FileContent>,
+    conflict: Option<SaveConflict>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalSessionInfo {
+    id: String,
+    cwd: String,
+    pid: Option<u32>,
+    ws_url: String,
+}
+
+enum TerminalWsEvent {
+    Frame(String),
+    Close(Option<u32>),
+}
+
+enum TerminalParserEvent {
+    Output(Vec<u8>),
+    Resize(u16, u16),
+}
+
+struct TerminalSession {
+    parser_tx: mpsc::Sender<TerminalParserEvent>,
+    ws_shutdown_tx: mpsc::Sender<()>,
+    killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
+    master: Box<dyn MasterPty + Send>,
+}
+
+#[derive(Clone)]
+struct TerminalEventProxy {
+    input_tx: mpsc::Sender<Vec<u8>>,
+}
+
+impl EventListener for TerminalEventProxy {
+    fn send_event(&self, event: TerminalEvent) {
+        if let TerminalEvent::PtyWrite(text) = event {
+            let _ = self.input_tx.send(text.into_bytes());
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalRunStyle {
+    fg: Option<String>,
+    bg: Option<String>,
+    bold: bool,
+    dim: bool,
+    italic: bool,
+    underline: bool,
+    inverse: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalFrameRun {
+    text: String,
+    #[serde(flatten)]
+    style: TerminalRunStyle,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalFrameLine {
+    cells: Vec<TerminalFrameRun>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalFrameModes {
+    app_cursor: bool,
+    app_keypad: bool,
+    bracketed_paste: bool,
+    focus_in_out: bool,
+    mouse_report_click: bool,
+    mouse_drag: bool,
+    mouse_motion: bool,
+    sgr_mouse: bool,
+    utf8_mouse: bool,
+    alt_screen: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalFrame {
+    #[serde(rename = "type")]
+    message_type: &'static str,
+    rows: usize,
+    cols: usize,
+    cursor_row: usize,
+    cursor_col: usize,
+    cursor_visible: bool,
+    modes: TerminalFrameModes,
+    lines: Vec<TerminalFrameLine>,
+}
+
+#[derive(Default)]
+struct TerminalState {
+    sessions: Arc<Mutex<HashMap<String, TerminalSession>>>,
+    next_id: AtomicU64,
+}
+
 #[tauri::command]
 fn default_start_path() -> Result<String, String> {
     env::current_dir()
@@ -177,6 +326,17 @@ fn get_file_content(path: String, file_path: String) -> Result<FileContent, Stri
 }
 
 #[tauri::command]
+fn save_file_content(request: SaveFileRequest) -> Result<SaveFileResponse, String> {
+    let root = repository_root(&request.path)?;
+    write_file_content(
+        &root,
+        &request.file_path,
+        &request.base_content,
+        &request.content,
+    )
+}
+
+#[tauri::command]
 fn search_files(
     path: String,
     query: String,
@@ -191,6 +351,63 @@ fn fetch_remotes(path: String) -> Result<(), String> {
     let root = repository_root(&path)?;
     git(&root, &["fetch", "--all", "--prune"])?;
     Ok(())
+}
+
+#[tauri::command]
+fn terminal_spawn(
+    state: State<TerminalState>,
+    path: String,
+    cwd: Option<String>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+) -> Result<TerminalSessionInfo, String> {
+    let root = repository_root(&path)?;
+    spawn_terminal_session(state.inner(), &root, cwd.as_deref(), cols, rows)
+}
+
+#[tauri::command]
+fn terminal_resize(
+    state: State<TerminalState>,
+    id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let sessions = state.sessions.lock().map_err(|error| error.to_string())?;
+    let session = sessions
+        .get(&id)
+        .ok_or_else(|| "Terminal session was not found".to_string())?;
+    session
+        .master
+        .resize(PtySize {
+            rows: rows.max(1),
+            cols: cols.max(1),
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|error| format!("Failed to resize terminal: {error}"))?;
+    let _ = session
+        .parser_tx
+        .send(TerminalParserEvent::Resize(cols.max(1), rows.max(1)));
+    Ok(())
+}
+
+#[tauri::command]
+fn terminal_kill(state: State<TerminalState>, id: String) -> Result<(), String> {
+    kill_terminal_session(state.inner(), &id)
+}
+
+fn kill_terminal_session(state: &TerminalState, id: &str) -> Result<(), String> {
+    let session = {
+        let mut sessions = state.sessions.lock().map_err(|error| error.to_string())?;
+        sessions
+            .remove(id)
+            .ok_or_else(|| "Terminal session was not found".to_string())?
+    };
+    let _ = session.ws_shutdown_tx.send(());
+    let mut killer = session.killer.lock().map_err(|error| error.to_string())?;
+    killer
+        .kill()
+        .map_err(|error| format!("Failed to kill terminal: {error}"))
 }
 
 fn repository_summary(root: &Path) -> Result<RepositorySummary, String> {
@@ -538,7 +755,7 @@ fn git_files(root: &Path) -> Result<Vec<TreeFile>, String> {
     Ok(files)
 }
 
-fn read_file_content(root: &Path, file_path: &str) -> Result<FileContent, String> {
+fn resolve_existing_repo_file(root: &Path, file_path: &str) -> Result<(String, PathBuf), String> {
     let normalized = normalize_git_path(file_path);
     if normalized.is_empty()
         || normalized.starts_with("../")
@@ -562,6 +779,11 @@ fn read_file_content(root: &Path, file_path: &str) -> Result<FileContent, String
         return Err("Selected path is not a file".to_string());
     }
 
+    Ok((normalized, canonical))
+}
+
+fn read_file_content(root: &Path, file_path: &str) -> Result<FileContent, String> {
+    let (normalized, canonical) = resolve_existing_repo_file(root, file_path)?;
     let metadata = fs::metadata(&canonical)
         .map_err(|error| format!("Failed to read file metadata: {error}"))?;
     if metadata.len() > MAX_TEXT_FILE_BYTES {
@@ -589,6 +811,565 @@ fn read_file_content(root: &Path, file_path: &str) -> Result<FileContent, String
         binary: false,
         too_large: false,
     })
+}
+
+fn write_file_content(
+    root: &Path,
+    file_path: &str,
+    base_content: &str,
+    content: &str,
+) -> Result<SaveFileResponse, String> {
+    let (normalized, canonical) = resolve_existing_repo_file(root, file_path)?;
+    let metadata = fs::metadata(&canonical)
+        .map_err(|error| format!("Failed to read file metadata: {error}"))?;
+    if metadata.len() > MAX_TEXT_FILE_BYTES {
+        return Err("File is too large to edit".to_string());
+    }
+
+    let current_bytes =
+        fs::read(&canonical).map_err(|error| format!("Failed to read current file: {error}"))?;
+    if current_bytes.contains(&0) {
+        return Err("Binary files cannot be edited".to_string());
+    }
+
+    let current_content = String::from_utf8_lossy(&current_bytes).to_string();
+    if current_content != base_content {
+        return Ok(SaveFileResponse {
+            status: "conflict".to_string(),
+            file: None,
+            conflict: Some(SaveConflict {
+                path: normalized,
+                base_content: base_content.to_string(),
+                current_content,
+                proposed_content: content.to_string(),
+            }),
+        });
+    }
+
+    let parent = canonical
+        .parent()
+        .ok_or_else(|| "Selected file has no parent directory".to_string())?;
+    let temp_path = parent.join(format!(
+        ".{}.view-save-tmp",
+        canonical
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("file")
+    ));
+    fs::write(&temp_path, content.as_bytes())
+        .map_err(|error| format!("Failed to write temporary file: {error}"))?;
+    fs::rename(&temp_path, &canonical)
+        .map_err(|error| format!("Failed to replace file: {error}"))?;
+
+    Ok(SaveFileResponse {
+        status: "saved".to_string(),
+        file: Some(FileContent {
+            path: normalized,
+            content: content.to_string(),
+            binary: false,
+            too_large: false,
+        }),
+        conflict: None,
+    })
+}
+
+fn resolve_terminal_cwd(root: &Path, cwd: Option<&str>) -> Result<PathBuf, String> {
+    let root = root
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve repository root: {error}"))?;
+    let candidate = cwd
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root.clone());
+    let full_path = if candidate.is_absolute() {
+        candidate
+    } else {
+        root.join(candidate)
+    };
+    let canonical = full_path
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve terminal cwd: {error}"))?;
+    if !canonical.starts_with(&root) {
+        return Err("Terminal cwd must stay inside the repository".to_string());
+    }
+    if !canonical.is_dir() {
+        return Err("Terminal cwd is not a directory".to_string());
+    }
+    Ok(canonical)
+}
+
+fn terminal_named_color(color: NamedColor) -> Option<&'static str> {
+    match color {
+        NamedColor::Black => Some("#1f2933"),
+        NamedColor::Red => Some("#ef6f6c"),
+        NamedColor::Green => Some("#6dd58c"),
+        NamedColor::Yellow => Some("#d9b45f"),
+        NamedColor::Blue => Some("#72a7ff"),
+        NamedColor::Magenta => Some("#d783d7"),
+        NamedColor::Cyan => Some("#65cfd3"),
+        NamedColor::White => Some("#d7dde2"),
+        NamedColor::BrightBlack => Some("#6b7480"),
+        NamedColor::BrightRed => Some("#ff8f87"),
+        NamedColor::BrightGreen => Some("#88e0a1"),
+        NamedColor::BrightYellow => Some("#edcc75"),
+        NamedColor::BrightBlue => Some("#90bbff"),
+        NamedColor::BrightMagenta => Some("#ec9dea"),
+        NamedColor::BrightCyan => Some("#84e4e7"),
+        NamedColor::BrightWhite => Some("#f7fafc"),
+        NamedColor::DimBlack => Some("#111827"),
+        NamedColor::DimRed => Some("#9f4a48"),
+        NamedColor::DimGreen => Some("#4f9b66"),
+        NamedColor::DimYellow => Some("#9d8247"),
+        NamedColor::DimBlue => Some("#547db8"),
+        NamedColor::DimMagenta => Some("#9b619b"),
+        NamedColor::DimCyan => Some("#4b989b"),
+        NamedColor::DimWhite => Some("#9ca3af"),
+        NamedColor::BrightForeground => Some("#f7fafc"),
+        NamedColor::DimForeground => Some("#9ca3af"),
+        NamedColor::Foreground | NamedColor::Background | NamedColor::Cursor => None,
+    }
+}
+
+fn terminal_indexed_color(value: u8) -> String {
+    const BASIC: [&str; 16] = [
+        "#1f2933", "#ef6f6c", "#6dd58c", "#d9b45f", "#72a7ff", "#d783d7", "#65cfd3", "#d7dde2",
+        "#6b7480", "#ff8f87", "#88e0a1", "#edcc75", "#90bbff", "#ec9dea", "#84e4e7", "#f7fafc",
+    ];
+    if let Some(color) = BASIC.get(value as usize) {
+        return (*color).to_string();
+    }
+    if (16..=231).contains(&value) {
+        let offset = value - 16;
+        let red = offset / 36;
+        let green = (offset % 36) / 6;
+        let blue = offset % 6;
+        let component = |part: u8| if part == 0 { 0 } else { 55 + part * 40 };
+        return format!(
+            "rgb({} {} {})",
+            component(red),
+            component(green),
+            component(blue)
+        );
+    }
+    let gray = 8 + value.saturating_sub(232) * 10;
+    format!("rgb({gray} {gray} {gray})")
+}
+
+fn terminal_color(color: TerminalColorValue) -> Option<String> {
+    match color {
+        TerminalColorValue::Named(color) => terminal_named_color(color).map(str::to_string),
+        TerminalColorValue::Indexed(value) => Some(terminal_indexed_color(value)),
+        TerminalColorValue::Spec(rgb) => Some(format!("rgb({} {} {})", rgb.r, rgb.g, rgb.b)),
+    }
+}
+
+fn terminal_cell_style(cell: &Cell) -> TerminalRunStyle {
+    let flags = cell.flags;
+    TerminalRunStyle {
+        fg: terminal_color(cell.fg),
+        bg: terminal_color(cell.bg),
+        bold: flags.contains(Flags::BOLD),
+        dim: flags.contains(Flags::DIM),
+        italic: flags.contains(Flags::ITALIC),
+        underline: flags.intersects(Flags::ALL_UNDERLINES),
+        inverse: flags.contains(Flags::INVERSE),
+    }
+}
+
+fn terminal_frame_modes(mode: TermMode) -> TerminalFrameModes {
+    TerminalFrameModes {
+        app_cursor: mode.contains(TermMode::APP_CURSOR),
+        app_keypad: mode.contains(TermMode::APP_KEYPAD),
+        bracketed_paste: mode.contains(TermMode::BRACKETED_PASTE),
+        focus_in_out: mode.contains(TermMode::FOCUS_IN_OUT),
+        mouse_report_click: mode.contains(TermMode::MOUSE_REPORT_CLICK),
+        mouse_drag: mode.contains(TermMode::MOUSE_DRAG),
+        mouse_motion: mode.contains(TermMode::MOUSE_MOTION),
+        sgr_mouse: mode.contains(TermMode::SGR_MOUSE),
+        utf8_mouse: mode.contains(TermMode::UTF8_MOUSE),
+        alt_screen: mode.contains(TermMode::ALT_SCREEN),
+    }
+}
+
+fn terminal_frame(term: &Term<TerminalEventProxy>) -> Result<String, String> {
+    let grid = term.grid();
+    let cols = grid.columns();
+    let rows = grid.screen_lines();
+    let mode = term.mode();
+    let display_offset = grid.display_offset() as i32;
+    let cursor = grid.cursor.point;
+    let cursor_row = (cursor.line.0 + display_offset).max(0) as usize;
+    let cursor_col = cursor.column.0.min(cols.saturating_sub(1));
+    let cursor_visible =
+        mode.contains(TermMode::SHOW_CURSOR) && cursor_row < rows && cursor_col < cols;
+    let default_style = TerminalRunStyle {
+        fg: None,
+        bg: None,
+        bold: false,
+        dim: false,
+        italic: false,
+        underline: false,
+        inverse: false,
+    };
+    let mut lines = Vec::with_capacity(rows);
+
+    for row in 0..rows {
+        let line_index = Line(row as i32 - display_offset);
+        let mut styled_cells = Vec::new();
+        let mut current_text = String::new();
+        let mut current_style = default_style.clone();
+        let mut last_content_col = 0usize;
+
+        for col in 0..cols {
+            let cell = &grid[line_index][Column(col)];
+            let style = terminal_cell_style(cell);
+            let is_cursor = cursor_visible && row == cursor_row && col == cursor_col;
+            if !cell.flags.contains(Flags::WIDE_CHAR_SPACER)
+                && (cell.c != ' ' || style != default_style || is_cursor)
+            {
+                last_content_col = col;
+            }
+        }
+
+        let render_cols = if cursor_visible && row == cursor_row {
+            last_content_col.max(cursor_col) + 1
+        } else {
+            last_content_col + 1
+        };
+
+        for col in 0..render_cols.min(cols) {
+            let cell = &grid[line_index][Column(col)];
+            let style = terminal_cell_style(cell);
+            if col == 0 {
+                current_style = style.clone();
+            } else if style != current_style {
+                styled_cells.push(TerminalFrameRun {
+                    text: std::mem::take(&mut current_text),
+                    style: current_style,
+                });
+                current_style = style.clone();
+            }
+
+            let character = if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                ' '
+            } else if cell.flags.contains(Flags::HIDDEN) {
+                ' '
+            } else {
+                cell.c
+            };
+            current_text.push(character);
+            if let Some(zerowidth) = cell.zerowidth() {
+                current_text.extend(zerowidth);
+            }
+        }
+
+        styled_cells.push(TerminalFrameRun {
+            text: current_text,
+            style: current_style,
+        });
+        lines.push(TerminalFrameLine {
+            cells: styled_cells,
+        });
+    }
+
+    serde_json::to_string(&TerminalFrame {
+        message_type: "frame",
+        rows,
+        cols,
+        cursor_row,
+        cursor_col,
+        cursor_visible,
+        modes: terminal_frame_modes(*mode),
+        lines,
+    })
+    .map_err(|error| format!("Failed to serialize terminal frame: {error}"))
+}
+
+fn spawn_terminal_session(
+    state: &TerminalState,
+    root: &Path,
+    cwd: Option<&str>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+) -> Result<TerminalSessionInfo, String> {
+    let cwd = resolve_terminal_cwd(root, cwd)?;
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: rows.unwrap_or(24).max(1),
+            cols: cols.unwrap_or(80).max(1),
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|error| format!("Failed to create terminal PTY: {error}"))?;
+    let portable_pty::PtyPair { master, slave } = pair;
+    let mut command = CommandBuilder::new_default_prog();
+    command.cwd(&cwd);
+    command.env("TERM", "xterm-256color");
+
+    let mut child = slave
+        .spawn_command(command)
+        .map_err(|error| format!("Failed to spawn terminal shell: {error}"))?;
+    let pid = child.process_id();
+    let killer = child.clone_killer();
+    drop(slave);
+
+    let mut reader = master
+        .try_clone_reader()
+        .map_err(|error| format!("Failed to open terminal reader: {error}"))?;
+    let writer = master
+        .take_writer()
+        .map_err(|error| format!("Failed to open terminal writer: {error}"))?;
+    let (input_tx, input_rx) = mpsc::channel::<Vec<u8>>();
+    let (parser_tx, parser_rx) = mpsc::channel::<TerminalParserEvent>();
+    thread::spawn(move || {
+        let mut writer = writer;
+        while let Ok(input) = input_rx.recv() {
+            if writer.write_all(&input).is_err() {
+                break;
+            }
+            if writer.flush().is_err() {
+                break;
+            }
+        }
+    });
+
+    let id = state
+        .next_id
+        .fetch_add(1, Ordering::Relaxed)
+        .saturating_add(1)
+        .to_string();
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|error| format!("Failed to bind terminal WebSocket: {error}"))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| format!("Failed to configure terminal WebSocket: {error}"))?;
+    let ws_port = listener
+        .local_addr()
+        .map_err(|error| format!("Failed to read terminal WebSocket address: {error}"))?
+        .port();
+    let ws_url = format!("ws://127.0.0.1:{ws_port}/terminal/{id}");
+    let sessions = state.sessions.clone();
+    let (ws_output_tx, ws_output_rx) = mpsc::channel::<TerminalWsEvent>();
+    let (ws_shutdown_tx, ws_shutdown_rx) = mpsc::channel::<()>();
+    let parser_input_tx = input_tx.clone();
+    let ws_input_tx = input_tx.clone();
+    {
+        let mut sessions_guard = sessions.lock().map_err(|error| error.to_string())?;
+        sessions_guard.insert(
+            id.clone(),
+            TerminalSession {
+                parser_tx: parser_tx.clone(),
+                ws_shutdown_tx,
+                killer: Mutex::new(killer),
+                master,
+            },
+        );
+    }
+
+    let reader_parser_tx = parser_tx.clone();
+    thread::spawn(move || {
+        let mut buffer = [0_u8; 8192];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(read) => {
+                    if reader_parser_tx
+                        .send(TerminalParserEvent::Output(buffer[..read].to_vec()))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
+            }
+        }
+    });
+
+    let reader_output_tx = ws_output_tx.clone();
+    thread::spawn(move || {
+        let initial_cols = cols.unwrap_or(80).max(1) as usize;
+        let initial_rows = rows.unwrap_or(24).max(1) as usize;
+        let mut term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(initial_cols, initial_rows),
+            TerminalEventProxy {
+                input_tx: parser_input_tx,
+            },
+        );
+        let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
+        if let Ok(frame) = terminal_frame(&term) {
+            let _ = reader_output_tx.send(TerminalWsEvent::Frame(frame));
+        }
+
+        let apply_event =
+            |event: TerminalParserEvent,
+             term: &mut Term<TerminalEventProxy>,
+             processor: &mut TerminalProcessor<TerminalSyncHandler>| {
+                match event {
+                    TerminalParserEvent::Output(bytes) => {
+                        processor.advance(term, &bytes);
+                    }
+                    TerminalParserEvent::Resize(cols, rows) => {
+                        term.resize(TermSize::new(cols.max(1) as usize, rows.max(1) as usize));
+                    }
+                }
+            };
+
+        while let Ok(event) = parser_rx.recv() {
+            apply_event(event, &mut term, &mut processor);
+            while let Ok(event) = parser_rx.try_recv() {
+                apply_event(event, &mut term, &mut processor);
+            }
+
+            match terminal_frame(&term) {
+                Ok(frame) => {
+                    if reader_output_tx
+                        .send(TerminalWsEvent::Frame(frame))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    thread::spawn(move || {
+        run_terminal_ws(listener, ws_input_tx, ws_output_rx, ws_shutdown_rx);
+    });
+
+    let exit_output_tx = ws_output_tx;
+    thread::spawn(move || {
+        let exit_code = child.wait().ok().map(|status| status.exit_code());
+        let _ = exit_output_tx.send(TerminalWsEvent::Close(exit_code));
+    });
+
+    Ok(TerminalSessionInfo {
+        id,
+        cwd: cwd.to_string_lossy().to_string(),
+        pid,
+        ws_url,
+    })
+}
+
+fn run_terminal_ws(
+    listener: TcpListener,
+    input_tx: mpsc::Sender<Vec<u8>>,
+    output_rx: mpsc::Receiver<TerminalWsEvent>,
+    shutdown_rx: mpsc::Receiver<()>,
+) {
+    let sleep_duration = Duration::from_millis(TERMINAL_WS_IDLE_SLEEP_MS);
+    let mut websocket = loop {
+        if shutdown_rx.try_recv().is_ok() {
+            return;
+        }
+        match listener.accept() {
+            Ok((stream, _)) => {
+                let _ = stream.set_nodelay(true);
+                match accept(stream) {
+                    Ok(mut websocket) => {
+                        let _ = websocket.get_mut().set_nonblocking(true);
+                        let _ = websocket.get_mut().set_nodelay(true);
+                        break websocket;
+                    }
+                    Err(_) => return,
+                }
+            }
+            Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                thread::sleep(sleep_duration);
+            }
+            Err(_) => return,
+        }
+    };
+
+    let mut pending_output = VecDeque::<TerminalWsEvent>::new();
+    loop {
+        if shutdown_rx.try_recv().is_ok() {
+            let _ = websocket.close(None);
+            return;
+        }
+        let mut did_work = false;
+
+        loop {
+            match websocket.read() {
+                Ok(Message::Text(text)) => {
+                    did_work = true;
+                    let _ = input_tx.send(text.into_bytes());
+                }
+                Ok(Message::Binary(bytes)) => {
+                    did_work = true;
+                    let _ = input_tx.send(bytes);
+                }
+                Ok(Message::Close(_)) => return,
+                Ok(Message::Ping(payload)) => {
+                    did_work = true;
+                    let _ = websocket.send(Message::Pong(payload));
+                }
+                Ok(Message::Pong(_)) | Ok(Message::Frame(_)) => {
+                    did_work = true;
+                }
+                Err(WsError::Io(error)) if error.kind() == ErrorKind::WouldBlock => break,
+                Err(WsError::ConnectionClosed) | Err(WsError::AlreadyClosed) => return,
+                Err(_) => return,
+            }
+        }
+
+        while let Ok(event) = output_rx.try_recv() {
+            did_work = true;
+            pending_output.push_back(event);
+            while pending_output.len() > TERMINAL_WS_PENDING_OUTPUT_LIMIT {
+                pending_output.pop_front();
+            }
+        }
+
+        let mut sent_output_count = 0;
+        while sent_output_count < TERMINAL_WS_OUTPUT_BURST_LIMIT {
+            let Some(event) = pending_output.pop_front() else {
+                break;
+            };
+            match write_terminal_ws_event(&mut websocket, &event) {
+                Ok(true) => return,
+                Ok(false) => {
+                    did_work = true;
+                    sent_output_count += 1;
+                }
+                Err(WsError::Io(error)) if error.kind() == ErrorKind::WouldBlock => {
+                    pending_output.push_front(event);
+                    break;
+                }
+                Err(WsError::ConnectionClosed) | Err(WsError::AlreadyClosed) => return,
+                Err(_) => return,
+            }
+        }
+
+        if !did_work {
+            thread::sleep(sleep_duration);
+        }
+    }
+}
+
+fn write_terminal_ws_event(
+    websocket: &mut WebSocket<TcpStream>,
+    event: &TerminalWsEvent,
+) -> Result<bool, WsError> {
+    match event {
+        TerminalWsEvent::Frame(frame) => {
+            websocket.send(Message::Text(frame.clone()))?;
+            Ok(false)
+        }
+        TerminalWsEvent::Close(exit_code) => {
+            let message = match exit_code {
+                Some(code) => format!(r#"{{"type":"close","exitCode":{code}}}"#),
+                None => r#"{"type":"close","exitCode":null}"#.to_string(),
+            };
+            websocket.send(Message::Text(message))?;
+            let _ = websocket.close(None);
+            Ok(true)
+        }
+    }
 }
 
 fn search_project_files(
@@ -981,7 +1762,273 @@ fn parse_worktrees(output: &str) -> Vec<WorktreeInfo> {
 mod tests {
     use super::*;
     use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn terminal_frame_uses_alacritty_alternate_screen_and_cursor_positioning() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        let mut term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(20, 6),
+            TerminalEventProxy { input_tx },
+        );
+        let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
+
+        processor.advance(
+            &mut term,
+            b"PRIMARY\x1b[?1049h\x1b[2J\x1b[3;5HHELLO\x1b[4;8H>",
+        );
+
+        let frame: serde_json::Value =
+            serde_json::from_str(&terminal_frame(&term).expect("terminal frame"))
+                .expect("frame json");
+        assert_eq!(frame["type"], "frame");
+        assert_eq!(frame["rows"], 6);
+        assert_eq!(frame["cols"], 20);
+
+        let all_text = terminal_frame_text(&frame);
+        assert!(
+            all_text.contains("HELLO"),
+            "absolute-positioned alternate-screen content should render"
+        );
+        assert!(
+            all_text.contains(">"),
+            "cursor-positioned prompt content should render"
+        );
+        assert!(
+            !all_text.contains("PRIMARY"),
+            "alternate screen should not leak primary screen content"
+        );
+    }
+
+    #[test]
+    fn terminal_frame_exposes_interactive_terminal_modes() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        let mut term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(20, 6),
+            TerminalEventProxy { input_tx },
+        );
+        let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
+
+        processor.advance(
+            &mut term,
+            b"\x1b[?1h\x1b[?2004h\x1b[?1004h\x1b[?1002h\x1b[?1006h",
+        );
+
+        let frame: serde_json::Value =
+            serde_json::from_str(&terminal_frame(&term).expect("terminal frame"))
+                .expect("frame json");
+        assert_eq!(frame["modes"]["appCursor"], true);
+        assert_eq!(frame["modes"]["bracketedPaste"], true);
+        assert_eq!(frame["modes"]["focusInOut"], true);
+        assert_eq!(frame["modes"]["mouseDrag"], true);
+        assert_eq!(frame["modes"]["sgrMouse"], true);
+    }
+
+    #[test]
+    fn terminal_event_proxy_writes_alacritty_terminal_responses_to_pty() {
+        let (input_tx, input_rx) = mpsc::channel::<Vec<u8>>();
+        let mut term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(20, 6),
+            TerminalEventProxy { input_tx },
+        );
+        let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
+
+        processor.advance(&mut term, b"\x1b[3;5H\x1b[6n");
+
+        let response = input_rx
+            .recv_timeout(Duration::from_millis(200))
+            .expect("terminal cursor position response");
+        let response = String::from_utf8(response).expect("utf8 terminal response");
+        assert_eq!(
+            response, "\x1b[3;5R",
+            "interactive programs rely on terminal query responses being written back to the PTY"
+        );
+    }
+
+    #[test]
+    fn terminal_frame_exposes_legacy_mouse_modes() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        let mut term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(20, 6),
+            TerminalEventProxy { input_tx },
+        );
+        let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
+
+        processor.advance(&mut term, b"\x1b[?1000h\x1b[?1005h");
+
+        let frame: serde_json::Value =
+            serde_json::from_str(&terminal_frame(&term).expect("terminal frame"))
+                .expect("frame json");
+        assert_eq!(frame["modes"]["mouseReportClick"], true);
+        assert_eq!(frame["modes"]["utf8Mouse"], true);
+        assert_eq!(frame["modes"]["sgrMouse"], false);
+    }
+
+    #[test]
+    fn terminal_session_runs_shell_command_through_websocket() {
+        let repo = create_basic_repo();
+        let state = TerminalState::default();
+        let session = spawn_terminal_session(&state, &repo, None, Some(80), Some(12))
+            .expect("spawn terminal session");
+        let mut websocket = connect_terminal_websocket(&session);
+
+        websocket
+            .send(Message::Text(
+                "printf '\\nVIEW_TERMINAL_E2E_OK\\n'\r".to_string(),
+            ))
+            .expect("send terminal input");
+        let frame_text = read_terminal_until_text(&mut websocket, "VIEW_TERMINAL_E2E_OK");
+
+        assert!(frame_text.contains("VIEW_TERMINAL_E2E_OK"));
+        let _ = websocket.close(None);
+        let _ = kill_terminal_session(&state, &session.id);
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn terminal_session_accepts_bursty_websocket_input_chunks() {
+        let repo = create_basic_repo();
+        let state = TerminalState::default();
+        let session = spawn_terminal_session(&state, &repo, None, Some(80), Some(12))
+            .expect("spawn terminal session");
+        let mut websocket = connect_terminal_websocket(&session);
+
+        for chunk in [
+            "printf '\\n'; ",
+            "read -r VIEW_TERMINAL_VALUE; ",
+            "printf 'VIEW_TERMINAL_BURST_%s\\n' \"$VIEW_TERMINAL_VALUE\"",
+            "\r",
+            "OK",
+            "\r",
+        ] {
+            websocket
+                .send(Message::Text(chunk.to_string()))
+                .expect("send terminal input chunk");
+        }
+
+        let frame_text = read_terminal_until_text(&mut websocket, "VIEW_TERMINAL_BURST_OK");
+        assert!(frame_text.contains("VIEW_TERMINAL_BURST_OK"));
+        let _ = websocket.close(None);
+        let _ = kill_terminal_session(&state, &session.id);
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn terminal_sessions_keep_websocket_output_isolated() {
+        let repo = create_basic_repo();
+        let state = TerminalState::default();
+        let session_a = spawn_terminal_session(&state, &repo, None, Some(80), Some(12))
+            .expect("spawn terminal session a");
+        let session_b = spawn_terminal_session(&state, &repo, None, Some(80), Some(12))
+            .expect("spawn terminal session b");
+        assert_ne!(session_a.id, session_b.id);
+        assert_ne!(session_a.ws_url, session_b.ws_url);
+
+        let mut websocket_a = connect_terminal_websocket(&session_a);
+        let mut websocket_b = connect_terminal_websocket(&session_b);
+
+        websocket_a
+            .send(Message::Text(
+                "printf '\\nVIEW_TERMINAL_SESSION_A\\n'\r".to_string(),
+            ))
+            .expect("send terminal a input");
+        let frame_a = read_terminal_until_text(&mut websocket_a, "VIEW_TERMINAL_SESSION_A");
+        assert!(frame_a.contains("VIEW_TERMINAL_SESSION_A"));
+        assert!(!frame_a.contains("VIEW_TERMINAL_SESSION_B"));
+
+        websocket_b
+            .send(Message::Text(
+                "printf '\\nVIEW_TERMINAL_SESSION_B\\n'\r".to_string(),
+            ))
+            .expect("send terminal b input");
+        let frame_b = read_terminal_until_text(&mut websocket_b, "VIEW_TERMINAL_SESSION_B");
+        assert!(frame_b.contains("VIEW_TERMINAL_SESSION_B"));
+        assert!(!frame_b.contains("VIEW_TERMINAL_SESSION_A"));
+
+        assert_eq!(
+            state.sessions.lock().expect("terminal sessions").len(),
+            2,
+            "both terminal sessions should stay registered until killed"
+        );
+
+        let _ = websocket_a.close(None);
+        let _ = websocket_b.close(None);
+        let _ = kill_terminal_session(&state, &session_a.id);
+        let _ = kill_terminal_session(&state, &session_b.id);
+        assert_eq!(
+            state.sessions.lock().expect("terminal sessions").len(),
+            0,
+            "killing both terminal sessions should clear the registry"
+        );
+        fs::remove_dir_all(repo).ok();
+    }
+
+    fn connect_terminal_websocket(
+        session: &TerminalSessionInfo,
+    ) -> WebSocket<tungstenite::stream::MaybeTlsStream<TcpStream>> {
+        let (mut websocket, _) =
+            tungstenite::connect(session.ws_url.as_str()).expect("connect terminal websocket");
+        if let tungstenite::stream::MaybeTlsStream::Plain(stream) = websocket.get_mut() {
+            stream
+                .set_read_timeout(Some(Duration::from_millis(200)))
+                .expect("set read timeout");
+        }
+        websocket
+    }
+
+    fn read_terminal_until_text(
+        websocket: &mut WebSocket<tungstenite::stream::MaybeTlsStream<TcpStream>>,
+        expected_text: &str,
+    ) -> String {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut last_frame_text = String::new();
+        while Instant::now() < deadline {
+            match websocket.read() {
+                Ok(Message::Text(text)) => {
+                    let Ok(frame) = serde_json::from_str::<serde_json::Value>(&text) else {
+                        continue;
+                    };
+                    if frame["type"] != "frame" {
+                        continue;
+                    }
+                    last_frame_text = terminal_frame_text(&frame);
+                    if last_frame_text.contains(expected_text) {
+                        return last_frame_text;
+                    }
+                }
+                Ok(Message::Binary(_)) | Ok(Message::Ping(_)) | Ok(Message::Pong(_)) => {}
+                Ok(Message::Close(_)) => break,
+                Ok(Message::Frame(_)) => {}
+                Err(WsError::Io(error))
+                    if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
+                Err(error) => panic!("terminal websocket read failed: {error}"),
+            }
+        }
+
+        panic!(
+            "terminal output {expected_text:?} was not rendered; last frame: {last_frame_text:?}"
+        );
+    }
+
+    fn terminal_frame_text(frame: &serde_json::Value) -> String {
+        frame["lines"]
+            .as_array()
+            .expect("frame lines")
+            .iter()
+            .flat_map(|line| {
+                line["cells"]
+                    .as_array()
+                    .expect("line cells")
+                    .iter()
+                    .filter_map(|cell| cell["text"].as_str())
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 
     #[test]
     fn merge_commit_diff_uses_first_parent_unified_diff() {
@@ -1081,6 +2128,51 @@ mod tests {
         assert!(
             read_file_content(&repo, "../note.txt").is_err(),
             "file content should not read outside the repository"
+        );
+
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn write_file_content_saves_when_base_matches_disk() {
+        let repo = create_basic_repo();
+        fs::write(repo.join("note.txt"), "hello\n").expect("write text");
+
+        let response = write_file_content(&repo, "note.txt", "hello\n", "hello view\n")
+            .expect("write file content");
+
+        assert_eq!(response.status, "saved");
+        assert!(response.conflict.is_none());
+        assert_eq!(
+            response.file.as_ref().map(|file| file.content.as_str()),
+            Some("hello view\n")
+        );
+        assert_eq!(
+            fs::read_to_string(repo.join("note.txt")).expect("read saved file"),
+            "hello view\n"
+        );
+
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn write_file_content_reports_conflict_when_disk_changed() {
+        let repo = create_basic_repo();
+        fs::write(repo.join("note.txt"), "disk\n").expect("write text");
+
+        let response =
+            write_file_content(&repo, "note.txt", "base\n", "mine\n").expect("write file content");
+
+        assert_eq!(response.status, "conflict");
+        assert!(response.file.is_none());
+        let conflict = response.conflict.expect("conflict payload");
+        assert_eq!(conflict.path, "note.txt");
+        assert_eq!(conflict.base_content, "base\n");
+        assert_eq!(conflict.current_content, "disk\n");
+        assert_eq!(conflict.proposed_content, "mine\n");
+        assert_eq!(
+            fs::read_to_string(repo.join("note.txt")).expect("read conflicted file"),
+            "disk\n"
         );
 
         fs::remove_dir_all(repo).ok();
@@ -1285,6 +2377,7 @@ mod tests {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(TerminalState::default())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             default_start_path,
@@ -1294,8 +2387,12 @@ pub fn run() {
             get_commits,
             get_project_files,
             get_file_content,
+            save_file_content,
             search_files,
-            fetch_remotes
+            fetch_remotes,
+            terminal_spawn,
+            terminal_resize,
+            terminal_kill
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

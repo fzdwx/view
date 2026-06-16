@@ -1,18 +1,23 @@
 import {
   type CSSProperties,
+  type DragEvent,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import type { FileContents } from "@pierre/diffs";
+import { UnresolvedFile } from "@pierre/diffs/react";
 import {
+  AlertTriangle,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -22,21 +27,22 @@ import {
   GitCommitHorizontal,
   GitPullRequestArrow,
   Loader2,
-  Minus,
   Plus,
-  RefreshCw,
   Search,
-  Square,
+  Save,
   Tag,
+  TerminalSquare,
   X,
 } from "lucide-react";
 import { DiffPanel } from "./components/DiffPanel";
+import { TerminalPanel } from "./components/TerminalPanel";
 import { TreePanel } from "./components/TreePanel";
 import {
   type BranchInfo,
   type CommitInfo,
   type FileContent,
   type RepositoryPayload,
+  type SaveConflict,
   type TagInfo,
   type FileSearchResult,
   fetchRemotes,
@@ -46,6 +52,7 @@ import {
   getProjectFiles,
   isTauriRuntime,
   loadRepository,
+  saveFileContent,
   searchFiles,
 } from "./lib/api";
 import {
@@ -62,6 +69,75 @@ import {
 } from "./lib/projects";
 
 type PreviewMode = "file" | "diff";
+type ToolDock = "left" | "bottom" | "right";
+type TreeDock = "left" | "right";
+type ProjectDock = TreeDock | "panel";
+type EditorDock = "left" | "right";
+type GitPanelId = "branches" | "history" | "details";
+type ToolPanelId = "project" | "git" | "terminal" | GitPanelId;
+
+const defaultGitPanelOrder: GitPanelId[] = ["branches", "history", "details"];
+const layoutStorageKey = "view.workbench-layout.v1";
+
+interface PanelSizes {
+  rail: number;
+  tree: number;
+  log: number;
+  branch: number;
+  details: number;
+  commitInfo: number;
+  sideDock: number;
+}
+
+interface WorkbenchLayout {
+  activityView: ToolPanelId;
+  toolDock: ToolDock;
+  treeDock: TreeDock;
+  projectInToolDock: boolean;
+  gitPanelOrder: GitPanelId[];
+  detachedGitPanels: GitPanelId[];
+  panelSizes: PanelSizes;
+}
+
+const defaultPanelSizes: PanelSizes = {
+  rail: 292,
+  tree: 300,
+  log: 280,
+  branch: 260,
+  details: 280,
+  commitInfo: 154,
+  sideDock: 420,
+};
+
+const defaultWorkbenchLayout: WorkbenchLayout = {
+  activityView: "git",
+  toolDock: "bottom",
+  treeDock: "left",
+  projectInToolDock: false,
+  gitPanelOrder: defaultGitPanelOrder,
+  detachedGitPanels: [],
+  panelSizes: defaultPanelSizes,
+};
+
+const toolPanels: Array<{
+  id: ToolPanelId;
+  label: string;
+  icon: typeof GitBranch;
+}> = [
+  { id: "project", label: "Project", icon: Folder },
+  { id: "git", label: "Git", icon: GitBranch },
+  { id: "terminal", label: "Terminal", icon: TerminalSquare },
+];
+
+const gitToolPanels: Array<{
+  id: GitPanelId;
+  label: string;
+  icon: typeof GitBranch;
+}> = [
+  { id: "branches", label: "Branches", icon: GitBranch },
+  { id: "history", label: "History", icon: GitCommitHorizontal },
+  { id: "details", label: "Details", icon: GitPullRequestArrow },
+];
 
 interface PreviewTab {
   id: string;
@@ -75,7 +151,15 @@ interface PreviewTarget {
   requestId: number;
 }
 
+interface EditorDraft {
+  baseContent: string;
+  content: string;
+  conflict: SaveConflict | null;
+}
+
 export function App() {
+  const queryClient = useQueryClient();
+  const [initialLayout] = useState(loadWorkbenchLayout);
   const [projects, setProjects] = useState<SavedProject[]>(() =>
     loadSavedProjects(),
   );
@@ -90,24 +174,72 @@ export function App() {
   const [previewTabs, setPreviewTabs] = useState<PreviewTab[]>([]);
   const [activePreviewTabId, setActivePreviewTabId] = useState<string | null>(null);
   const [previewTarget, setPreviewTarget] = useState<PreviewTarget | null>(null);
+  const [editorDrafts, setEditorDrafts] = useState<Record<string, EditorDraft>>({});
+  const [savePendingKey, setSavePendingKey] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [activityView, setActivityView] = useState<ToolPanelId>(
+    initialLayout.activityView,
+  );
+  const [toolPanelCollapsed, setToolPanelCollapsed] = useState(false);
+  const [toolDock, setToolDock] = useState<ToolDock>(initialLayout.toolDock);
+  const [draggedToolPanel, setDraggedToolPanel] = useState<ToolPanelId | null>(null);
+  const [treeDock, setTreeDock] = useState<TreeDock>(initialLayout.treeDock);
+  const [projectInToolDock, setProjectInToolDock] = useState(
+    initialLayout.projectInToolDock,
+  );
+  const [draggingTreePanel, setDraggingTreePanel] = useState(false);
+  const [draggingEditorPanel, setDraggingEditorPanel] = useState(false);
+  const [gitPanelOrder, setGitPanelOrder] = useState<GitPanelId[]>(
+    initialLayout.gitPanelOrder,
+  );
+  const [detachedGitPanels, setDetachedGitPanels] = useState<GitPanelId[]>(
+    initialLayout.detachedGitPanels,
+  );
+  const [draggedGitPanel, setDraggedGitPanel] = useState<GitPanelId | null>(null);
   const [commitFilter, setCommitFilter] = useState("");
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
   const [debouncedCommandQuery, setDebouncedCommandQuery] = useState("");
   const [commandSelectionIndex, setCommandSelectionIndex] = useState(0);
-  const [panelSizes, setPanelSizes] = useState({
-    rail: 292,
-    tree: 300,
-    log: 280,
-    branch: 260,
-    details: 280,
-  });
+  const [projectSwitcherOpen, setProjectSwitcherOpen] = useState(false);
+  const [panelSizes, setPanelSizes] = useState<PanelSizes>(
+    initialLayout.panelSizes,
+  );
   const remoteFetchInFlightRef = useRef(false);
   const previewRequestIdRef = useRef(0);
 
   useEffect(() => {
     saveProjects(projects);
   }, [projects]);
+
+  useEffect(() => {
+    saveWorkbenchLayout({
+      activityView,
+      toolDock,
+      treeDock,
+      projectInToolDock,
+      gitPanelOrder,
+      detachedGitPanels,
+      panelSizes,
+    });
+  }, [
+    activityView,
+    detachedGitPanels,
+    gitPanelOrder,
+    panelSizes,
+    projectInToolDock,
+    toolDock,
+    treeDock,
+  ]);
+
+  useEffect(() => {
+    window.addEventListener("dragend", clearDockDrag);
+    window.addEventListener("drop", clearDockDrag);
+    return () => {
+      window.removeEventListener("dragend", clearDockDrag);
+      window.removeEventListener("drop", clearDockDrag);
+    };
+  }, []);
 
   const activeProject = projects.find(
     (project) => project.id === activeProjectId,
@@ -200,18 +332,28 @@ export function App() {
       return;
     }
 
-    setProjects((current) =>
-      current.map((project) =>
-        project.id === activeProject.id
-          ? {
-              ...project,
-              rootPath: projectRootFromPayload(payload),
-              name: projectNameFromPath(projectRootFromPayload(payload)),
-            }
-          : project,
-      ),
-    );
-  }, [activeProject, repositoryQuery.data]);
+    const rootPath = projectRootFromPayload(payload);
+    const name = projectNameFromPath(rootPath);
+    setProjects((current) => {
+      let changed = false;
+      const nextProjects = current.map((project) => {
+        if (project.id !== activeProject.id) {
+          return project;
+        }
+        if (project.rootPath === rootPath && project.name === name) {
+          return project;
+        }
+        changed = true;
+        return {
+          ...project,
+          rootPath,
+          name,
+        };
+      });
+
+      return changed ? nextProjects : current;
+    });
+  }, [activeProject?.id, repositoryQuery.data]);
 
   const payload = repositoryQuery.data;
   const currentFileDiff =
@@ -225,6 +367,11 @@ export function App() {
     fileContentQuery.data?.filePath === selectedProjectPath
       ? fileContentQuery.data.file
       : null;
+  const editorKey =
+    activeProject && selectedProjectPath
+      ? editorDraftKey(activeProject.activePath, selectedProjectPath)
+      : null;
+  const activeEditorDraft = editorKey ? editorDrafts[editorKey] ?? null : null;
   const parsedDiff = useMemo(
     () => parseRepositoryDiff(currentFileDiff?.diff ?? ""),
     [currentFileDiff?.diff],
@@ -251,16 +398,79 @@ export function App() {
     debouncedCommandQuery.trim().length > 0
       ? (fileSearchQuery.data ?? [])
       : [];
+  const activeProjectDirtyDraftCount = activeProject
+    ? countDirtyDraftsForProject(editorDrafts, activeProject.activePath)
+    : 0;
+  const dirtyDraftCount = countDirtyDrafts(editorDrafts);
+  const dirtyPreviewTabIds = useMemo(() => {
+    if (!activeProject) {
+      return new Set<string>();
+    }
+
+    return new Set(
+      previewTabs
+        .filter(
+          (tab) =>
+            tab.mode === "file" &&
+            isDraftDirty(editorDrafts[editorDraftKey(activeProject.activePath, tab.path)]),
+        )
+        .map((tab) => tab.id),
+    );
+  }, [activeProject, editorDrafts, previewTabs]);
   const appShellStyle = {
-    gridTemplateColumns: `${panelSizes.rail}px 6px minmax(0, 1fr)`,
+    gridTemplateColumns: "56px minmax(0, 1fr)",
   };
-  const contentGridStyle = {
-    gridTemplateColumns: `${panelSizes.tree}px 6px minmax(0, 1fr)`,
-    gridTemplateRows: `minmax(0, 1fr) 6px ${panelSizes.log}px`,
-  };
-  const gitLogStyle = {
-    gridTemplateColumns: `${panelSizes.branch}px 6px minmax(0, 1fr) 6px ${panelSizes.details}px`,
-  };
+  const contentGridStyle: CSSProperties = buildContentGridStyle(
+    treeDock,
+    toolDock,
+    !projectInToolDock,
+    panelSizes.tree,
+    toolPanelCollapsed ? 36 : panelSizes.log,
+    panelSizes.sideDock,
+  );
+  const editorDock: EditorDock = treeDock === "left" ? "right" : "left";
+  const dockedGitPanelOrder = gitPanelOrder.filter(
+    (panel) => !detachedGitPanels.includes(panel),
+  );
+  const gitLogStyle: CSSProperties = buildGitPanelGridStyle(
+    toolDock,
+    dockedGitPanelOrder,
+    panelSizes.branch,
+    panelSizes.details,
+  );
+
+  useEffect(() => {
+    if (!editorKey || !currentFileContent) {
+      return;
+    }
+
+    setEditorDrafts((current) => {
+      const existing = current[editorKey];
+      if (existing?.conflict || existing?.content !== existing?.baseContent) {
+        return current;
+      }
+      if (
+        existing &&
+        existing.baseContent === currentFileContent.content &&
+        existing.content === currentFileContent.content
+      ) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [editorKey]: {
+          baseContent: currentFileContent.content,
+          content: currentFileContent.content,
+          conflict: null,
+        },
+      };
+    });
+  }, [currentFileContent, editorKey]);
+
+  useEffect(() => {
+    setSaveError(null);
+  }, [editorKey]);
 
   useEffect(() => {
     if (projectFilesQuery.isPlaceholderData) {
@@ -314,6 +524,19 @@ export function App() {
         return;
       }
 
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+        if (
+          !editableTarget ||
+          event.target instanceof HTMLTextAreaElement
+        ) {
+          event.preventDefault();
+          if (previewMode === "file" && activeEditorDraft) {
+            void saveActiveFile();
+          }
+        }
+        return;
+      }
+
       if (event.key === "Escape" && commandOpen && !editableTarget) {
         event.preventDefault();
         closeCommandPanel();
@@ -322,7 +545,45 @@ export function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeProject, commandOpen]);
+  }, [activeEditorDraft, activeProject, commandOpen, previewMode]);
+
+  useEffect(() => {
+    if (dirtyDraftCount === 0) {
+      return;
+    }
+
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [dirtyDraftCount]);
+
+  useEffect(() => {
+    if (!isTauriRuntime() || dirtyDraftCount === 0) {
+      return;
+    }
+
+    let unlisten: (() => void) | null = null;
+    void getCurrentWindow()
+      .onCloseRequested((event) => {
+        if (
+          countDirtyDrafts(editorDrafts) > 0 &&
+          !window.confirm("You have unsaved file changes. Close View and discard them?")
+        ) {
+          event.preventDefault();
+        }
+      })
+      .then((nextUnlisten) => {
+        unlisten = nextUnlisten;
+      });
+
+    return () => {
+      unlisten?.();
+    };
+  }, [dirtyDraftCount, editorDrafts]);
 
   useEffect(() => {
     if (repositoryQuery.isPlaceholderData) {
@@ -341,16 +602,9 @@ export function App() {
 
     const stillExists = files.some((file) => file.path === selectedChangePath);
     if (!stillExists) {
-      setSelectedChangePath(files[0]?.path ?? null);
+      setSelectedChangePath(null);
     }
   }, [payload?.files, repositoryQuery.isPlaceholderData, selectedChangePath]);
-
-  useEffect(() => {
-    if (previewMode !== "diff" || selectedChangePath || !payload?.files.length) {
-      return;
-    }
-    setSelectedChangePath(payload.files[0].path);
-  }, [payload?.files, previewMode, selectedChangePath]);
 
   useEffect(() => {
     if (!activeProject || !isTauriRuntime()) {
@@ -401,6 +655,17 @@ export function App() {
       return;
     }
 
+    if (
+      activeProject &&
+      activeProject.activePath !== selected &&
+      !confirmDiscardProjectDrafts(activeProject.activePath, "open another repository")
+    ) {
+      return;
+    }
+    if (activeProject && activeProject.activePath !== selected) {
+      discardDraftsForProject(activeProject.activePath);
+    }
+
     setActiveCommit(null);
     setActiveBranchRef(null);
     setSelectedProjectPath(null);
@@ -415,11 +680,23 @@ export function App() {
         nextProjects.at(-1)?.id ??
         null,
     );
+    setProjectSwitcherOpen(false);
   }
 
   function removeProject(projectId: string) {
+    const project = projects.find((current) => current.id === projectId);
+    if (
+      project &&
+      !confirmDiscardProjectDrafts(project.activePath, `remove ${project.name}`)
+    ) {
+      return;
+    }
+
     const remaining = projects.filter((project) => project.id !== projectId);
     setProjects(remaining);
+    if (project) {
+      discardDraftsForProject(project.activePath);
+    }
     if (activeProjectId === projectId) {
       setActiveProjectId(remaining[0]?.id ?? null);
       setActiveCommit(null);
@@ -429,6 +706,28 @@ export function App() {
       setPreviewMode("file");
       clearPreviewTabs();
     }
+  }
+
+  function selectProject(project: SavedProject) {
+    if (
+      activeProject &&
+      activeProject.id !== project.id &&
+      !confirmDiscardProjectDrafts(activeProject.activePath, `switch to ${project.name}`)
+    ) {
+      return;
+    }
+    if (activeProject && activeProject.id !== project.id) {
+      discardDraftsForProject(activeProject.activePath);
+    }
+
+    setActiveProjectId(project.id);
+    setProjectSwitcherOpen(false);
+    setActiveCommit(null);
+    setActiveBranchRef(null);
+    setSelectedProjectPath(null);
+    setSelectedChangePath(null);
+    setPreviewMode("file");
+    clearPreviewTabs();
   }
 
   function clearPreviewTabs() {
@@ -460,7 +759,7 @@ export function App() {
       if (tabs.some((tab) => tab.id === id)) {
         return tabs;
       }
-      return [...tabs, nextTab].slice(-10);
+      return [...tabs, nextTab];
     });
     activatePreviewTab(nextTab);
     setPreviewTarget(
@@ -487,6 +786,20 @@ export function App() {
   }
 
   function closePreviewTab(tabId: string) {
+    const tab = previewTabs.find((current) => current.id === tabId);
+    if (tab?.mode === "file" && activeProject) {
+      const key = editorDraftKey(activeProject.activePath, tab.path);
+      if (isDraftDirty(editorDrafts[key])) {
+        const confirmed = window.confirm(
+          `Close ${tab.path} and discard unsaved changes?`,
+        );
+        if (!confirmed) {
+          return;
+        }
+        setEditorDrafts((current) => omitDraft(current, key));
+      }
+    }
+
     const closedIndex = previewTabs.findIndex((tab) => tab.id === tabId);
     const nextTabs = previewTabs.filter((tab) => tab.id !== tabId);
     setPreviewTabs(nextTabs);
@@ -505,6 +818,7 @@ export function App() {
     setActivePreviewTabId(null);
     setSelectedProjectPath(null);
     setSelectedChangePath(null);
+    setPreviewMode("file");
     setPreviewTarget(null);
   }
 
@@ -525,6 +839,451 @@ export function App() {
     closeCommandPanel();
   }
 
+  function dockToolPanel(panel: ToolPanelId, dock: ToolDock) {
+    if (panel === "project") {
+      setProjectInToolDock(true);
+    } else if (isGitPanelId(panel)) {
+      setDetachedGitPanels((current) =>
+        current.includes(panel) ? current : [...current, panel],
+      );
+    }
+    setActivityView(panel);
+    setToolPanelCollapsed(false);
+    setToolDock(dock);
+    clearDockDrag();
+  }
+
+  function startToolPanelDrag(panel: ToolPanelId) {
+    setDraggedToolPanel(panel);
+    if (isGitPanelId(panel)) {
+      setDraggedGitPanel(panel);
+    }
+  }
+
+  function endToolPanelDrag() {
+    clearDockDrag();
+  }
+
+  function dockProjectPanel(nextDock: ProjectDock) {
+    if (nextDock === "panel") {
+      setProjectInToolDock(true);
+      setActivityView("project");
+      setToolPanelCollapsed(false);
+      setToolDock("bottom");
+      clearDockDrag();
+      return;
+    }
+
+    setProjectInToolDock(false);
+    setTreeDock(nextDock);
+    if (activityView === "project") {
+      setActivityView("git");
+      setToolPanelCollapsed(false);
+    }
+    clearDockDrag();
+  }
+
+  function selectToolPanelView(view: ToolPanelId) {
+    if (toolDock === "bottom" && activityView === view) {
+      setToolPanelCollapsed((collapsed) => !collapsed);
+      return;
+    }
+
+    setActivityView(view);
+    setToolPanelCollapsed(false);
+  }
+
+  function dockEditorPanel(nextDock: EditorDock) {
+    setTreeDock(nextDock === "left" ? "right" : "left");
+    clearDockDrag();
+  }
+
+  function clearDockDrag() {
+    setDraggedToolPanel(null);
+    setDraggedGitPanel(null);
+    setDraggingTreePanel(false);
+    setDraggingEditorPanel(false);
+  }
+
+  function moveGitPanel(panel: GitPanelId, targetPanel: GitPanelId) {
+    setDetachedGitPanels((current) => current.filter((item) => item !== panel));
+    setGitPanelOrder((current) => {
+      if (panel === targetPanel) {
+        return current;
+      }
+
+      const nextOrder = current.filter((item) => item !== panel);
+      const targetIndex = nextOrder.indexOf(targetPanel);
+      if (targetIndex === -1) {
+        return current;
+      }
+
+      nextOrder.splice(targetIndex, 0, panel);
+      return nextOrder;
+    });
+    if (activityView === panel) {
+      setActivityView("git");
+      setToolPanelCollapsed(false);
+    }
+    clearDockDrag();
+  }
+
+  function reattachGitPanel(panel: GitPanelId) {
+    setDetachedGitPanels((current) => current.filter((item) => item !== panel));
+    if (activityView === panel) {
+      setActivityView("git");
+      setToolPanelCollapsed(false);
+    }
+    clearDockDrag();
+  }
+
+  function updateEditorDraft(content: string) {
+    if (!editorKey || !currentFileContent) {
+      return;
+    }
+
+    setEditorDrafts((current) => {
+      const existing = current[editorKey] ?? {
+        baseContent: currentFileContent.content,
+        content: currentFileContent.content,
+        conflict: null,
+      };
+
+      return {
+        ...current,
+        [editorKey]: {
+          ...existing,
+          content,
+        },
+      };
+    });
+    setSaveError(null);
+  }
+
+  function setConflictDraftContent(content: string) {
+    if (!editorKey) {
+      return;
+    }
+
+    setEditorDrafts((current) => {
+      const existing = current[editorKey];
+      if (!existing) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [editorKey]: {
+          ...existing,
+          content,
+        },
+      };
+    });
+    setSaveError(null);
+  }
+
+  async function saveActiveFile() {
+    if (!activeProject || !selectedProjectPath || !editorKey) {
+      return;
+    }
+
+    const draft = editorDrafts[editorKey];
+    if (!draft) {
+      return;
+    }
+
+    setSavePendingKey(editorKey);
+    setSaveError(null);
+    try {
+      const baseContent = draft.conflict
+        ? draft.conflict.currentContent
+        : draft.baseContent;
+      const response = await saveFileContent(
+        activeProject.activePath,
+        selectedProjectPath,
+        baseContent,
+        draft.content,
+      );
+
+      if (response.status === "conflict" && response.conflict) {
+        setEditorDrafts((current) => ({
+          ...current,
+          [editorKey]: {
+            baseContent: response.conflict!.baseContent,
+            content: response.conflict!.proposedContent,
+            conflict: response.conflict!,
+          },
+        }));
+        return;
+      }
+
+      if (response.file) {
+        setEditorDrafts((current) => ({
+          ...current,
+          [editorKey]: {
+            baseContent: response.file!.content,
+            content: response.file!.content,
+            conflict: null,
+          },
+        }));
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: ["file-content", activeProject.activePath, selectedProjectPath],
+          }),
+          queryClient.invalidateQueries({
+            queryKey: ["project-files", activeProject.activePath],
+          }),
+          queryClient.invalidateQueries({
+            queryKey: ["repository", activeProject.activePath],
+          }),
+        ]);
+      }
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSavePendingKey(null);
+    }
+  }
+
+  function discardConflictToDisk() {
+    if (!editorKey) {
+      return;
+    }
+
+    setEditorDrafts((current) => {
+      const existing = current[editorKey];
+      if (!existing?.conflict) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [editorKey]: {
+          baseContent: existing.conflict.currentContent,
+          content: existing.conflict.currentContent,
+          conflict: null,
+        },
+      };
+    });
+    setSaveError(null);
+  }
+
+  function confirmDiscardProjectDrafts(projectPath: string, action: string): boolean {
+    const dirtyCount = countDirtyDraftsForProject(editorDrafts, projectPath);
+    if (dirtyCount === 0) {
+      return true;
+    }
+
+    return window.confirm(
+      `${dirtyCount} file${dirtyCount > 1 ? "s have" : " has"} unsaved changes. Continue to ${action} and discard them?`,
+    );
+  }
+
+  function discardDraftsForProject(projectPath: string) {
+    setEditorDrafts((current) => omitDraftsForProject(current, projectPath));
+  }
+
+  const gitPanelBodies: Record<GitPanelId, ReactNode> = {
+    branches: (
+      <section className="branch-panel">
+        {payload ? (
+          <BranchTree
+            branches={payload.summary.branches}
+            tags={payload.summary.tags}
+            activeRef={selectedBranchRef}
+            onSelect={(refName) => {
+              setActiveBranchRef(refName);
+              setActiveCommit(null);
+              setSelectedChangePath(null);
+              setPreviewMode("diff");
+              setActivePreviewTabId(null);
+            }}
+          />
+        ) : (
+          <LoadingRows />
+        )}
+      </section>
+    ),
+    history: (
+      <section className="history-panel">
+        <VirtualCommitList
+          commits={filteredCommits}
+          activeCommit={activeCommit}
+          filter={commitFilter}
+          loading={commitsQuery.isLoading}
+          onChangeFilter={setCommitFilter}
+          onSelectCommit={(hash) => {
+            setActiveCommit(hash);
+            setSelectedChangePath(null);
+            setPreviewMode("diff");
+            setActivePreviewTabId(null);
+          }}
+          onSelectWorkingTree={() => {
+            setActiveCommit(null);
+            setSelectedChangePath(null);
+            setPreviewMode("diff");
+            setActivePreviewTabId(null);
+          }}
+        />
+      </section>
+    ),
+    details: (
+      <CommitInspector
+        branchName={
+          payload?.summary.branches.find(
+            (branch) => branch.refName === selectedBranchRef,
+          )?.name ??
+          payload?.summary.tags.find((tag) => tag.refName === selectedBranchRef)
+            ?.name ??
+          payload?.summary.branch
+        }
+        commit={selectedCommit}
+        files={payload?.files ?? []}
+        detailHeight={panelSizes.commitInfo}
+        selectedPath={selectedChangePath}
+        onResizeDetails={(delta) => resizePanel("commitInfo", -delta, 110, 360)}
+        onSelectPath={(path) => {
+          openPreviewTab("diff", path);
+        }}
+      />
+    ),
+  };
+
+  const projectTreeContent = (
+    <section className="tree-panel">
+      {projectFilesQuery.data ? (
+        <TreePanel
+          files={projectFilesQuery.data}
+          selectedPath={selectedProjectPath}
+          title={
+            activeProject ? (
+              <ProjectTreeTitle path={activeProject.activePath} />
+            ) : (
+              "Project"
+            )
+          }
+          emptyTitle="No project files"
+          emptyCopy="Tracked and untracked files will appear here."
+          onDragEnd={clearDockDrag}
+          onDragStart={() => setDraggingTreePanel(true)}
+          onSelectPath={(path) => {
+            openPreviewTab("file", path);
+          }}
+        />
+      ) : (
+        <LoadingRows />
+      )}
+    </section>
+  );
+
+  const gitPanelContent = (
+    <section className="git-log-panel" style={gitLogStyle}>
+      {dockedGitPanelOrder.length === 0 ? (
+        <div
+          className={
+            draggedGitPanel ? "git-panel-empty can-drop" : "git-panel-empty"
+          }
+          onDragOver={(event) => {
+            if (!draggedGitPanel) {
+              return;
+            }
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            const panel =
+              (event.dataTransfer.getData(
+                "application/x-view-git-panel",
+              ) as GitPanelId) || draggedGitPanel;
+            if (isGitPanelId(panel)) {
+              reattachGitPanel(panel);
+            }
+          }}
+        >
+          All Git panels are docked as tabs.
+        </div>
+      ) : null}
+      {dockedGitPanelOrder.map((panelId, index) => (
+        <FragmentWithSplitter
+          key={panelId}
+          index={index}
+          panelCount={dockedGitPanelOrder.length}
+          dock={toolDock}
+          onResizeFirst={(delta) =>
+            resizePanel("branch", delta, toolDock === "bottom" ? 180 : 120, 460)
+          }
+          onResizeSecond={(delta) =>
+            resizePanel("details", -delta, toolDock === "bottom" ? 200 : 120, 460)
+          }
+        >
+          <GitPanelSlot
+            panelId={panelId}
+            draggingPanel={draggedGitPanel}
+            onDropPanel={moveGitPanel}
+            onDragEnd={clearDockDrag}
+            onDragStart={setDraggedGitPanel}
+          >
+            {gitPanelBodies[panelId]}
+          </GitPanelSlot>
+        </FragmentWithSplitter>
+      ))}
+    </section>
+  );
+
+  const nonTerminalToolPanelContent =
+    activityView === "project"
+      ? projectTreeContent
+      : isGitPanelId(activityView)
+        ? (
+            <ToolContentFrame
+              label={gitPanelLabel(activityView)}
+              panelId={activityView}
+              onDragEnd={clearDockDrag}
+              onDragStart={startToolPanelDrag}
+            >
+              <section className="detached-git-panel">
+                {gitPanelBodies[activityView]}
+              </section>
+            </ToolContentFrame>
+          )
+      : activityView === "git"
+        ? gitPanelContent
+        : null;
+  const toolPanelContent = (
+    <div className="tool-panel-stack">
+      <div
+        className={
+          activityView === "terminal"
+            ? "tool-panel-layer tool-panel-layer-hidden"
+            : "tool-panel-layer"
+        }
+        aria-hidden={activityView === "terminal"}
+      >
+        {nonTerminalToolPanelContent}
+      </div>
+      <section
+        className={
+          activityView === "terminal"
+            ? "bottom-terminal-panel tool-panel-layer"
+            : "bottom-terminal-panel tool-panel-layer tool-panel-layer-hidden"
+        }
+        aria-hidden={activityView !== "terminal"}
+      >
+        <TerminalPanel
+          active={activityView === "terminal"}
+          projectPath={activeProject?.activePath ?? null}
+        />
+      </section>
+    </div>
+  );
+  const visibleToolPanels = [
+    ...(projectInToolDock
+      ? toolPanels
+      : toolPanels.filter((panel) => panel.id !== "project")),
+    ...gitToolPanels.filter((panel) => detachedGitPanels.includes(panel.id)),
+  ];
+
   return (
     <main className="app-shell" style={appShellStyle}>
       <aside className="project-rail" aria-label="Projects">
@@ -532,68 +1291,39 @@ export function App() {
           <div className="brand-mark">
             <GitPullRequestArrow size={18} />
           </div>
-          <div>
-            <div className="brand-title">View</div>
-            <div className="brand-subtitle">Git diff workbench</div>
-          </div>
         </div>
 
-        <button className="primary-action rail-action" onClick={chooseRepository}>
-          <Plus size={16} />
-          Open repository
-        </button>
-
-        <div className="rail-section-title">
-          <span>Projects</span>
-          <span>{projects.length}</span>
-        </div>
-        <div className="project-list">
-          {projects.length === 0 ? (
-            <div className="rail-empty">
-              Add a repository to inspect logs, worktrees, and diffs.
-            </div>
-          ) : null}
-          {projects.map((project) => (
-            <ProjectItem
-              key={project.id}
-              project={project}
-              active={project.id === activeProjectId}
-              onSelect={() => {
-                setActiveProjectId(project.id);
-                setActiveCommit(null);
-                setActiveBranchRef(null);
-                setSelectedProjectPath(null);
-                setSelectedChangePath(null);
-                setPreviewMode("file");
-                clearPreviewTabs();
-              }}
-              onRemove={() => removeProject(project.id)}
+        <div className="project-switcher-anchor">
+          <button
+            className={
+              projectSwitcherOpen
+                ? "activity-button rail-project-button active"
+                : "activity-button rail-project-button"
+            }
+            aria-expanded={projectSwitcherOpen}
+            aria-haspopup="dialog"
+            aria-label="Switch project"
+            title={activeProject ? activeProject.name : "Switch project"}
+            onClick={() => setProjectSwitcherOpen((open) => !open)}
+          >
+            <FolderOpen size={18} />
+          </button>
+          {projectSwitcherOpen ? (
+            <ProjectSwitcherPopover
+              projects={projects}
+              activeProjectId={activeProjectId}
+              onChooseRepository={chooseRepository}
+              onClose={() => setProjectSwitcherOpen(false)}
+              onRemoveProject={removeProject}
+              onSelectProject={selectProject}
             />
-          ))}
+          ) : null}
         </div>
+
+        <div className="rail-spacer" />
       </aside>
-      <ResizeHandle
-        axis="x"
-        className="app-splitter"
-        label="Resize project panel"
-        onResize={(delta) => resizePanel("rail", delta, 220, 460)}
-      />
 
       <section className="workspace">
-        <HeaderBar
-          payload={payload}
-          activeProject={activeProject}
-          loading={repositoryQuery.isFetching || commitsQuery.isFetching}
-          onOpenCommandPanel={openCommandPanel}
-          onRefresh={() => {
-            void Promise.all([
-              repositoryQuery.refetch(),
-              commitsQuery.refetch(),
-              projectFilesQuery.refetch(),
-            ]);
-          }}
-        />
-
         {!activeProject ? (
           <div className="welcome-surface">
             <div className="welcome-icon">
@@ -615,29 +1345,30 @@ export function App() {
             <pre>{String(repositoryQuery.error.message)}</pre>
           </div>
         ) : (
-          <div className="content-grid" style={contentGridStyle}>
-            <section className="tree-panel">
-              {projectFilesQuery.data ? (
-                <TreePanel
-                  files={projectFilesQuery.data}
-                  selectedPath={selectedProjectPath}
-                  title="Project"
-                  emptyTitle="No project files"
-                  emptyCopy="Tracked and untracked files will appear here."
-                  onSelectPath={(path) => {
-                    openPreviewTab("file", path);
-                  }}
+          <div
+            className={`content-grid dock-${toolDock} tree-dock-${treeDock}${
+              draggedToolPanel ||
+              draggedGitPanel ||
+              draggingTreePanel ||
+              draggingEditorPanel
+                ? " is-docking"
+                : ""
+            }`}
+            style={contentGridStyle}
+          >
+            {!projectInToolDock ? (
+              <>
+                {projectTreeContent}
+                <ResizeHandle
+                  axis="x"
+                  className="tree-diff-splitter"
+                  label="Resize file tree panel"
+                  onResize={(delta) =>
+                    resizePanel("tree", treeDock === "left" ? delta : -delta, 220, 560)
+                  }
                 />
-              ) : (
-                <LoadingRows />
-              )}
-            </section>
-            <ResizeHandle
-              axis="x"
-              className="tree-diff-splitter"
-              label="Resize file tree panel"
-              onResize={(delta) => resizePanel("tree", delta, 220, 560)}
-            />
+              </>
+            ) : null}
 
             <section className="diff-panel">
               <PreviewTabBar
@@ -649,15 +1380,19 @@ export function App() {
                   fileContentQuery.isFetching
                 }
                 onCloseTab={closePreviewTab}
+                onDragEnd={clearDockDrag}
+                onDragStart={() => setDraggingEditorPanel(true)}
                 onSelectTab={activatePreviewTab}
                 previewMode={previewMode}
                 selectedPath={
                   previewMode === "diff" ? selectedChangePath : selectedProjectPath
                 }
                 tabs={previewTabs}
+                dirtyTabIds={dirtyPreviewTabIds}
               />
               {previewMode === "file" ? (
                 <FilePreview
+                  draft={activeEditorDraft}
                   error={
                     fileContentQuery.isError
                       ? String(fileContentQuery.error.message)
@@ -669,9 +1404,22 @@ export function App() {
                       fileContentQuery.isFetching &&
                       !currentFileContent,
                   )}
+                  saveError={saveError}
+                  saving={Boolean(editorKey && savePendingKey === editorKey)}
                   selectedPath={selectedProjectPath}
                   target={previewTarget}
+                  onChangeDraft={updateEditorDraft}
+                  onDiscardConflict={discardConflictToDisk}
+                  onSave={() => void saveActiveFile()}
+                  onSetConflictDraftContent={setConflictDraftContent}
                 />
+              ) : payload && !selectedChangePath ? (
+                <div className="empty-state">
+                  <div className="empty-title">Select a changed file</div>
+                  <div className="empty-copy">
+                    Choose a file from Changes to render its diff.
+                  </div>
+                </div>
               ) : payload && fileDiffQuery.isFetching && !currentFileDiff ? (
                 <div className="diff-loading">
                   <Loader2 className="spin" size={18} />
@@ -693,107 +1441,71 @@ export function App() {
                 </div>
               )}
             </section>
-            <ResizeHandle
-              axis="y"
-              className="main-log-splitter"
-              label="Resize Git log panel"
-              onResize={(delta) => resizePanel("log", -delta, 180, 560)}
-            />
-
-            <section className="git-log-panel" style={gitLogStyle}>
-              <section className="branch-panel">
-                {payload ? (
-                  <BranchTree
-                    branches={payload.summary.branches}
-                    tags={payload.summary.tags}
-                    activeRef={selectedBranchRef}
-                    onSelect={(refName) => {
-                      setActiveBranchRef(refName);
-                      setActiveCommit(null);
-                      setSelectedChangePath(null);
-                      setPreviewMode("diff");
-                      setActivePreviewTabId(null);
-                    }}
-                  />
-                ) : (
-                  <LoadingRows />
-                )}
-              </section>
-              <ResizeHandle
-                axis="x"
-                className="branch-history-splitter"
-                label="Resize branch tree panel"
-                onResize={(delta) => resizePanel("branch", delta, 180, 460)}
-              />
-
-              <section className="history-panel">
-                <div className="panel-toolbar">
-                  <div>
-                    <div className="panel-title">History</div>
-                    <div className="panel-kicker">
-                      {activeCommit ? "Commit diff" : "Working tree diff"}
-                    </div>
-                  </div>
-                  <button
-                    className={activeCommit ? "ghost-button" : "ghost-button active"}
-                    onClick={() => {
-                      setActiveCommit(null);
-                      setSelectedChangePath(null);
-                      setPreviewMode("diff");
-                      setActivePreviewTabId(null);
-                    }}
-                  >
-                    <CheckCircle2 size={15} />
-                    Working tree
-                  </button>
-                </div>
-
-                <label className="search-field">
-                  <Search size={15} />
-                  <input
-                    value={commitFilter}
-                    onChange={(event) => setCommitFilter(event.target.value)}
-                    placeholder="Filter commits"
-                  />
-                </label>
-
-                <VirtualCommitList
-                  commits={filteredCommits}
-                  activeCommit={activeCommit}
-                  loading={commitsQuery.isLoading}
-                  onSelectCommit={(hash) => {
-                    setActiveCommit(hash);
-                    setSelectedChangePath(null);
-                    setPreviewMode("diff");
-                    setActivePreviewTabId(null);
-                  }}
+            {toolDock === "bottom" ? (
+              <>
+                <ResizeHandle
+                  axis="y"
+                  className="main-log-splitter"
+                  label="Resize tool panel"
+                  onResize={(delta) => resizePanel("log", -delta, 180, 560)}
                 />
-              </section>
-              <ResizeHandle
-                axis="x"
-                className="history-detail-splitter"
-                label="Resize details panel"
-                onResize={(delta) => resizePanel("details", -delta, 200, 460)}
+                <ToolDockPanel
+                  activeView={activityView}
+                  collapsed={toolPanelCollapsed}
+                  dock="bottom"
+                  panels={visibleToolPanels}
+                  onDragEnd={endToolPanelDrag}
+                  onDragStart={startToolPanelDrag}
+                  onSelectView={selectToolPanelView}
+                >
+                  {toolPanelContent}
+                </ToolDockPanel>
+              </>
+            ) : (
+              <>
+                <ResizeHandle
+                  axis="x"
+                  className="side-dock-splitter"
+                  label="Resize tool panel"
+                  onResize={(delta) =>
+                    resizePanel(
+                      "sideDock",
+                      toolDock === "left" ? delta : -delta,
+                      320,
+                      620,
+                    )
+                  }
+                />
+                <ToolDockPanel
+                  activeView={activityView}
+                  collapsed={toolPanelCollapsed}
+                  dock={toolDock}
+                  panels={visibleToolPanels}
+                  onDragEnd={endToolPanelDrag}
+                  onDragStart={startToolPanelDrag}
+                  onSelectView={selectToolPanelView}
+                >
+                  {toolPanelContent}
+                </ToolDockPanel>
+              </>
+            )}
+            {draggedToolPanel ||
+            draggedGitPanel ||
+            draggingTreePanel ||
+            draggingEditorPanel ? (
+              <WorkbenchDockOverlay
+                activeEditorDock={editorDock}
+                activeProjectDock={projectInToolDock ? "panel" : treeDock}
+                activeToolDock={toolDock}
+                draggedGitPanel={draggedGitPanel}
+                draggedToolPanel={draggedToolPanel}
+                draggingEditorPanel={draggingEditorPanel}
+                draggingTreePanel={draggingTreePanel}
+                onDockEditor={dockEditorPanel}
+                onDockProject={dockProjectPanel}
+                onDockTool={dockToolPanel}
               />
-
-              <CommitInspector
-                branchName={
-                  payload?.summary.branches.find(
-                    (branch) => branch.refName === selectedBranchRef,
-                  )?.name ??
-                  payload?.summary.tags.find(
-                    (tag) => tag.refName === selectedBranchRef,
-                  )?.name ??
-                  payload?.summary.branch
-                }
-                commit={selectedCommit}
-                files={payload?.files ?? []}
-                selectedPath={selectedChangePath}
-                onSelectPath={(path) => {
-                  openPreviewTab("diff", path);
-                }}
-              />
-            </section>
+            ) : null}
           </div>
         )}
       </section>
@@ -818,28 +1530,412 @@ export function App() {
   );
 }
 
+function ToolDockPanel({
+  activeView,
+  children,
+  collapsed,
+  dock,
+  panels,
+  onDragEnd,
+  onDragStart,
+  onSelectView,
+}: {
+  activeView: ToolPanelId;
+  children: ReactNode;
+  collapsed: boolean;
+  dock: ToolDock;
+  panels: typeof toolPanels;
+  onDragEnd(): void;
+  onDragStart(panel: ToolPanelId): void;
+  onSelectView(view: ToolPanelId): void;
+}) {
+  return (
+    <section
+      className={
+        collapsed
+          ? `tool-dock-panel tool-dock-${dock} collapsed`
+          : `tool-dock-panel tool-dock-${dock}`
+      }
+    >
+      <div className="tool-dock-content" aria-hidden={collapsed}>
+        {children}
+      </div>
+      <nav className="tool-dock-tabs" aria-label="Tool panel views">
+        <div className="tool-tab-group">
+          {panels.map((panel) => {
+            const Icon = panel.icon;
+            return (
+              <button
+                key={panel.id}
+                className={
+                  activeView === panel.id
+                    ? "activity-button active"
+                    : "activity-button"
+                }
+                aria-label={`${panel.label} view`}
+                title={`${panel.label}, drag to dock`}
+                draggable
+                onClick={() => onSelectView(panel.id)}
+                onDragEnd={onDragEnd}
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData(
+                    "application/x-view-tool-panel",
+                    panel.id,
+                  );
+                  if (isGitPanelId(panel.id)) {
+                    event.dataTransfer.setData(
+                      "application/x-view-git-panel",
+                      panel.id,
+                    );
+                  }
+                  onDragStart(panel.id);
+                }}
+              >
+                <Icon size={19} />
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+    </section>
+  );
+}
+
+function ToolContentFrame({
+  children,
+  label,
+  panelId,
+  onDragEnd,
+  onDragStart,
+}: {
+  children: ReactNode;
+  label: string;
+  panelId: ToolPanelId;
+  onDragEnd(): void;
+  onDragStart(panel: ToolPanelId): void;
+}) {
+  return (
+    <section className="tool-content-frame">
+      <div
+        className="tool-content-dragbar"
+        draggable
+        title={`Drag ${label} panel`}
+        onDragEnd={onDragEnd}
+        onDragStart={(event) => {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("application/x-view-tool-panel", panelId);
+          if (isGitPanelId(panelId)) {
+            event.dataTransfer.setData("application/x-view-git-panel", panelId);
+          }
+          onDragStart(panelId);
+        }}
+      >
+        <span>{label}</span>
+      </div>
+      <div className="tool-content-frame-body">{children}</div>
+    </section>
+  );
+}
+
+function FragmentWithSplitter({
+  children,
+  dock,
+  index,
+  panelCount,
+  onResizeFirst,
+  onResizeSecond,
+}: {
+  children: ReactNode;
+  dock: ToolDock;
+  index: number;
+  panelCount: number;
+  onResizeFirst(delta: number): void;
+  onResizeSecond(delta: number): void;
+}) {
+  return (
+    <>
+      {children}
+      {index < panelCount - 1 ? (
+        <ResizeHandle
+          axis={dock === "bottom" ? "x" : "y"}
+          className={`git-panel-splitter-${index + 1}`}
+          label="Resize Git panel"
+          onResize={index === 0 ? onResizeFirst : onResizeSecond}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function GitPanelSlot({
+  children,
+  draggingPanel,
+  onDragEnd,
+  onDragStart,
+  onDropPanel,
+  panelId,
+}: {
+  children: ReactNode;
+  draggingPanel: GitPanelId | null;
+  onDragEnd(): void;
+  onDragStart(panel: GitPanelId): void;
+  onDropPanel(panel: GitPanelId, targetPanel: GitPanelId): void;
+  panelId: GitPanelId;
+}) {
+  function handleDragOver(event: DragEvent<HTMLElement>) {
+    if (!draggingPanel) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+  }
+
+  function handleDrop(event: DragEvent<HTMLElement>) {
+    event.preventDefault();
+    const panel =
+      (event.dataTransfer.getData("application/x-view-git-panel") as GitPanelId) ||
+      draggingPanel;
+    if (panel === "branches" || panel === "history" || panel === "details") {
+      onDropPanel(panel, panelId);
+    }
+  }
+
+  return (
+    <section
+      className={
+        draggingPanel && draggingPanel !== panelId
+          ? "git-panel-slot can-drop"
+          : "git-panel-slot"
+      }
+      style={{ gridArea: panelId }}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      <div
+        className="git-panel-grab-edge"
+        draggable
+        title={`Drag ${gitPanelLabel(panelId)} panel`}
+        onDragEnd={onDragEnd}
+        onDragStart={(event) => {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("application/x-view-git-panel", panelId);
+          onDragStart(panelId);
+        }}
+      />
+      <div className="git-panel-slot-body">{children}</div>
+    </section>
+  );
+}
+
+function WorkbenchDockOverlay({
+  activeEditorDock,
+  activeProjectDock,
+  activeToolDock,
+  draggedGitPanel,
+  draggedToolPanel,
+  draggingEditorPanel,
+  draggingTreePanel,
+  onDockEditor,
+  onDockProject,
+  onDockTool,
+}: {
+  activeEditorDock: EditorDock;
+  activeProjectDock: ProjectDock;
+  activeToolDock: ToolDock;
+  draggedGitPanel: GitPanelId | null;
+  draggedToolPanel: ToolPanelId | null;
+  draggingEditorPanel: boolean;
+  draggingTreePanel: boolean;
+  onDockEditor(dock: EditorDock): void;
+  onDockProject(dock: ProjectDock): void;
+  onDockTool(panel: ToolPanelId, dock: ToolDock): void;
+}) {
+  const draggingTool = Boolean(draggedToolPanel || draggedGitPanel);
+
+  function handleDragOver(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+  }
+
+  function getDraggedToolPanel(event: DragEvent<HTMLDivElement>) {
+    const gitPanel = event.dataTransfer.getData(
+      "application/x-view-git-panel",
+    ) as GitPanelId;
+    if (isGitPanelId(gitPanel)) {
+      return gitPanel;
+    }
+
+    const toolPanel = event.dataTransfer.getData(
+      "application/x-view-tool-panel",
+    ) as ToolPanelId;
+    if (
+      toolPanel === "project" ||
+      toolPanel === "git" ||
+      toolPanel === "terminal" ||
+      isGitPanelId(toolPanel)
+    ) {
+      return toolPanel;
+    }
+
+    return draggedToolPanel ?? draggedGitPanel;
+  }
+
+  function handleToolDrop(nextDock: ToolDock) {
+    return (event: DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      const panel = getDraggedToolPanel(event);
+      if (panel) {
+        onDockTool(panel, nextDock);
+      }
+    };
+  }
+
+  function handleProjectDrop(nextDock: ProjectDock) {
+    return (event: DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      onDockProject(nextDock);
+    };
+  }
+
+  function handleEditorDrop(nextDock: EditorDock) {
+    return (event: DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      onDockEditor(nextDock);
+    };
+  }
+
+  return (
+    <div className="workbench-dock-overlay" aria-hidden="true">
+      {draggingTool ? (
+        <>
+          <div
+            className={
+              activeToolDock === "left"
+                ? "dock-drop-zone dock-drop-left active"
+                : "dock-drop-zone dock-drop-left"
+            }
+            onDragOver={handleDragOver}
+            onDrop={handleToolDrop("left")}
+          />
+          <div
+            className={
+              activeToolDock === "bottom"
+                ? "dock-drop-zone dock-drop-bottom active"
+                : "dock-drop-zone dock-drop-bottom"
+            }
+            onDragOver={handleDragOver}
+            onDrop={handleToolDrop("bottom")}
+          />
+          <div
+            className={
+              activeToolDock === "right"
+                ? "dock-drop-zone dock-drop-right active"
+                : "dock-drop-zone dock-drop-right"
+            }
+            onDragOver={handleDragOver}
+            onDrop={handleToolDrop("right")}
+          />
+        </>
+      ) : null}
+
+      {draggingTreePanel ? (
+        <>
+          <div
+            className={
+              activeProjectDock === "left"
+                ? "dock-drop-zone dock-drop-left active"
+                : "dock-drop-zone dock-drop-left"
+            }
+            onDragOver={handleDragOver}
+            onDrop={handleProjectDrop("left")}
+          />
+          <div
+            className={
+              activeProjectDock === "panel"
+                ? "dock-drop-zone dock-drop-center active"
+                : "dock-drop-zone dock-drop-center"
+            }
+            onDragOver={handleDragOver}
+            onDrop={handleProjectDrop("panel")}
+          />
+          <div
+            className={
+              activeProjectDock === "right"
+                ? "dock-drop-zone dock-drop-right active"
+                : "dock-drop-zone dock-drop-right"
+            }
+            onDragOver={handleDragOver}
+            onDrop={handleProjectDrop("right")}
+          />
+        </>
+      ) : null}
+
+      {draggingEditorPanel ? (
+        <>
+          <div
+            className={
+              activeEditorDock === "left"
+                ? "dock-drop-zone dock-drop-left active"
+                : "dock-drop-zone dock-drop-left"
+            }
+            onDragOver={handleDragOver}
+            onDrop={handleEditorDrop("left")}
+          />
+          <div
+            className={
+              activeEditorDock === "right"
+                ? "dock-drop-zone dock-drop-right active"
+                : "dock-drop-zone dock-drop-right"
+            }
+            onDragOver={handleDragOver}
+            onDrop={handleEditorDrop("right")}
+          />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 function FilePreview({
+  draft,
   error,
   file,
   loading,
+  saveError,
+  saving,
   selectedPath,
   target,
+  onChangeDraft,
+  onDiscardConflict,
+  onSave,
+  onSetConflictDraftContent,
 }: {
+  draft: EditorDraft | null;
   error: string | null;
   file: FileContent | null;
   loading: boolean;
+  saveError: string | null;
+  saving: boolean;
   selectedPath: string | null;
   target: PreviewTarget | null;
+  onChangeDraft(content: string): void;
+  onDiscardConflict(): void;
+  onSave(): void;
+  onSetConflictDraftContent(content: string): void;
 }) {
   const frameRef = useRef<HTMLElement | null>(null);
   const targetLineRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const content = draft?.content ?? file?.content ?? "";
+  const conflict = draft?.conflict ?? null;
   const lines = useMemo(() => {
-    if (!file) {
+    if (!content) {
       return [];
     }
 
-    return file.content.length > 0 ? file.content.split(/\r?\n/) : [""];
-  }, [file]);
+    return content.length > 0 ? content.split(/\r?\n/) : [""];
+  }, [content]);
 
   useLayoutEffect(() => {
     if (!target || !file) {
@@ -865,7 +1961,16 @@ function FilePreview({
       left: frame.scrollLeft,
       behavior: "auto",
     });
-  }, [file, target]);
+  }, [content, file, target]);
+
+  useLayoutEffect(() => {
+    if (!target || !textareaRef.current) {
+      return;
+    }
+
+    const lineHeight = 19;
+    textareaRef.current.scrollTop = Math.max(0, (target.line - 1) * lineHeight - 120);
+  }, [target]);
 
   if (loading) {
     return (
@@ -919,31 +2024,97 @@ function FilePreview({
     );
   }
 
-  return (
-    <section ref={frameRef} className="file-preview-frame" aria-label={file.path}>
-      <div className="file-preview-code" role="presentation">
-        {lines.map((line, index) => {
-          const lineNumber = index + 1;
-          const active = target?.line === lineNumber;
-
-          return (
-            <div
-              key={lineNumber}
-              ref={active ? targetLineRef : undefined}
-              className={
-                active
-                  ? "file-preview-line active"
-                  : "file-preview-line"
-              }
+  if (conflict) {
+    return (
+      <section className="merge-page" aria-label={`Merge ${file.path}`}>
+        <div className="editor-toolbar conflict-toolbar">
+          <div className="editor-status conflict">
+            <AlertTriangle size={14} />
+            <span>File changed on disk</span>
+          </div>
+          <div className="editor-actions">
+            <button
+              className="ghost-button"
+              onClick={() => onSetConflictDraftContent(conflict.currentContent)}
             >
-              <span className="file-preview-line-number">{lineNumber}</span>
-              <span className="file-preview-line-code">
-                {line.length > 0 ? line : " "}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+              Use disk
+            </button>
+            <button
+              className="ghost-button"
+              onClick={() => onSetConflictDraftContent(conflict.proposedContent)}
+            >
+              Use mine
+            </button>
+            <button className="ghost-button" onClick={onDiscardConflict}>
+              Reload disk
+            </button>
+            <button className="primary-action editor-save" disabled={saving} onClick={onSave}>
+              {saving ? <Loader2 className="spin" size={14} /> : <Save size={14} />}
+              Save merge
+            </button>
+          </div>
+        </div>
+        <div className="merge-diff-frame">
+          <UnresolvedFile
+            file={conflictToMarkerFile(conflict)}
+            className="diff-view merge-conflict-view"
+            options={{
+              mergeConflictActionsType: "none",
+              overflow: "scroll",
+              tokenizeMaxLineLength: 400,
+              theme: {
+                light: "pierre-light",
+                dark: "pierre-dark",
+              },
+              themeType: "dark",
+            }}
+          />
+        </div>
+        <textarea
+          ref={textareaRef}
+          className="file-editor merge-editor"
+          spellCheck={false}
+          value={content}
+          onChange={(event) => onChangeDraft(event.target.value)}
+        />
+        {saveError ? <div className="editor-error">{saveError}</div> : null}
+      </section>
+    );
+  }
+
+  return (
+    <section className="file-editor-shell" aria-label={file.path}>
+      {target ? (
+        <section ref={frameRef} className="file-preview-frame target-preview" aria-hidden="true">
+          <div className="file-preview-code" role="presentation">
+            {lines.map((line, index) => {
+              const lineNumber = index + 1;
+              const active = target.line === lineNumber;
+
+              return (
+                <div
+                  key={lineNumber}
+                  ref={active ? targetLineRef : undefined}
+                  className={active ? "file-preview-line active" : "file-preview-line"}
+                >
+                  <span className="file-preview-line-number">{lineNumber}</span>
+                  <span className="file-preview-line-code">
+                    {line.length > 0 ? line : " "}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+      <textarea
+        ref={textareaRef}
+        className="file-editor"
+        spellCheck={false}
+        value={content}
+        onChange={(event) => onChangeDraft(event.target.value)}
+      />
+      {saveError ? <div className="editor-error">{saveError}</div> : null}
     </section>
   );
 }
@@ -951,8 +2122,11 @@ function FilePreview({
 function PreviewTabBar({
   activeTabId,
   diffStats,
+  dirtyTabIds,
   loading,
   onCloseTab,
+  onDragEnd,
+  onDragStart,
   onSelectTab,
   previewMode,
   selectedPath,
@@ -960,8 +2134,11 @@ function PreviewTabBar({
 }: {
   activeTabId: string | null;
   diffStats: { additions: number; deletions: number; files: number };
+  dirtyTabIds: Set<string>;
   loading: boolean;
   onCloseTab(tabId: string): void;
+  onDragEnd(): void;
+  onDragStart(): void;
   onSelectTab(tab: PreviewTab): void;
   previewMode: PreviewMode;
   selectedPath: string | null;
@@ -989,11 +2166,17 @@ function PreviewTabBar({
                   {tab.mode === "diff" ? "D" : "F"}
                 </span>
                 <span className="preview-tab-name">{fileNameFromPath(tab.path)}</span>
+                {dirtyTabIds.has(tab.id) ? (
+                  <span className="preview-tab-dirty" aria-label="Unsaved changes" />
+                ) : null}
               </button>
               <button
                 className="preview-tab-close"
                 aria-label={`Close ${tab.path}`}
-                onClick={() => onCloseTab(tab.id)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onCloseTab(tab.id);
+                }}
               >
                 <X size={12} />
               </button>
@@ -1010,6 +2193,19 @@ function PreviewTabBar({
         )}
       </div>
       <div className="preview-tabbar-meta">
+        <div
+          className="editor-dock-handle"
+          draggable
+          title="Drag editor group"
+          onDragEnd={onDragEnd}
+          onDragStart={(event) => {
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("application/x-view-panel", "editor");
+            onDragStart();
+          }}
+        >
+          Editor
+        </div>
         {previewMode === "diff" && diffStats.files > 0 ? (
           <div className="diff-stat-strip" aria-label="Diff line counts">
             <span className="addition">+{diffStats.additions}</span>
@@ -1020,6 +2216,30 @@ function PreviewTabBar({
       </div>
     </div>
   );
+}
+
+function ProjectTreeTitle({ path }: { path: string }) {
+  const { parent, name } = splitProjectPath(path);
+
+  return (
+    <span className="project-tree-title" title={path}>
+      {parent ? <span className="project-tree-parent">{parent}/</span> : null}
+      <span className="project-tree-name">{name}</span>
+    </span>
+  );
+}
+
+function splitProjectPath(path: string): { parent: string; name: string } {
+  const normalized = path.replace(/\/+$/, "") || path;
+  const parts = normalized.split("/").filter(Boolean);
+  const name = parts.at(-1) ?? normalized;
+  const parentParts = parts.slice(0, -1);
+  const parent =
+    normalized.startsWith("/") && parentParts.length > 0
+      ? `/${parentParts.join("/")}`
+      : parentParts.join("/");
+
+  return { parent, name };
 }
 
 function CommandPanel({
@@ -1285,18 +2505,12 @@ function BranchTree({
     currentBranch && filterRefs([currentBranch], branchFilter).length > 0;
   const refCount = branches.length + tags.length;
   const visibleRefCount = localBranches.length + remoteBranches.length + visibleTags.length;
+  const refCountLabel = branchFilter.trim()
+    ? `${visibleRefCount} / ${refCount}`
+    : `${refCount}`;
 
   return (
     <div className="branch-tree">
-      <div className="panel-toolbar compact-toolbar">
-        <div>
-          <div className="panel-title">Branches</div>
-          <div className="panel-kicker">
-            {branchFilter.trim() ? `${visibleRefCount} / ${refCount} refs` : `${refCount} refs`}
-          </div>
-        </div>
-      </div>
-
       <label className="search-field branch-search">
         <Search size={15} />
         <input
@@ -1304,6 +2518,7 @@ function BranchTree({
           onChange={(event) => setBranchFilter(event.target.value)}
           placeholder="Filter branches"
         />
+        <span className="search-count">{refCountLabel}</span>
       </label>
 
       <div className="branch-scroll">
@@ -1631,33 +2846,49 @@ function BranchTrackingBadge({ branch }: { branch: RefLeaf }) {
 function CommitInspector({
   commit,
   branchName,
+  detailHeight,
   files,
   selectedPath,
+  onResizeDetails,
   onSelectPath,
 }: {
   commit: CommitInfo | null;
   branchName?: string;
+  detailHeight: number;
   files: RepositoryPayload["files"];
   selectedPath: string | null;
+  onResizeDetails(delta: number): void;
   onSelectPath(path: string): void;
 }) {
   return (
-    <aside className="commit-detail-panel">
+    <aside
+      className="commit-detail-panel"
+      style={{
+        gridTemplateRows: `minmax(0, 1fr) 6px ${detailHeight}px`,
+      }}
+    >
       <div className="commit-changes-panel">
         <TreePanel
           files={files}
           selectedPath={selectedPath}
           title="Changes"
+          showHeader={false}
+          initialExpansion="open"
           emptyTitle="No changed files"
           emptyCopy="Select a commit with file changes, or inspect working tree changes."
           onSelectPath={onSelectPath}
         />
       </div>
+      <ResizeHandle
+        axis="y"
+        className="commit-info-splitter"
+        label="Resize commit details"
+        onResize={onResizeDetails}
+      />
       <CommitDetails
         branchName={branchName}
         commit={commit}
         fileCount={files.length}
-        selectedPath={selectedPath}
       />
     </aside>
   );
@@ -1667,61 +2898,101 @@ function CommitDetails({
   commit,
   branchName,
   fileCount,
-  selectedPath,
 }: {
   commit: CommitInfo | null;
   branchName?: string;
   fileCount: number;
-  selectedPath: string | null;
 }) {
   return (
     <section className="commit-details-section">
       {commit ? (
         <div className="commit-detail-body">
-          <div className="compact-commit-heading">
-            <span className="compact-commit-subject">{commit.subject}</span>
-            <span className="compact-detail-pill mono-value">{commit.shortHash}</span>
+          <div className="commit-detail-heading">
+            <span className="commit-detail-subject">{commit.subject}</span>
+            <span className="commit-detail-hash mono-value">{commit.shortHash}</span>
           </div>
-          <div className="compact-detail-grid">
-            <span className="compact-detail-chip">
-              <GitBranch size={12} />
-              <span>{branchName ?? "current"}</span>
+          <div className="commit-detail-meta">
+            <span>{commit.author}</span>
+            <span>{formatDate(commit.date)}</span>
+          </div>
+          <div className="commit-detail-line">
+            <GitBranch size={13} />
+            <span>
+              In 1 branch: <strong>{branchName ?? "current"}</strong>
             </span>
-            <span className="compact-detail-chip">
-              <span>{commit.author}</span>
-            </span>
-            <span className="compact-detail-chip mono-value">
-              <span>{formatDate(commit.date)}</span>
-            </span>
-            <span className="compact-detail-chip">
-              <span>{fileCount} files</span>
-            </span>
-            <span className="compact-detail-chip selected-file">
-              <span>{selectedPath ?? "No file selected"}</span>
-            </span>
+          </div>
+          <div className="commit-detail-line muted">
+            <span>{fileCount} changed {fileCount === 1 ? "file" : "files"}</span>
           </div>
         </div>
       ) : (
         <div className="commit-detail-body">
-          <div className="compact-commit-heading">
-            <span className="compact-commit-subject">Working tree changes</span>
-            <span className="compact-detail-pill">live</span>
+          <div className="commit-detail-heading">
+            <span className="commit-detail-subject">Working tree changes</span>
+            <span className="commit-detail-hash">live</span>
           </div>
-          <div className="compact-detail-grid">
-            <span className="compact-detail-chip">
-              <GitBranch size={12} />
-              <span>{branchName ?? "current"}</span>
+          <div className="commit-detail-line">
+            <GitBranch size={13} />
+            <span>
+              On branch: <strong>{branchName ?? "current"}</strong>
             </span>
-            <span className="compact-detail-chip">
-              <span>{fileCount} files</span>
-            </span>
-            <span className="compact-detail-chip selected-file">
-              <span>{selectedPath ?? "No file selected"}</span>
-            </span>
+          </div>
+          <div className="commit-detail-line muted">
+            <span>{fileCount} changed {fileCount === 1 ? "file" : "files"}</span>
           </div>
         </div>
       )}
     </section>
+  );
+}
+
+function ProjectSwitcherPopover({
+  activeProjectId,
+  projects,
+  onChooseRepository,
+  onClose,
+  onRemoveProject,
+  onSelectProject,
+}: {
+  activeProjectId: string | null;
+  projects: SavedProject[];
+  onChooseRepository(): void;
+  onClose(): void;
+  onRemoveProject(projectId: string): void;
+  onSelectProject(project: SavedProject): void;
+}) {
+  return (
+    <div className="project-switcher-popover" role="dialog" aria-label="Switch project">
+      <div className="project-switcher-head">
+        <div>
+          <div className="project-switcher-title">Projects</div>
+          <div className="project-switcher-count">{projects.length} saved</div>
+        </div>
+        <button className="icon-button" aria-label="Close projects" onClick={onClose}>
+          <X size={14} />
+        </button>
+      </div>
+      <button className="primary-action rail-action" onClick={onChooseRepository}>
+        <Plus size={16} />
+        Open repository
+      </button>
+      <div className="project-list project-switcher-list">
+        {projects.length === 0 ? (
+          <div className="rail-empty">
+            Add a repository to inspect logs, worktrees, and diffs.
+          </div>
+        ) : null}
+        {projects.map((project) => (
+          <ProjectItem
+            key={project.id}
+            project={project}
+            active={project.id === activeProjectId}
+            onSelect={() => onSelectProject(project)}
+            onRemove={() => onRemoveProject(project.id)}
+          />
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1749,126 +3020,22 @@ function ProjectItem({
   );
 }
 
-function HeaderBar({
-  payload,
-  activeProject,
-  loading,
-  onOpenCommandPanel,
-  onRefresh,
-}: {
-  payload?: RepositoryPayload;
-  activeProject?: SavedProject;
-  loading: boolean;
-  onOpenCommandPanel(): void;
-  onRefresh(): void;
-}) {
-  const counts = payload?.summary.statusCounts;
-  const activePath = payload?.summary.root ?? activeProject?.activePath ?? "";
-  const pathParts = activePath.split("/").filter(Boolean);
-  const compactPath =
-    pathParts.length > 3
-      ? ["...", ...pathParts.slice(pathParts.length - 3)]
-      : pathParts;
-  const activeWorktree =
-    payload?.summary.worktrees.find(
-      (worktree) => worktree.path === activeProject?.activePath,
-    ) ?? payload?.summary.worktrees[0];
-  const appWindow = isTauriRuntime() ? getCurrentWindow() : null;
-
-  return (
-    <header className="workspace-header">
-      <div className="ide-header-main" data-tauri-drag-region>
-        <div className="ide-project-chip">
-          <Folder size={14} />
-          <span>{activeProject?.name ?? "No project"}</span>
-        </div>
-        <div className="ide-path-trail" aria-label="Current workspace path">
-          {compactPath.length > 0 ? (
-            compactPath.map((part, index) => (
-              <span key={`${part}-${index}`}>
-                {index > 0 ? <ChevronRight size={12} /> : null}
-                {part}
-              </span>
-            ))
-          ) : (
-            <span>Choose a folder</span>
-          )}
-        </div>
-      </div>
-      <div className="ide-header-context" data-tauri-drag-region>
-        <div className="ide-context-item strong">
-          <GitBranch size={13} />
-          <span>{payload?.summary.branch ?? "no branch"}</span>
-        </div>
-        <div className="ide-context-item">
-          <GitCommitHorizontal size={13} />
-          <span>{payload?.summary.head ?? "no commit"}</span>
-        </div>
-        <div className="ide-context-item">
-          <FolderOpen size={13} />
-          <span>{activeWorktree?.branch ?? "workspace"}</span>
-        </div>
-      </div>
-      <div className="ide-header-actions">
-        {counts ? (
-          <div className="ide-status-strip" aria-label="Working tree status">
-            <span className="added">A {counts.added}</span>
-            <span className="modified">M {counts.modified}</span>
-            <span className="deleted">D {counts.deleted}</span>
-            <span className="untracked">U {counts.untracked}</span>
-          </div>
-        ) : null}
-        <button
-          className="ghost-button ide-search-button"
-          disabled={!activeProject}
-          onClick={onOpenCommandPanel}
-        >
-          <Search size={15} />
-          <span>Files</span>
-          <kbd>⌘P</kbd>
-        </button>
-        <button className="ghost-button ide-refresh-button" onClick={onRefresh}>
-          {loading ? <Loader2 className="spin" size={15} /> : <RefreshCw size={15} />}
-          <span>Sync</span>
-        </button>
-        <div className="window-controls" aria-label="Window controls">
-          <button
-            className="window-control"
-            aria-label="Minimize"
-            onClick={() => appWindow?.minimize()}
-          >
-            <Minus size={14} />
-          </button>
-          <button
-            className="window-control"
-            aria-label="Maximize"
-            onClick={() => appWindow?.toggleMaximize()}
-          >
-            <Square size={12} />
-          </button>
-          <button
-            className="window-control close"
-            aria-label="Close"
-            onClick={() => appWindow?.close()}
-          >
-            <X size={15} />
-          </button>
-        </div>
-      </div>
-    </header>
-  );
-}
-
 function VirtualCommitList({
   commits,
   activeCommit,
+  filter,
   loading,
+  onChangeFilter,
   onSelectCommit,
+  onSelectWorkingTree,
 }: {
   commits: CommitInfo[];
   activeCommit: string | null;
+  filter: string;
   loading: boolean;
+  onChangeFilter(filter: string): void;
   onSelectCommit(hash: string): void;
+  onSelectWorkingTree(): void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const graphRows = useMemo(() => buildCommitGraph(commits), [commits]);
@@ -1895,7 +3062,12 @@ function VirtualCommitList({
   if (loading) {
     return (
       <div className="commit-table" style={tableStyle}>
-        <CommitListHeader />
+        <CommitListHeader
+          activeCommit={activeCommit}
+          filter={filter}
+          onChangeFilter={onChangeFilter}
+          onSelectWorkingTree={onSelectWorkingTree}
+        />
         <div className="commit-list">
           <LoadingRows />
         </div>
@@ -1906,7 +3078,12 @@ function VirtualCommitList({
   if (graphRows.length === 0) {
     return (
       <div className="commit-table" style={tableStyle}>
-        <CommitListHeader />
+        <CommitListHeader
+          activeCommit={activeCommit}
+          filter={filter}
+          onChangeFilter={onChangeFilter}
+          onSelectWorkingTree={onSelectWorkingTree}
+        />
         <div className="commit-list empty-list">
           <div className="empty-inline">No commits match the current filter.</div>
         </div>
@@ -1916,7 +3093,12 @@ function VirtualCommitList({
 
   return (
     <div className="commit-table" style={tableStyle}>
-      <CommitListHeader />
+      <CommitListHeader
+        activeCommit={activeCommit}
+        filter={filter}
+        onChangeFilter={onChangeFilter}
+        onSelectWorkingTree={onSelectWorkingTree}
+      />
       <div ref={scrollRef} className="commit-list">
         <div className="commit-list-spacer" ref={virtualizer.containerRef}>
           {virtualizer.getVirtualItems().map((virtualItem) => {
@@ -1943,11 +3125,37 @@ function VirtualCommitList({
   );
 }
 
-function CommitListHeader() {
+function CommitListHeader({
+  activeCommit,
+  filter,
+  onChangeFilter,
+  onSelectWorkingTree,
+}: {
+  activeCommit: string | null;
+  filter: string;
+  onChangeFilter(filter: string): void;
+  onSelectWorkingTree(): void;
+}) {
   return (
-    <div className="commit-list-header" aria-hidden="true">
-      <span />
-      <span>Commit</span>
+    <div className="commit-list-header">
+      <span className="commit-list-worktree-cell">
+        <button
+          className={activeCommit ? "commit-worktree-button" : "commit-worktree-button active"}
+          title="Show working tree"
+          aria-label="Show working tree"
+          onClick={onSelectWorkingTree}
+        >
+          <CheckCircle2 size={13} />
+        </button>
+      </span>
+      <label className="commit-header-search">
+        <Search size={13} />
+        <input
+          value={filter}
+          onChange={(event) => onChangeFilter(event.target.value)}
+          placeholder="Search commits"
+        />
+      </label>
       <span>Author</span>
       <span>Date</span>
       <span>Hash</span>
@@ -2212,6 +3420,319 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function loadWorkbenchLayout(): WorkbenchLayout {
+  if (typeof localStorage === "undefined") {
+    return defaultWorkbenchLayout;
+  }
+
+  try {
+    const raw = localStorage.getItem(layoutStorageKey);
+    if (!raw) {
+      return defaultWorkbenchLayout;
+    }
+
+    return normalizeWorkbenchLayout(JSON.parse(raw));
+  } catch {
+    return defaultWorkbenchLayout;
+  }
+}
+
+function saveWorkbenchLayout(layout: WorkbenchLayout): void {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+
+  localStorage.setItem(layoutStorageKey, JSON.stringify(layout));
+}
+
+function normalizeWorkbenchLayout(value: unknown): WorkbenchLayout {
+  const record = isRecord(value) ? value : {};
+  const projectInToolDock =
+    typeof record.projectInToolDock === "boolean"
+      ? record.projectInToolDock
+      : defaultWorkbenchLayout.projectInToolDock;
+  const detachedGitPanels = normalizeDetachedGitPanels(record.detachedGitPanels);
+  const activityView = normalizeActivityView(
+    record.activityView,
+    projectInToolDock,
+    detachedGitPanels,
+  );
+
+  return {
+    activityView,
+    toolDock: isToolDock(record.toolDock)
+      ? record.toolDock
+      : defaultWorkbenchLayout.toolDock,
+    treeDock: isTreeDock(record.treeDock)
+      ? record.treeDock
+      : defaultWorkbenchLayout.treeDock,
+    projectInToolDock,
+    gitPanelOrder: normalizeGitPanelOrder(record.gitPanelOrder),
+    detachedGitPanels,
+    panelSizes: normalizePanelSizes(record.panelSizes),
+  };
+}
+
+function normalizeActivityView(
+  value: unknown,
+  projectInToolDock: boolean,
+  detachedGitPanels: GitPanelId[],
+): ToolPanelId {
+  if (!isToolPanelId(value)) {
+    return defaultWorkbenchLayout.activityView;
+  }
+  if (value === "project" && !projectInToolDock) {
+    return "git";
+  }
+  if (isGitPanelId(value) && !detachedGitPanels.includes(value)) {
+    return "git";
+  }
+
+  return value;
+}
+
+function normalizeGitPanelOrder(value: unknown): GitPanelId[] {
+  if (!Array.isArray(value)) {
+    return defaultGitPanelOrder;
+  }
+
+  const seen = new Set<GitPanelId>();
+  const order = value.filter((item): item is GitPanelId => {
+    if (!isGitPanelId(item) || seen.has(item)) {
+      return false;
+    }
+    seen.add(item);
+    return true;
+  });
+
+  return [
+    ...order,
+    ...defaultGitPanelOrder.filter((panel) => !seen.has(panel)),
+  ];
+}
+
+function normalizeDetachedGitPanels(value: unknown): GitPanelId[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set<GitPanelId>();
+  return value.filter((item): item is GitPanelId => {
+    if (!isGitPanelId(item) || seen.has(item)) {
+      return false;
+    }
+    seen.add(item);
+    return true;
+  });
+}
+
+function normalizePanelSizes(value: unknown): PanelSizes {
+  const record = isRecord(value) ? value : {};
+  return {
+    rail: normalizePanelSize(record.rail, defaultPanelSizes.rail, 220, 460),
+    tree: normalizePanelSize(record.tree, defaultPanelSizes.tree, 220, 560),
+    log: normalizePanelSize(record.log, defaultPanelSizes.log, 180, 560),
+    branch: normalizePanelSize(record.branch, defaultPanelSizes.branch, 120, 460),
+    details: normalizePanelSize(
+      record.details,
+      defaultPanelSizes.details,
+      120,
+      460,
+    ),
+    commitInfo: normalizePanelSize(
+      record.commitInfo,
+      defaultPanelSizes.commitInfo,
+      110,
+      360,
+    ),
+    sideDock: normalizePanelSize(
+      record.sideDock,
+      defaultPanelSizes.sideDock,
+      320,
+      620,
+    ),
+  };
+}
+
+function normalizePanelSize(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? clamp(value, min, max)
+    : fallback;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isToolDock(value: unknown): value is ToolDock {
+  return value === "left" || value === "bottom" || value === "right";
+}
+
+function isTreeDock(value: unknown): value is TreeDock {
+  return value === "left" || value === "right";
+}
+
+function isToolPanelId(value: unknown): value is ToolPanelId {
+  return (
+    value === "project" ||
+    value === "git" ||
+    value === "terminal" ||
+    isGitPanelId(typeof value === "string" ? value : null)
+  );
+}
+
+function buildContentGridStyle(
+  treeDock: TreeDock,
+  toolDock: ToolDock,
+  hasProjectSidePanel: boolean,
+  treeWidth: number,
+  logHeight: number,
+  sideDockWidth: number,
+): CSSProperties {
+  if (!hasProjectSidePanel) {
+    if (toolDock === "left") {
+      return {
+        gridTemplateColumns: `${sideDockWidth}px 6px minmax(0, 1fr)`,
+        gridTemplateRows: "minmax(0, 1fr)",
+        gridTemplateAreas: '"dock dock-splitter diff"',
+      };
+    }
+
+    if (toolDock === "right") {
+      return {
+        gridTemplateColumns: `minmax(0, 1fr) 6px ${sideDockWidth}px`,
+        gridTemplateRows: "minmax(0, 1fr)",
+        gridTemplateAreas: '"diff dock-splitter dock"',
+      };
+    }
+
+    return {
+      gridTemplateColumns: "minmax(0, 1fr)",
+      gridTemplateRows: `minmax(0, 1fr) 6px ${logHeight}px`,
+      gridTemplateAreas: '"diff" "log-splitter" "log"',
+    };
+  }
+
+  if (toolDock === "left") {
+    return treeDock === "left"
+      ? {
+          gridTemplateColumns: `${sideDockWidth}px 6px ${treeWidth}px 6px minmax(0, 1fr)`,
+          gridTemplateRows: "minmax(0, 1fr)",
+          gridTemplateAreas:
+            '"dock dock-splitter tree tree-splitter diff"',
+        }
+      : {
+          gridTemplateColumns: `${sideDockWidth}px 6px minmax(0, 1fr) 6px ${treeWidth}px`,
+          gridTemplateRows: "minmax(0, 1fr)",
+          gridTemplateAreas:
+            '"dock dock-splitter diff tree-splitter tree"',
+        };
+  }
+
+  if (toolDock === "right") {
+    return treeDock === "left"
+      ? {
+          gridTemplateColumns: `${treeWidth}px 6px minmax(0, 1fr) 6px ${sideDockWidth}px`,
+          gridTemplateRows: "minmax(0, 1fr)",
+          gridTemplateAreas:
+            '"tree tree-splitter diff dock-splitter dock"',
+        }
+      : {
+          gridTemplateColumns: `minmax(0, 1fr) 6px ${treeWidth}px 6px ${sideDockWidth}px`,
+          gridTemplateRows: "minmax(0, 1fr)",
+          gridTemplateAreas:
+            '"diff tree-splitter tree dock-splitter dock"',
+        };
+  }
+
+  return treeDock === "left"
+    ? {
+        gridTemplateColumns: `${treeWidth}px 6px minmax(0, 1fr)`,
+        gridTemplateRows: `minmax(0, 1fr) 6px ${logHeight}px`,
+        gridTemplateAreas:
+          '"tree tree-splitter diff" "log-splitter log-splitter log-splitter" "log log log"',
+      }
+    : {
+        gridTemplateColumns: `minmax(0, 1fr) 6px ${treeWidth}px`,
+        gridTemplateRows: `minmax(0, 1fr) 6px ${logHeight}px`,
+        gridTemplateAreas:
+          '"diff tree-splitter tree" "log-splitter log-splitter log-splitter" "log log log"',
+    };
+}
+
+function buildGitPanelGridStyle(
+  dock: ToolDock,
+  order: GitPanelId[],
+  firstSize: number,
+  lastSize: number,
+): CSSProperties {
+  if (order.length === 0) {
+    return {
+      gridTemplateColumns: "minmax(0, 1fr)",
+      gridTemplateRows: "minmax(0, 1fr)",
+      gridTemplateAreas: '"empty"',
+    };
+  }
+
+  if (order.length === 1) {
+    return {
+      gridTemplateColumns: "minmax(0, 1fr)",
+      gridTemplateRows: "minmax(0, 1fr)",
+      gridTemplateAreas: `"${order[0]}"`,
+    };
+  }
+
+  if (order.length === 2) {
+    const [first, second] = order;
+    if (dock !== "bottom") {
+      return {
+        gridTemplateColumns: "minmax(0, 1fr)",
+        gridTemplateRows: `${firstSize}px 6px minmax(0, 1fr)`,
+        gridTemplateAreas: `"${first}" "git-splitter-1" "${second}"`,
+      };
+    }
+
+    return {
+      gridTemplateColumns: `${firstSize}px 6px minmax(0, 1fr)`,
+      gridTemplateAreas: `"${first} git-splitter-1 ${second}"`,
+    };
+  }
+
+  const [first, second, third] = order;
+  if (dock !== "bottom") {
+    return {
+      gridTemplateColumns: "minmax(0, 1fr)",
+      gridTemplateRows: `${firstSize}px 6px minmax(0, 1fr) 6px ${lastSize}px`,
+      gridTemplateAreas: `"${first}" "git-splitter-1" "${second}" "git-splitter-2" "${third}"`,
+    };
+  }
+
+  return {
+    gridTemplateColumns: `${firstSize}px 6px minmax(0, 1fr) 6px ${lastSize}px`,
+    gridTemplateAreas: `"${first} git-splitter-1 ${second} git-splitter-2 ${third}"`,
+  };
+}
+
+function gitPanelLabel(panelId: GitPanelId): string {
+  switch (panelId) {
+    case "branches":
+      return "Branches";
+    case "history":
+      return "History";
+    case "details":
+      return "Details";
+  }
+}
+
+function isGitPanelId(panelId: string | null | undefined): panelId is GitPanelId {
+  return panelId === "branches" || panelId === "history" || panelId === "details";
+}
+
 function previewTabId(mode: PreviewMode, path: string, commit: string | null): string {
   return `${mode}:${commit ?? "worktree"}:${path}`;
 }
@@ -2228,6 +3749,62 @@ function fileExtension(path: string): string {
   const fileName = fileNameFromPath(path);
   const extension = fileName.includes(".") ? fileName.split(".").pop() : null;
   return extension ? extension.slice(0, 4).toLowerCase() : "";
+}
+
+function editorDraftKey(projectPath: string, filePath: string): string {
+  return `${projectPath}\u0000${filePath}`;
+}
+
+function isDraftDirty(draft: EditorDraft | null | undefined): boolean {
+  return Boolean(draft && (draft.conflict || draft.content !== draft.baseContent));
+}
+
+function countDirtyDrafts(drafts: Record<string, EditorDraft>): number {
+  return Object.values(drafts).filter(isDraftDirty).length;
+}
+
+function countDirtyDraftsForProject(
+  drafts: Record<string, EditorDraft>,
+  projectPath: string,
+): number {
+  const prefix = `${projectPath}\u0000`;
+  return Object.entries(drafts).filter(
+    ([key, draft]) => key.startsWith(prefix) && isDraftDirty(draft),
+  ).length;
+}
+
+function omitDraft(
+  drafts: Record<string, EditorDraft>,
+  keyToRemove: string,
+): Record<string, EditorDraft> {
+  const { [keyToRemove]: _removed, ...remaining } = drafts;
+  return remaining;
+}
+
+function omitDraftsForProject(
+  drafts: Record<string, EditorDraft>,
+  projectPath: string,
+): Record<string, EditorDraft> {
+  const prefix = `${projectPath}\u0000`;
+  return Object.fromEntries(
+    Object.entries(drafts).filter(([key]) => !key.startsWith(prefix)),
+  );
+}
+
+function conflictToMarkerFile(conflict: SaveConflict): FileContents {
+  return {
+    name: conflict.path,
+    contents:
+      "<<<<<<< Disk\n" +
+      ensureTrailingNewline(conflict.currentContent) +
+      "=======\n" +
+      ensureTrailingNewline(conflict.proposedContent) +
+      ">>>>>>> Your changes\n",
+  };
+}
+
+function ensureTrailingNewline(value: string): string {
+  return value.endsWith("\n") ? value : `${value}\n`;
 }
 
 function projectRootFromPayload(payload: RepositoryPayload): string {

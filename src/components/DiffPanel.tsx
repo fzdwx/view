@@ -53,10 +53,10 @@ export function DiffPanel({ error, files, title }: DiffPanelProps) {
               tokenizeMaxLineLength: 400,
               collapsedContextThreshold: 4,
               theme: {
-                light: "github-light",
-                dark: "github-dark",
+                light: "pierre-light",
+                dark: "pierre-dark",
               },
-              themeType: "light",
+              themeType: "dark",
             }}
           />
         ))}
