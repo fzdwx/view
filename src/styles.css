@@ -186,14 +186,14 @@ button {
 .project-switcher-title {
   color: var(--ink);
   font-size: 13px;
-  font-weight: 760;
+  font-weight: 500;
 }
 
 .project-switcher-count {
   margin-top: 1px;
   color: var(--muted);
   font-size: 11px;
-  font-weight: 620;
+  font-weight: 400;
 }
 
 .project-switcher-list {
@@ -202,7 +202,7 @@ button {
 
 .brand-title {
   font-size: 16px;
-  font-weight: 720;
+  font-weight: 500;
   letter-spacing: 0;
 }
 
@@ -230,19 +230,9 @@ button {
   border: 1px solid transparent;
   border-radius: 7px;
   transition:
-    transform 120ms cubic-bezier(0.16, 1, 0.3, 1),
     background 120ms ease,
     border-color 120ms ease,
     color 120ms ease;
-}
-
-.primary-action:active,
-.ghost-button:active,
-.icon-button:active,
-.project-remove:active,
-.project-button:active,
-.commit-row:active {
-  transform: scale(0.98);
 }
 
 .primary-action {
@@ -254,7 +244,7 @@ button {
   height: 36px;
   color: var(--accent-foreground);
   background: var(--accent);
-  font-weight: 500;
+  font-weight: 400;
 }
 
 .rail-action {
@@ -282,8 +272,8 @@ button {
   align-items: center;
   justify-content: space-between;
   font-size: 11px;
-  font-weight: 720;
-  letter-spacing: 0.08em;
+  font-weight: 500;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
@@ -332,7 +322,7 @@ button {
 
 .project-name {
   font-size: 14px;
-  font-weight: 680;
+  font-weight: 400;
   line-height: 1.25;
 }
 
@@ -385,7 +375,7 @@ button {
 }
 
 .project-remove:active {
-  transform: translateY(-50%) scale(0.98);
+  transform: translateY(-50%);
 }
 
 .project-path {
@@ -413,8 +403,8 @@ button {
 
 .repo-name {
   font-size: 18px;
-  font-weight: 720;
-  letter-spacing: -0.012em;
+  font-weight: 400;
+  letter-spacing: 0;
 }
 
 .repo-meta {
@@ -462,7 +452,7 @@ kbd {
   color: var(--muted);
   font-family: var(--mono);
   font-size: 10px;
-  font-weight: 680;
+  font-weight: 500;
   line-height: 1;
   padding: 0 5px;
   box-shadow: none;
@@ -575,7 +565,7 @@ kbd {
   color: var(--muted);
   cursor: grab;
   font-size: 11px;
-  font-weight: 760;
+  font-weight: 500;
   padding: 0 9px;
   text-transform: uppercase;
 }
@@ -668,7 +658,7 @@ kbd {
   place-items: center;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 400;
 }
 
 .git-panel-empty.can-drop {
@@ -795,7 +785,6 @@ kbd {
   border-color: var(--accent-strong);
   background: color-mix(in oklch, var(--accent) 22%, var(--surface-2));
   opacity: 1;
-  transform: scale(1.015);
 }
 
 .dock-drop-zone.active::after,
@@ -1000,7 +989,7 @@ body.is-resizing-y * {
   gap: 5px;
   font-family: var(--mono);
   font-size: 12px;
-  font-weight: 680;
+  font-weight: 500;
 }
 
 .diff-stat-strip span {
@@ -1082,14 +1071,14 @@ body.is-resizing-y * {
   color: var(--muted);
   font-family: var(--mono);
   font-size: 10px;
-  font-weight: 760;
+  font-weight: 500;
 }
 
 .preview-tab-name {
   min-width: 0;
   overflow: hidden;
   font-size: 12px;
-  font-weight: 640;
+  font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1148,7 +1137,7 @@ body.is-resizing-y * {
   color: var(--muted);
   cursor: grab;
   font-size: 11px;
-  font-weight: 720;
+  font-weight: 500;
   padding: 0 7px;
 }
 
@@ -1261,7 +1250,7 @@ body.is-resizing-y * {
   color: var(--muted);
   font-family: var(--mono);
   font-size: 9px;
-  font-weight: 760;
+  font-weight: 500;
   text-transform: uppercase;
 }
 
@@ -1281,7 +1270,7 @@ body.is-resizing-y * {
 
 .command-result-main span {
   font-size: 13px;
-  font-weight: 680;
+  font-weight: 400;
 }
 
 .command-result-main small,
@@ -1310,7 +1299,7 @@ body.is-resizing-y * {
 .panel-title {
   color: var(--ink);
   font-size: 13px;
-  font-weight: 720;
+  font-weight: 500;
 }
 
 .panel-kicker {
@@ -1360,8 +1349,8 @@ body.is-resizing-y * {
   background: var(--surface-1);
   color: var(--muted);
   font-size: 10px;
-  font-weight: 760;
-  letter-spacing: 0.08em;
+  font-weight: 500;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
@@ -1428,7 +1417,7 @@ body.is-resizing-y * {
   background: transparent;
   color: var(--ink);
   font-size: 12px;
-  font-weight: 620;
+  font-weight: 400;
 }
 
 .commit-header-search input::placeholder {
@@ -1525,7 +1514,7 @@ body.is-resizing-y * {
   min-width: 0;
   color: var(--ink);
   font-size: 13px;
-  font-weight: 520;
+  font-weight: 400;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1706,7 +1695,7 @@ body.is-resizing-y * {
   color: var(--muted);
   font-family: var(--mono);
   font-size: 11px;
-  font-weight: 680;
+  font-weight: 500;
   padding-left: 8px;
 }
 
@@ -1724,7 +1713,7 @@ body.is-resizing-y * {
   background: var(--surface-0);
   color: var(--muted);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 500;
   padding: 7px 5px 4px;
   width: 100%;
   border: 0;
@@ -1786,7 +1775,7 @@ body.is-resizing-y * {
   gap: 5px;
   font-family: var(--mono);
   font-size: 10px;
-  font-weight: 680;
+  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -1863,7 +1852,7 @@ body.is-resizing-y * {
   color: var(--ink);
   font-family: var(--mono);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 400;
   line-height: 1.45;
 }
 
@@ -1876,7 +1865,7 @@ body.is-resizing-y * {
   background: var(--surface-2);
   color: var(--muted);
   font-size: 11px;
-  font-weight: 720;
+  font-weight: 500;
   padding: 0 7px;
 }
 
@@ -1943,7 +1932,7 @@ body.is-resizing-y * {
 
 .compact-detail-pill {
   color: var(--ink);
-  font-weight: 680;
+  font-weight: 500;
 }
 
 .compact-detail-chip span {
@@ -1989,7 +1978,7 @@ body.is-resizing-y * {
   border-bottom: 1px solid var(--line);
   color: var(--ink);
   font-size: 12px;
-  font-weight: 720;
+  font-weight: 500;
   padding: 0 12px;
 }
 
@@ -2022,14 +2011,14 @@ body.is-resizing-y * {
   min-width: 0;
   overflow: hidden;
   color: var(--faint);
-  font-weight: 520;
+  font-weight: 400;
   text-overflow: ellipsis;
 }
 
 .project-tree-name {
   flex: 0 0 auto;
   color: var(--ink);
-  font-weight: 720;
+  font-weight: 500;
 }
 
 .diff-shell-frame,
@@ -2083,7 +2072,7 @@ body.is-resizing-y * {
   gap: 8px;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 680;
+  font-weight: 500;
 }
 
 .editor-status small {
@@ -2092,7 +2081,7 @@ body.is-resizing-y * {
   color: var(--faint);
   font-family: var(--mono);
   font-size: 11px;
-  font-weight: 520;
+  font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2213,7 +2202,7 @@ body.is-resizing-y * {
   color: var(--muted);
   font-family: var(--mono);
   font-size: 11px;
-  font-weight: 680;
+  font-weight: 500;
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -2563,7 +2552,7 @@ body.is-resizing-y * {
 .empty-title,
 .error-title {
   color: var(--ink);
-  font-weight: 720;
+  font-weight: 500;
 }
 
 .empty-copy {
