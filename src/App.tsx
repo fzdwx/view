@@ -1,9 +1,13 @@
 import {
+  type ClipboardEvent,
   type CSSProperties,
   type DragEvent,
+  type InputEvent as ReactInputEvent,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  type UIEvent,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -19,6 +23,7 @@ import { UnresolvedFile } from "@pierre/diffs/react";
 import {
   AlertTriangle,
   CheckCircle2,
+  Code2,
   ChevronDown,
   ChevronRight,
   FolderOpen,
@@ -26,12 +31,17 @@ import {
   GitBranch,
   GitCommitHorizontal,
   GitPullRequestArrow,
+  Image as ImageIcon,
+  Keyboard,
   Loader2,
   Plus,
+  RotateCcw,
   Search,
   Save,
+  Settings as SettingsIcon,
   Tag,
   TerminalSquare,
+  Type,
   X,
 } from "lucide-react";
 import { DiffPanel } from "./components/DiffPanel";
@@ -40,11 +50,15 @@ import { TreePanel } from "./components/TreePanel";
 import {
   type BranchInfo,
   type CommitInfo,
+  type EditorTextMatch,
   type FileContent,
+  type FileSearchResult,
+  type PullMode,
   type RepositoryPayload,
   type SaveConflict,
   type TagInfo,
-  type FileSearchResult,
+  createProjectFile,
+  deleteProjectFile,
   fetchRemotes,
   getCommits,
   getFileContent,
@@ -52,7 +66,11 @@ import {
   getProjectFiles,
   isTauriRuntime,
   loadRepository,
+  pullCurrentBranch,
+  renameProjectFile,
+  replaceEditorText,
   saveFileContent,
+  searchEditorText,
   searchFiles,
 } from "./lib/api";
 import {
@@ -69,6 +87,7 @@ import {
 } from "./lib/projects";
 
 type PreviewMode = "file" | "diff";
+type FileViewMode = "preview" | "source";
 type ToolDock = "left" | "bottom" | "right";
 type TreeDock = "left" | "right";
 type ProjectDock = TreeDock | "panel";
@@ -78,6 +97,76 @@ type ToolPanelId = "project" | "git" | "terminal" | GitPanelId;
 
 const defaultGitPanelOrder: GitPanelId[] = ["branches", "history", "details"];
 const layoutStorageKey = "view.workbench-layout.v1";
+const settingsStorageKey = "view.settings.v1";
+
+type ShortcutAction =
+  | "commandPanel"
+  | "saveFile"
+  | "pullCurrentBranch"
+  | "openGitLog"
+  | "openTerminal"
+  | "switchProject";
+
+interface AppSettings {
+  fontFamily: string;
+  fontSize: number;
+  fontWeight: string;
+  lineHeight: number;
+  shortcuts: Record<ShortcutAction, string>;
+}
+
+const defaultAppSettings: AppSettings = {
+  fontFamily:
+    '"SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+  fontSize: 12,
+  fontWeight: "400",
+  lineHeight: 1.56,
+  shortcuts: {
+    commandPanel: "Mod+P",
+    saveFile: "Mod+S",
+    pullCurrentBranch: "Mod+T",
+    openGitLog: "Mod+G",
+    openTerminal: "Mod+`",
+    switchProject: "Mod+O",
+  },
+};
+
+const shortcutRows: Array<{
+  action: ShortcutAction;
+  label: string;
+  description: string;
+}> = [
+  {
+    action: "commandPanel",
+    label: "Command panel",
+    description: "Search files and commands",
+  },
+  {
+    action: "saveFile",
+    label: "Save file",
+    description: "Save the active editor tab",
+  },
+  {
+    action: "pullCurrentBranch",
+    label: "Pull branch",
+    description: "Choose merge or rebase",
+  },
+  {
+    action: "openGitLog",
+    label: "Open Git log",
+    description: "Focus the Git panel",
+  },
+  {
+    action: "openTerminal",
+    label: "Open terminal",
+    description: "Focus the terminal panel",
+  },
+  {
+    action: "switchProject",
+    label: "Switch project",
+    description: "Open the project switcher",
+  },
+];
 
 interface PanelSizes {
   rail: number;
@@ -157,12 +246,44 @@ interface EditorDraft {
   conflict: SaveConflict | null;
 }
 
+interface EditorGitMarker {
+  id: string;
+  line: number;
+  lineCount: number;
+  oldStart: number;
+  oldLineCount: number;
+  newStart: number;
+  newLineCount: number;
+  additions: number;
+  deletions: number;
+  kind: "added" | "modified" | "deleted";
+  oldLines: string[];
+  newLines: string[];
+  diffLines: string[];
+}
+
+interface EditorFindState {
+  readonly open: boolean;
+  readonly replaceOpen: boolean;
+  readonly query: string;
+  readonly replaceText: string;
+  readonly activeIndex: number;
+}
+
+interface EditorScrollMetrics {
+  readonly top: number;
+  readonly left: number;
+  readonly height: number;
+  readonly width: number;
+}
+
 export function App() {
   const queryClient = useQueryClient();
   const [initialLayout] = useState(loadWorkbenchLayout);
   const [projects, setProjects] = useState<SavedProject[]>(() =>
     loadSavedProjects(),
   );
+  const [appSettings, setAppSettings] = useState(loadAppSettings);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(
     () => loadSavedProjects()[0]?.id ?? null,
   );
@@ -202,15 +323,25 @@ export function App() {
   const [debouncedCommandQuery, setDebouncedCommandQuery] = useState("");
   const [commandSelectionIndex, setCommandSelectionIndex] = useState(0);
   const [projectSwitcherOpen, setProjectSwitcherOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [pullChoiceOpen, setPullChoiceOpen] = useState(false);
+  const [pullPending, setPullPending] = useState(false);
+  const [pullError, setPullError] = useState<string | null>(null);
   const [panelSizes, setPanelSizes] = useState<PanelSizes>(
     initialLayout.panelSizes,
   );
   const remoteFetchInFlightRef = useRef(false);
+  const branchPullInFlightRef = useRef(false);
+  const commandRestoreFocusRef = useRef<HTMLElement | null>(null);
   const previewRequestIdRef = useRef(0);
 
   useEffect(() => {
     saveProjects(projects);
   }, [projects]);
+
+  useEffect(() => {
+    saveAppSettings(appSettings);
+  }, [appSettings]);
 
   useEffect(() => {
     saveWorkbenchLayout({
@@ -311,6 +442,42 @@ export function App() {
     retry: false,
   });
 
+  const selectedProjectFile = useMemo(
+    () =>
+      (projectFilesQuery.data ?? repositoryQuery.data?.files ?? []).find(
+        (file) => file.path === selectedProjectPath,
+      ) ?? null,
+    [projectFilesQuery.data, repositoryQuery.data?.files, selectedProjectPath],
+  );
+
+  const fileWorktreeDiffQuery = useQuery({
+    queryKey: [
+      "file-worktree-diff",
+      activeProject?.activePath,
+      selectedProjectPath,
+      selectedProjectFile?.status,
+    ],
+    queryFn: async () => {
+      const rootPath = activeProject!.activePath;
+      const filePath = selectedProjectPath!;
+
+      return {
+        rootPath,
+        filePath,
+        diff: await getFileDiff(rootPath, filePath, null),
+      };
+    },
+    enabled: Boolean(
+      activeProject &&
+        selectedProjectPath &&
+        previewMode === "file" &&
+        selectedProjectFile?.status &&
+        isChangedFileStatus(selectedProjectFile.status),
+    ),
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+
   const fileSearchQuery = useQuery({
     queryKey: [
       "file-search",
@@ -367,6 +534,15 @@ export function App() {
     fileContentQuery.data?.filePath === selectedProjectPath
       ? fileContentQuery.data.file
       : null;
+  const currentWorktreeFileDiff =
+    fileWorktreeDiffQuery.data?.rootPath === activeProject?.activePath &&
+    fileWorktreeDiffQuery.data?.filePath === selectedProjectPath
+      ? fileWorktreeDiffQuery.data.diff
+      : "";
+  const editorGitMarkers = useMemo(
+    () => buildEditorGitMarkers(currentWorktreeFileDiff),
+    [currentWorktreeFileDiff],
+  );
   const editorKey =
     activeProject && selectedProjectPath
       ? editorDraftKey(activeProject.activePath, selectedProjectPath)
@@ -398,9 +574,6 @@ export function App() {
     debouncedCommandQuery.trim().length > 0
       ? (fileSearchQuery.data ?? [])
       : [];
-  const activeProjectDirtyDraftCount = activeProject
-    ? countDirtyDraftsForProject(editorDrafts, activeProject.activePath)
-    : 0;
   const dirtyDraftCount = countDirtyDrafts(editorDrafts);
   const dirtyPreviewTabIds = useMemo(() => {
     if (!activeProject) {
@@ -419,7 +592,12 @@ export function App() {
   }, [activeProject, editorDrafts, previewTabs]);
   const appShellStyle = {
     gridTemplateColumns: "56px minmax(0, 1fr)",
-  };
+    "--app-font-family": appSettings.fontFamily,
+    "--mono": appSettings.fontFamily,
+    "--editor-font-size": `${appSettings.fontSize}px`,
+    "--editor-font-weight": appSettings.fontWeight,
+    "--editor-line-height": String(appSettings.lineHeight),
+  } as CSSProperties;
   const contentGridStyle: CSSProperties = buildContentGridStyle(
     treeDock,
     toolDock,
@@ -438,6 +616,57 @@ export function App() {
     panelSizes.branch,
     panelSizes.details,
   );
+  const projectTreeTitle = useMemo(
+    () =>
+      activeProject ? (
+        <ProjectTreeTitle path={activeProject.activePath} />
+      ) : (
+        "Project"
+      ),
+    [activeProject?.activePath],
+  );
+  const clearDockDragRef = useRef(clearDockDrag);
+  const createFileFromTreeRef = useRef(createFileFromTree);
+  const deleteFileFromTreeRef = useRef(deleteFileFromTree);
+  const renameFileFromTreeRef = useRef(renameFileFromTree);
+  clearDockDragRef.current = clearDockDrag;
+  createFileFromTreeRef.current = createFileFromTree;
+  deleteFileFromTreeRef.current = deleteFileFromTree;
+  renameFileFromTreeRef.current = renameFileFromTree;
+  const handleTreeDragEnd = useCallback(() => {
+    clearDockDragRef.current();
+  }, []);
+  const handleTreeDragStart = useCallback(() => {
+    setDraggingTreePanel(true);
+  }, []);
+  const handleProjectTreeCreateFile = useCallback((parentPath: string | null) => {
+    void createFileFromTreeRef.current(parentPath);
+  }, []);
+  const handleProjectTreeDeleteFile = useCallback((path: string) => {
+    void deleteFileFromTreeRef.current(path);
+  }, []);
+  const handleProjectTreeRenameFile = useCallback(
+    (fromPath: string, toPath: string) => {
+      void renameFileFromTreeRef.current(fromPath, toPath);
+    },
+    [],
+  );
+  const handleProjectTreeSelectPath = useCallback((path: string) => {
+    const id = previewTabId("file", path, null);
+    const nextTab: PreviewTab = { id, mode: "file", path, commit: null };
+
+    setPreviewTabs((tabs) => {
+      if (tabs.some((tab) => tab.id === id)) {
+        return tabs;
+      }
+      return [...tabs, nextTab];
+    });
+    setActivePreviewTabId(id);
+    setPreviewMode("file");
+    setPreviewTarget(null);
+    setSelectedProjectPath(path);
+    setSelectedChangePath(null);
+  }, []);
 
   useEffect(() => {
     if (!editorKey || !currentFileContent) {
@@ -516,7 +745,7 @@ export function App() {
         (event.target.matches("input, textarea, [contenteditable='true']") ||
           event.target.closest("[data-command-panel]"));
 
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "p") {
+      if (matchesShortcut(event, appSettings.shortcuts.commandPanel)) {
         event.preventDefault();
         if (activeProject) {
           openCommandPanel();
@@ -524,7 +753,7 @@ export function App() {
         return;
       }
 
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+      if (matchesShortcut(event, appSettings.shortcuts.saveFile)) {
         if (
           !editableTarget ||
           event.target instanceof HTMLTextAreaElement
@@ -537,6 +766,47 @@ export function App() {
         return;
       }
 
+      if (matchesShortcut(event, appSettings.shortcuts.pullCurrentBranch)) {
+        event.preventDefault();
+        if (!activeProject || !isTauriRuntime()) {
+          return;
+        }
+        setPullError(null);
+        setPullChoiceOpen(true);
+        return;
+      }
+
+      if (matchesShortcut(event, appSettings.shortcuts.openGitLog)) {
+        event.preventDefault();
+        if (activeProject) {
+          setActivityView("git");
+          setToolPanelCollapsed(false);
+        }
+        return;
+      }
+
+      if (matchesShortcut(event, appSettings.shortcuts.openTerminal)) {
+        event.preventDefault();
+        if (activeProject) {
+          setActivityView("terminal");
+          setToolPanelCollapsed(false);
+        }
+        return;
+      }
+
+      if (matchesShortcut(event, appSettings.shortcuts.switchProject)) {
+        event.preventDefault();
+        setProjectSwitcherOpen((open) => !open);
+        setSettingsOpen(false);
+        return;
+      }
+
+      if (event.key === "Escape" && pullChoiceOpen) {
+        event.preventDefault();
+        setPullChoiceOpen(false);
+        return;
+      }
+
       if (event.key === "Escape" && commandOpen && !editableTarget) {
         event.preventDefault();
         closeCommandPanel();
@@ -545,7 +815,18 @@ export function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeEditorDraft, activeProject, commandOpen, previewMode]);
+  }, [
+    activeEditorDraft,
+    activeProject,
+    appSettings.shortcuts,
+    commandOpen,
+    commitsQuery.refetch,
+    fileWorktreeDiffQuery.refetch,
+    pullChoiceOpen,
+    previewMode,
+    projectFilesQuery.refetch,
+    repositoryQuery.refetch,
+  ]);
 
   useEffect(() => {
     if (dirtyDraftCount === 0) {
@@ -554,7 +835,6 @@ export function App() {
 
     function handleBeforeUnload(event: BeforeUnloadEvent) {
       event.preventDefault();
-      event.returnValue = "";
     }
 
     window.addEventListener("beforeunload", handleBeforeUnload);
@@ -737,6 +1017,8 @@ export function App() {
   }
 
   function openCommandPanel() {
+    commandRestoreFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setCommandOpen(true);
     setCommandQuery("");
     setDebouncedCommandQuery("");
@@ -748,6 +1030,14 @@ export function App() {
     setCommandQuery("");
     setDebouncedCommandQuery("");
     setCommandSelectionIndex(0);
+    const element = commandRestoreFocusRef.current;
+    commandRestoreFocusRef.current = null;
+    window.requestAnimationFrame(() => {
+      if (!element || !document.contains(element)) {
+        return;
+      }
+      element.focus({ preventScroll: true });
+    });
   }
 
   function openPreviewTab(mode: PreviewMode, path: string, targetLine: number | null = null) {
@@ -837,6 +1127,172 @@ export function App() {
   function openFileSearchResult(result: FileSearchResult) {
     openPreviewTab("file", result.path, result.lineNumber);
     closeCommandPanel();
+  }
+
+  async function refreshProjectFileState(projectPath: string) {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["project-files", projectPath] }),
+      queryClient.invalidateQueries({ queryKey: ["repository", projectPath] }),
+      queryClient.invalidateQueries({ queryKey: ["file-content", projectPath] }),
+      queryClient.invalidateQueries({ queryKey: ["file-worktree-diff", projectPath] }),
+      queryClient.invalidateQueries({ queryKey: ["file-diff", projectPath] }),
+    ]);
+  }
+
+  async function createFileFromTree(parentPath: string | null) {
+    if (!activeProject) {
+      return;
+    }
+
+    const input = window.prompt(
+      parentPath ? `New file path in ${parentPath}` : "New file path",
+      "untitled.txt",
+    );
+    if (input === null) {
+      return;
+    }
+
+    const requestedPath = buildRequestedFilePath(parentPath, input);
+    if (!requestedPath) {
+      return;
+    }
+
+    try {
+      const createdPath = await createProjectFile(activeProject.activePath, requestedPath);
+      await refreshProjectFileState(activeProject.activePath);
+      openPreviewTab("file", createdPath);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function renameFileFromTree(fromPath: string, toPath: string) {
+    if (!activeProject || fromPath === toPath) {
+      return;
+    }
+
+    const draftKey = editorDraftKey(activeProject.activePath, fromPath);
+    if (isDraftDirty(editorDrafts[draftKey])) {
+      const confirmed = window.confirm(
+        `Rename ${fromPath} and discard unsaved editor changes?`,
+      );
+      if (!confirmed) {
+        return;
+      }
+      setEditorDrafts((current) => omitDraft(current, draftKey));
+    }
+
+    try {
+      const renamedPath = await renameProjectFile(
+        activeProject.activePath,
+        fromPath,
+        toPath,
+      );
+      movePreviewTabPath(fromPath, renamedPath);
+      moveEditorDraftPath(activeProject.activePath, fromPath, renamedPath);
+      if (selectedProjectPath === fromPath) {
+        setSelectedProjectPath(renamedPath);
+      }
+      await refreshProjectFileState(activeProject.activePath);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : String(error));
+      await refreshProjectFileState(activeProject.activePath);
+    }
+  }
+
+  async function deleteFileFromTree(path: string) {
+    if (!activeProject) {
+      return;
+    }
+
+    const confirmed = window.confirm(`Delete ${path}?`);
+    if (!confirmed) {
+      return;
+    }
+
+    const draftKey = editorDraftKey(activeProject.activePath, path);
+    if (isDraftDirty(editorDrafts[draftKey])) {
+      const discardConfirmed = window.confirm(
+        `${path} has unsaved editor changes. Delete it and discard those changes?`,
+      );
+      if (!discardConfirmed) {
+        return;
+      }
+    }
+
+    try {
+      await deleteProjectFile(activeProject.activePath, path);
+      setEditorDrafts((current) => omitDraft(current, draftKey));
+      removePreviewTabsForPath(path);
+      await refreshProjectFileState(activeProject.activePath);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  function movePreviewTabPath(fromPath: string, toPath: string) {
+    const fromTabId = previewTabId("file", fromPath, null);
+    const toTabId = previewTabId("file", toPath, null);
+    setPreviewTabs((tabs) =>
+      tabs.map((tab) =>
+        tab.mode === "file" && tab.path === fromPath
+          ? { ...tab, id: toTabId, path: toPath }
+          : tab,
+      ),
+    );
+    if (activePreviewTabId === fromTabId) {
+      setActivePreviewTabId(toTabId);
+    }
+  }
+
+  function removePreviewTabsForPath(path: string) {
+    const removedTabIds = new Set(
+      previewTabs
+        .filter((tab) => tab.mode === "file" && tab.path === path)
+        .map((tab) => tab.id),
+    );
+    if (removedTabIds.size === 0) {
+      return;
+    }
+
+    const removedIndex = previewTabs.findIndex((tab) => removedTabIds.has(tab.id));
+    const nextTabs = previewTabs.filter((tab) => !removedTabIds.has(tab.id));
+    setPreviewTabs(nextTabs);
+    if (activePreviewTabId && removedTabIds.has(activePreviewTabId)) {
+      const nextTab =
+        nextTabs[Math.max(0, removedIndex - 1)] ?? nextTabs[0] ?? null;
+      if (nextTab) {
+        activatePreviewTab(nextTab);
+        return;
+      }
+
+      setActivePreviewTabId(null);
+      setSelectedProjectPath(null);
+      setSelectedChangePath(null);
+      setPreviewMode("file");
+      setPreviewTarget(null);
+      return;
+    }
+
+    if (selectedProjectPath === path) {
+      setSelectedProjectPath(null);
+    }
+  }
+
+  function moveEditorDraftPath(projectPath: string, fromPath: string, toPath: string) {
+    const fromKey = editorDraftKey(projectPath, fromPath);
+    const toKey = editorDraftKey(projectPath, toPath);
+    setEditorDrafts((current) => {
+      const draft = current[fromKey];
+      if (!draft) {
+        return current;
+      }
+      const { [fromKey]: _removed, ...remaining } = current;
+      return {
+        ...remaining,
+        [toKey]: draft,
+      };
+    });
   }
 
   function dockToolPanel(panel: ToolPanelId, dock: ToolDock) {
@@ -935,6 +1391,33 @@ export function App() {
       setToolPanelCollapsed(false);
     }
     clearDockDrag();
+  }
+
+  async function performPull(mode: PullMode) {
+    if (!activeProject || branchPullInFlightRef.current) {
+      return;
+    }
+
+    branchPullInFlightRef.current = true;
+    setPullPending(true);
+    setPullError(null);
+    try {
+      await pullCurrentBranch(activeProject.activePath, mode);
+      setPullChoiceOpen(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setPullError(message);
+      console.warn("Failed to pull current branch", error);
+    } finally {
+      await Promise.all([
+        repositoryQuery.refetch(),
+        commitsQuery.refetch(),
+        projectFilesQuery.refetch(),
+        fileWorktreeDiffQuery.refetch(),
+      ]);
+      branchPullInFlightRef.current = false;
+      setPullPending(false);
+    }
   }
 
   function updateEditorDraft(content: string) {
@@ -1108,6 +1591,7 @@ export function App() {
       <section className="history-panel">
         <VirtualCommitList
           commits={filteredCommits}
+          graphWidthCommits={commits}
           activeCommit={activeCommit}
           filter={commitFilter}
           loading={commitsQuery.isLoading}
@@ -1155,20 +1639,15 @@ export function App() {
         <TreePanel
           files={projectFilesQuery.data}
           selectedPath={selectedProjectPath}
-          title={
-            activeProject ? (
-              <ProjectTreeTitle path={activeProject.activePath} />
-            ) : (
-              "Project"
-            )
-          }
+          title={projectTreeTitle}
           emptyTitle="No project files"
           emptyCopy="Tracked and untracked files will appear here."
-          onDragEnd={clearDockDrag}
-          onDragStart={() => setDraggingTreePanel(true)}
-          onSelectPath={(path) => {
-            openPreviewTab("file", path);
-          }}
+          onDragEnd={handleTreeDragEnd}
+          onDragStart={handleTreeDragStart}
+          onCreateFile={handleProjectTreeCreateFile}
+          onDeleteFile={handleProjectTreeDeleteFile}
+          onRenameFile={handleProjectTreeRenameFile}
+          onSelectPath={handleProjectTreeSelectPath}
         />
       ) : (
         <LoadingRows />
@@ -1321,7 +1800,41 @@ export function App() {
         </div>
 
         <div className="rail-spacer" />
+        <button
+          className={
+            settingsOpen
+              ? "activity-button rail-project-button active"
+              : "activity-button rail-project-button"
+          }
+          aria-label="Settings"
+          title="Settings"
+          onClick={() => {
+            setSettingsOpen((open) => !open);
+            setProjectSwitcherOpen(false);
+          }}
+        >
+          <SettingsIcon size={18} />
+        </button>
       </aside>
+
+      {settingsOpen ? (
+        <SettingsPage
+          settings={appSettings}
+          onChange={setAppSettings}
+          onClose={() => setSettingsOpen(false)}
+          onReset={() => setAppSettings(defaultAppSettings)}
+        />
+      ) : null}
+
+      {pullChoiceOpen ? (
+        <PullChoiceDialog
+          error={pullError}
+          pending={pullPending}
+          projectName={activeProject?.name ?? "current project"}
+          onCancel={() => setPullChoiceOpen(false)}
+          onPull={(mode) => void performPull(mode)}
+        />
+      ) : null}
 
       <section className="workspace">
         {!activeProject ? (
@@ -1377,6 +1890,7 @@ export function App() {
                 loading={
                   repositoryQuery.isFetching ||
                   fileDiffQuery.isFetching ||
+                  fileWorktreeDiffQuery.isFetching ||
                   fileContentQuery.isFetching
                 }
                 onCloseTab={closePreviewTab}
@@ -1393,12 +1907,16 @@ export function App() {
               {previewMode === "file" ? (
                 <FilePreview
                   draft={activeEditorDraft}
+                  editorSessionKey={activePreviewTabId}
                   error={
                     fileContentQuery.isError
                       ? String(fileContentQuery.error.message)
                       : null
                   }
                   file={currentFileContent}
+                  editorFontSize={appSettings.fontSize}
+                  editorLineHeightRatio={appSettings.lineHeight}
+                  gitMarkers={editorGitMarkers}
                   loading={Boolean(
                     selectedProjectPath &&
                       fileContentQuery.isFetching &&
@@ -1527,6 +2045,138 @@ export function App() {
         onSelectIndex={setCommandSelectionIndex}
       />
     </main>
+  );
+}
+
+function SettingsPage({
+  settings,
+  onChange,
+  onClose,
+  onReset,
+}: {
+  settings: AppSettings;
+  onChange(settings: AppSettings): void;
+  onClose(): void;
+  onReset(): void;
+}) {
+  const updateShortcut = (action: ShortcutAction, shortcut: string) => {
+    onChange({
+      ...settings,
+      shortcuts: {
+        ...settings.shortcuts,
+        [action]: shortcut,
+      },
+    });
+  };
+
+  return (
+    <section className="settings-page" aria-label="Settings">
+      <div className="settings-panel">
+        <div className="settings-head">
+          <div>
+            <span>Settings</span>
+            <small>Editor, terminal and shortcuts</small>
+          </div>
+          <button className="icon-button" aria-label="Close settings" onClick={onClose}>
+            <X size={14} />
+          </button>
+        </div>
+        <div className="settings-body">
+          <section className="settings-section">
+            <div className="settings-section-title">
+              <Type size={14} />
+              <span>Font</span>
+            </div>
+            <label className="settings-field wide">
+              <span>Family</span>
+              <input
+                value={settings.fontFamily}
+                spellCheck={false}
+                onChange={(event) =>
+                  onChange({ ...settings, fontFamily: event.target.value })
+                }
+              />
+            </label>
+            <div className="settings-grid">
+              <label className="settings-field">
+                <span>Size</span>
+                <input
+                  type="number"
+                  min={10}
+                  max={22}
+                  value={settings.fontSize}
+                  onChange={(event) =>
+                    onChange({
+                      ...settings,
+                      fontSize: clamp(Number(event.target.value), 10, 22),
+                    })
+                  }
+                />
+              </label>
+              <label className="settings-field">
+                <span>Weight</span>
+                <select
+                  value={settings.fontWeight}
+                  onChange={(event) =>
+                    onChange({ ...settings, fontWeight: event.target.value })
+                  }
+                >
+                  <option value="300">Light</option>
+                  <option value="400">Regular</option>
+                  <option value="500">Medium</option>
+                  <option value="600">Semibold</option>
+                </select>
+              </label>
+              <label className="settings-field">
+                <span>Line height</span>
+                <input
+                  type="number"
+                  min={1.2}
+                  max={2}
+                  step={0.05}
+                  value={settings.lineHeight}
+                  onChange={(event) =>
+                    onChange({
+                      ...settings,
+                      lineHeight: clamp(Number(event.target.value), 1.2, 2),
+                    })
+                  }
+                />
+              </label>
+            </div>
+          </section>
+          <section className="settings-section">
+            <div className="settings-section-title">
+              <Keyboard size={14} />
+              <span>Shortcuts</span>
+            </div>
+            <div className="shortcut-list">
+              {shortcutRows.map((row) => (
+                <label key={row.action} className="shortcut-row">
+                  <span>
+                    {row.label}
+                    <small>{row.description}</small>
+                  </span>
+                  <input
+                    value={settings.shortcuts[row.action]}
+                    spellCheck={false}
+                    onChange={(event) => updateShortcut(row.action, event.target.value)}
+                  />
+                </label>
+              ))}
+            </div>
+          </section>
+        </div>
+        <div className="settings-footer">
+          <button className="ghost-button settings-action" onClick={onReset}>
+            Reset
+          </button>
+          <button className="primary-action settings-action" onClick={onClose}>
+            Done
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1899,8 +2549,12 @@ function WorkbenchDockOverlay({
 
 function FilePreview({
   draft,
+  editorSessionKey,
   error,
   file,
+  editorFontSize,
+  editorLineHeightRatio,
+  gitMarkers,
   loading,
   saveError,
   saving,
@@ -1912,8 +2566,12 @@ function FilePreview({
   onSetConflictDraftContent,
 }: {
   draft: EditorDraft | null;
+  editorSessionKey: string | null;
   error: string | null;
   file: FileContent | null;
+  editorFontSize: number;
+  editorLineHeightRatio: number;
+  gitMarkers: EditorGitMarker[];
   loading: boolean;
   saveError: string | null;
   saving: boolean;
@@ -1925,10 +2583,59 @@ function FilePreview({
   onSetConflictDraftContent(content: string): void;
 }) {
   const frameRef = useRef<HTMLElement | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const targetLineRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const lineNumberTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const replaceInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingEditorSelectionRef = useRef<{ start: number; end: number } | null>(
+    null,
+  );
+  const editorSearchRequestRef = useRef(0);
+  const editorSearchTimerRef = useRef<number | null>(null);
+  const editorFindStatesRef = useRef(new Map<string, EditorFindState>());
+  const currentEditorSessionKeyRef = useRef<string | null>(editorSessionKey);
+  const currentEditorFindStateRef = useRef<EditorFindState>({
+    open: false,
+    replaceOpen: false,
+    query: "",
+    replaceText: "",
+    activeIndex: 0,
+  });
+  const pendingEditorScrollMetricsRef = useRef<EditorScrollMetrics | null>(null);
+  const editorScrollFrameRef = useRef<number | null>(null);
+  const [editorFindOpen, setEditorFindOpen] = useState(false);
+  const [editorReplaceOpen, setEditorReplaceOpen] = useState(false);
+  const [editorFindQuery, setEditorFindQuery] = useState("");
+  const [editorReplaceText, setEditorReplaceText] = useState("");
+  const [editorMatches, setEditorMatches] = useState<EditorTextMatch[]>([]);
+  const [editorSearchPending, setEditorSearchPending] = useState(false);
+  const [activeEditorMatchIndex, setActiveEditorMatchIndex] = useState(0);
+  const [activeGitMarkerId, setActiveGitMarkerId] = useState<string | null>(null);
+  const [fileViewMode, setFileViewMode] = useState<FileViewMode>("source");
+  const [editorScrollTop, setEditorScrollTop] = useState(0);
+  const [editorScrollLeft, setEditorScrollLeft] = useState(0);
+  const [editorViewportHeight, setEditorViewportHeight] = useState(0);
+  const [editorViewportWidth, setEditorViewportWidth] = useState(0);
+  const [editorLineHeight, setEditorLineHeight] = useState(
+    editorFontSize * editorLineHeightRatio,
+  );
+  const [editorPaddingTop, setEditorPaddingTop] = useState(12);
+  const [gitPopoverLeftOffset, setGitPopoverLeftOffset] = useState(0);
   const content = draft?.content ?? file?.content ?? "";
   const conflict = draft?.conflict ?? null;
+  const mediaDataUrl = file?.mediaDataUrl ?? null;
+  const mediaType = file?.mediaType ?? null;
+  const renderableMedia = Boolean(mediaDataUrl && mediaType?.startsWith("image/"));
+  const canShowMediaSource = Boolean(file && !file.binary && !file.tooLarge);
+  const fallbackEditorLineHeight = editorFontSize * editorLineHeightRatio;
+  currentEditorFindStateRef.current = {
+    open: editorFindOpen,
+    replaceOpen: editorReplaceOpen,
+    query: editorFindQuery,
+    replaceText: editorReplaceText,
+    activeIndex: activeEditorMatchIndex,
+  };
   const lines = useMemo(() => {
     if (!content) {
       return [];
@@ -1936,6 +2643,60 @@ function FilePreview({
 
     return content.length > 0 ? content.split(/\r?\n/) : [""];
   }, [content]);
+  const visibleGitMarkers = useMemo(
+    () => filterVisibleEditorGitMarkers(gitMarkers, content),
+    [content, gitMarkers],
+  );
+  const activeEditorMatch =
+    editorMatches.length > 0
+      ? editorMatches[Math.min(activeEditorMatchIndex, editorMatches.length - 1)]
+      : null;
+  const activeGitMarker =
+    visibleGitMarkers.find((marker) => marker.id === activeGitMarkerId) ?? null;
+  const gitPopoverWidth = Math.min(430, Math.max(260, editorViewportWidth - 74));
+  const gitPopoverLeft = clamp(
+    44 + gitPopoverLeftOffset,
+    12,
+    Math.max(12, editorViewportWidth - gitPopoverWidth - 12),
+  );
+  const editorLineNumberText = useMemo(
+    () =>
+      Array.from({ length: Math.max(1, lines.length) }, (_, index) =>
+        String(index + 1),
+      ).join("\n"),
+    [lines.length],
+  );
+  useLayoutEffect(() => {
+    const previousKey = currentEditorSessionKeyRef.current;
+    if (previousKey === editorSessionKey) {
+      return;
+    }
+
+    if (previousKey) {
+      editorFindStatesRef.current.set(previousKey, currentEditorFindStateRef.current);
+    }
+
+    const nextState = editorSessionKey
+      ? editorFindStatesRef.current.get(editorSessionKey)
+      : undefined;
+    currentEditorSessionKeyRef.current = editorSessionKey;
+    setEditorFindOpen(nextState?.open ?? false);
+    setEditorReplaceOpen(nextState?.replaceOpen ?? false);
+    setEditorFindQuery(nextState?.query ?? "");
+    setEditorReplaceText(nextState?.replaceText ?? "");
+    setActiveEditorMatchIndex(nextState?.activeIndex ?? 0);
+    setEditorMatches([]);
+    setEditorSearchPending(false);
+  }, [editorSessionKey]);
+
+  useEffect(() => {
+    return () => {
+      if (editorScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(editorScrollFrameRef.current);
+        editorScrollFrameRef.current = null;
+      }
+    };
+  }, []);
 
   useLayoutEffect(() => {
     if (!target || !file) {
@@ -1968,9 +2729,499 @@ function FilePreview({
       return;
     }
 
-    const lineHeight = 19;
-    textareaRef.current.scrollTop = Math.max(0, (target.line - 1) * lineHeight - 120);
+    textareaRef.current.scrollTop = Math.max(
+      0,
+      (target.line - 1) * editorLineHeight - 120,
+    );
+    syncEditorScrollMetrics(textareaRef.current, true);
   }, [target]);
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea || textarea.value === content) {
+      return;
+    }
+
+    textarea.value = content;
+    syncEditorScrollMetrics(textarea, true);
+  }, [content, file?.path]);
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+
+    const updateViewportHeight = () => {
+      const style = window.getComputedStyle(textarea);
+      setEditorViewportHeight(textarea.clientHeight);
+      setEditorViewportWidth(textarea.clientWidth);
+      setEditorLineHeight(measureEditorLineHeight(style, fallbackEditorLineHeight));
+      setEditorPaddingTop(parseCssPixels(style.paddingTop, 12));
+      syncEditorScrollMetrics(textarea, true);
+    };
+    updateViewportHeight();
+    const observer = new ResizeObserver(updateViewportHeight);
+    observer.observe(textarea);
+    return () => observer.disconnect();
+  }, [editorFontSize, fallbackEditorLineHeight, file?.path]);
+
+  useEffect(() => {
+    if (!editorFindOpen || editorReplaceOpen) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      textareaRef.current?.focus({ preventScroll: true });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [editorFindOpen, editorReplaceOpen]);
+
+  useEffect(() => {
+    const requestId = editorSearchRequestRef.current + 1;
+    editorSearchRequestRef.current = requestId;
+    const query = editorFindQuery.trim();
+    if (editorSearchTimerRef.current !== null) {
+      window.clearTimeout(editorSearchTimerRef.current);
+      editorSearchTimerRef.current = null;
+    }
+
+    if (!editorFindOpen || !query) {
+      setEditorMatches([]);
+      setEditorSearchPending(false);
+      setActiveEditorMatchIndex(0);
+      return;
+    }
+
+    setEditorSearchPending(true);
+    editorSearchTimerRef.current = window.setTimeout(() => {
+      editorSearchTimerRef.current = null;
+      searchEditorText(content, query)
+        .then((response) => {
+          if (editorSearchRequestRef.current !== requestId) {
+            return;
+          }
+          setEditorMatches(response.matches);
+          setActiveEditorMatchIndex(0);
+          if (response.matches[0]) {
+            window.requestAnimationFrame(() => {
+              if (editorSearchRequestRef.current === requestId) {
+                revealEditorMatch(response.matches[0], true);
+              }
+            });
+          }
+        })
+        .catch(() => {
+          if (editorSearchRequestRef.current !== requestId) {
+            return;
+          }
+          setEditorMatches([]);
+          setActiveEditorMatchIndex(0);
+        })
+        .finally(() => {
+          if (editorSearchRequestRef.current === requestId) {
+            setEditorSearchPending(false);
+          }
+        });
+    }, 220);
+
+    return () => {
+      if (editorSearchTimerRef.current !== null) {
+        window.clearTimeout(editorSearchTimerRef.current);
+        editorSearchTimerRef.current = null;
+      }
+    };
+  }, [content, editorFindOpen, editorFindQuery, editorReplaceOpen]);
+
+  useEffect(() => {
+    if (activeEditorMatchIndex < editorMatches.length) {
+      return;
+    }
+
+    setActiveEditorMatchIndex(Math.max(0, editorMatches.length - 1));
+  }, [activeEditorMatchIndex, editorMatches.length]);
+
+  useEffect(() => {
+    setActiveGitMarkerId(null);
+    setGitPopoverLeftOffset(0);
+  }, [file?.path]);
+
+  useEffect(() => {
+    if (!renderableMedia) {
+      setFileViewMode("source");
+      return;
+    }
+
+    setFileViewMode("preview");
+  }, [file?.path, renderableMedia]);
+
+  useEffect(() => {
+    if (fileViewMode === "source" && !canShowMediaSource) {
+      setFileViewMode("preview");
+    }
+  }, [canShowMediaSource, fileViewMode]);
+
+  useEffect(() => {
+    if (!activeGitMarkerId) {
+      return;
+    }
+    if (!visibleGitMarkers.some((marker) => marker.id === activeGitMarkerId)) {
+      setActiveGitMarkerId(null);
+    }
+  }, [activeGitMarkerId, visibleGitMarkers]);
+
+  useLayoutEffect(() => {
+    const pendingSelection = pendingEditorSelectionRef.current;
+    if (!pendingSelection || !textareaRef.current) {
+      return;
+    }
+
+    pendingEditorSelectionRef.current = null;
+    textareaRef.current.focus({ preventScroll: true });
+    textareaRef.current.setSelectionRange(
+      pendingSelection.start,
+      pendingSelection.end,
+    );
+  }, [content]);
+
+  function openEditorFind(replace: boolean) {
+    setEditorFindOpen(true);
+    setEditorReplaceOpen(replace);
+    const selection = getTextareaSelection(textareaRef.current);
+    if (selection && selection.start !== selection.end) {
+      setEditorFindQuery(content.slice(selection.start, selection.end));
+      setActiveEditorMatchIndex(0);
+    }
+  }
+
+  function closeEditorFind() {
+    setEditorFindOpen(false);
+    setEditorReplaceOpen(false);
+    textareaRef.current?.focus({ preventScroll: true });
+  }
+
+  function applyEditorScrollVars(metrics: EditorScrollMetrics) {
+    const stage = stageRef.current;
+    if (!stage) {
+      return;
+    }
+
+    stage.style.setProperty("--editor-scroll-top", `${metrics.top}px`);
+    stage.style.setProperty("--editor-scroll-left", `${metrics.left}px`);
+    if (lineNumberTextareaRef.current) {
+      lineNumberTextareaRef.current.scrollTop = metrics.top;
+    }
+  }
+
+  function commitEditorScrollMetrics(metrics: EditorScrollMetrics) {
+    setEditorScrollTop(metrics.top);
+    setEditorScrollLeft(metrics.left);
+    setEditorViewportHeight(metrics.height);
+    setEditorViewportWidth(metrics.width);
+  }
+
+  function syncEditorScrollMetrics(
+    textarea: HTMLTextAreaElement,
+    immediate: boolean,
+  ) {
+    const metrics: EditorScrollMetrics = {
+      top: textarea.scrollTop,
+      left: textarea.scrollLeft,
+      height: textarea.clientHeight,
+      width: textarea.clientWidth,
+    };
+    applyEditorScrollVars(metrics);
+
+    if (immediate) {
+      if (editorScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(editorScrollFrameRef.current);
+        editorScrollFrameRef.current = null;
+      }
+      pendingEditorScrollMetricsRef.current = null;
+      commitEditorScrollMetrics(metrics);
+      return;
+    }
+
+    pendingEditorScrollMetricsRef.current = metrics;
+    if (editorScrollFrameRef.current !== null) {
+      return;
+    }
+
+    editorScrollFrameRef.current = window.requestAnimationFrame(() => {
+      editorScrollFrameRef.current = null;
+      const pendingMetrics = pendingEditorScrollMetricsRef.current;
+      pendingEditorScrollMetricsRef.current = null;
+      if (pendingMetrics) {
+        commitEditorScrollMetrics(pendingMetrics);
+      }
+    });
+  }
+
+  function selectEditorMatch(index: number) {
+    if (editorMatches.length === 0 || !textareaRef.current) {
+      return;
+    }
+
+    const nextIndex = wrapIndex(index, editorMatches.length);
+    const match = editorMatches[nextIndex];
+    setActiveEditorMatchIndex(nextIndex);
+    revealEditorMatch(match, true);
+  }
+
+  function revealEditorMatch(match: EditorTextMatch, focusEditor: boolean) {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+
+    const lineTop = editorPaddingTop + (match.lineNumber - 1) * editorLineHeight;
+    const visibleTop = textarea.scrollTop;
+    const visibleBottom = visibleTop + textarea.clientHeight;
+    const margin = editorLineHeight * 4;
+
+    if (lineTop < visibleTop + margin || lineTop > visibleBottom - margin) {
+      textarea.scrollTop = Math.max(
+        0,
+        lineTop - textarea.clientHeight / 2 + editorLineHeight,
+      );
+    }
+    if (focusEditor) {
+      textarea.focus({ preventScroll: true });
+    }
+    textarea.setSelectionRange(match.start, match.end);
+    syncEditorScrollMetrics(textarea, true);
+  }
+
+  async function replaceCurrentEditorMatch() {
+    const textarea = textareaRef.current;
+    if (!textarea || !activeEditorMatch) {
+      return;
+    }
+
+    const sourceContent = content;
+    const response = await replaceEditorText(
+      sourceContent,
+      editorFindQuery,
+      editorReplaceText,
+      activeEditorMatchIndex,
+      false,
+    );
+    if (textarea.value !== sourceContent) {
+      return;
+    }
+    textarea.focus({ preventScroll: true });
+    textarea.setRangeText(
+      editorReplaceText,
+      activeEditorMatch.start,
+      activeEditorMatch.end,
+      "select",
+    );
+    pendingEditorSelectionRef.current = {
+      start: response.selectionStart,
+      end: response.selectionEnd,
+    };
+    onChangeDraft(textarea.value);
+    setEditorMatches(response.matches);
+    setActiveEditorMatchIndex(nextMatchIndexAfter(response.matches, response.selectionEnd));
+  }
+
+  async function replaceAllEditorMatches() {
+    if (editorMatches.length === 0) {
+      return;
+    }
+
+    const sourceContent = content;
+    const response = await replaceEditorText(
+      sourceContent,
+      editorFindQuery,
+      editorReplaceText,
+      activeEditorMatchIndex,
+      true,
+    );
+    const textarea = textareaRef.current;
+    if (textarea) {
+      if (textarea.value !== sourceContent) {
+        return;
+      }
+      textarea.focus({ preventScroll: true });
+      textarea.setRangeText(response.content, 0, textarea.value.length, "start");
+      onChangeDraft(textarea.value);
+    } else {
+      onChangeDraft(response.content);
+    }
+    pendingEditorSelectionRef.current = {
+      start: response.selectionStart,
+      end: response.selectionEnd,
+    };
+    setEditorMatches(response.matches);
+    setActiveEditorMatchIndex(0);
+  }
+
+  function handleEditorKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    const key = event.key.toLowerCase();
+    if (editorFindOpen && routeEditorKeyToFind(event)) {
+      return;
+    }
+    if ((event.metaKey || event.ctrlKey) && key === "f") {
+      event.preventDefault();
+      openEditorFind(false);
+      return;
+    }
+    if ((event.metaKey || event.ctrlKey) && key === "r") {
+      event.preventDefault();
+      openEditorFind(true);
+    }
+  }
+
+  function routeEditorKeyToFind(event: KeyboardEvent<HTMLTextAreaElement>): boolean {
+    if (event.metaKey || event.ctrlKey || event.altKey) {
+      return false;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeEditorFind();
+      return true;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      selectEditorMatch(event.shiftKey ? activeEditorMatchIndex - 1 : activeEditorMatchIndex + 1);
+      return true;
+    }
+    if (event.key === "Backspace") {
+      event.preventDefault();
+      setEditorFindQuery((current) => current.slice(0, -1));
+      setActiveEditorMatchIndex(0);
+      return true;
+    }
+    if (event.key === "Delete") {
+      event.preventDefault();
+      setEditorFindQuery("");
+      setActiveEditorMatchIndex(0);
+      return true;
+    }
+    if (event.key.length !== 1) {
+      return false;
+    }
+
+    return false;
+  }
+
+  function handleEditorBeforeInput(event: ReactInputEvent<HTMLTextAreaElement>) {
+    if (!editorFindOpen || editorReplaceOpen) {
+      return;
+    }
+
+    const nativeEvent = event.nativeEvent;
+    if (!(nativeEvent instanceof InputEvent)) {
+      return;
+    }
+
+    if (
+      nativeEvent.inputType !== "insertText" &&
+      nativeEvent.inputType !== "insertCompositionText"
+    ) {
+      return;
+    }
+
+    const text = nativeEvent.data ?? "";
+    if (!text) {
+      return;
+    }
+
+    event.preventDefault();
+    setEditorFindQuery((current) => `${current}${text}`);
+    setActiveEditorMatchIndex(0);
+  }
+
+  function handleEditorPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    if (!editorFindOpen || editorReplaceOpen) {
+      return;
+    }
+
+    const text = event.clipboardData.getData("text");
+    if (!text) {
+      return;
+    }
+
+    event.preventDefault();
+    setEditorFindQuery((current) => `${current}${text}`);
+    setActiveEditorMatchIndex(0);
+  }
+
+  function handleEditorScroll(event: UIEvent<HTMLTextAreaElement>) {
+    syncEditorScrollMetrics(event.currentTarget, false);
+  }
+
+  function revealGitMarker(marker: EditorGitMarker) {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+
+    const lineTop = editorPaddingTop + (marker.line - 1) * editorLineHeight;
+    const visibleTop = textarea.scrollTop;
+    const visibleBottom = visibleTop + textarea.clientHeight;
+    const margin = editorLineHeight * 3;
+
+    if (lineTop < visibleTop + margin || lineTop > visibleBottom - margin) {
+      textarea.scrollTop = Math.max(
+        0,
+        lineTop - textarea.clientHeight / 2 + editorLineHeight,
+      );
+    }
+    syncEditorScrollMetrics(textarea, true);
+  }
+
+  function toggleGitMarker(marker: EditorGitMarker) {
+    setActiveGitMarkerId((current) => {
+      const next = current === marker.id ? null : marker.id;
+      if (next !== current) {
+        setGitPopoverLeftOffset(0);
+      }
+      return next;
+    });
+    revealGitMarker(marker);
+  }
+
+  function revertGitMarker(marker: EditorGitMarker) {
+    const nextContent = revertEditorGitMarker(content, marker);
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.focus({ preventScroll: true });
+      textarea.value = nextContent;
+      const selectionLine = Math.max(1, marker.newStart);
+      const selectionStart = utf16OffsetForLine(nextContent, selectionLine);
+      textarea.setSelectionRange(selectionStart, selectionStart);
+      textarea.scrollTop = editorScrollTop;
+      syncEditorScrollMetrics(textarea, true);
+    }
+    onChangeDraft(nextContent);
+    setActiveGitMarkerId(null);
+  }
+
+  function handleEditorFindKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const key = event.key.toLowerCase();
+    if (key === "escape") {
+      event.preventDefault();
+      closeEditorFind();
+      return;
+    }
+    if ((event.metaKey || event.ctrlKey) && key === "r") {
+      event.preventDefault();
+      setEditorReplaceOpen(true);
+      window.requestAnimationFrame(() => replaceInputRef.current?.focus());
+      return;
+    }
+    if (key === "enter") {
+      event.preventDefault();
+      if (event.shiftKey) {
+        selectEditorMatch(activeEditorMatchIndex - 1);
+      } else {
+        selectEditorMatch(activeEditorMatchIndex + 1);
+      }
+    }
+  }
 
   if (loading) {
     return (
@@ -2004,7 +3255,18 @@ function FilePreview({
     return null;
   }
 
-  if (file.binary) {
+  if (file.tooLarge) {
+    return (
+      <div className="empty-state">
+        <div className="empty-title">File is too large</div>
+        <div className="empty-copy">
+          Files larger than the preview limit are not opened here.
+        </div>
+      </div>
+    );
+  }
+
+  if (file.binary && !renderableMedia) {
     return (
       <div className="empty-state">
         <div className="empty-title">Binary file</div>
@@ -2013,14 +3275,67 @@ function FilePreview({
     );
   }
 
-  if (file.tooLarge) {
+  if (renderableMedia && fileViewMode === "preview") {
     return (
-      <div className="empty-state">
-        <div className="empty-title">File is too large</div>
-        <div className="empty-copy">
-          Files larger than 1 MB are not opened in the preview.
+      <section className="media-preview-shell" aria-label={file.path}>
+        <MediaViewToolbar
+          canShowSource={canShowMediaSource}
+          mediaType={mediaType}
+          mode={fileViewMode}
+          path={file.path}
+          onChangeMode={setFileViewMode}
+        />
+        <div className="media-preview-stage">
+          <img className="media-preview-image" src={mediaDataUrl ?? ""} alt={file.path} />
         </div>
-      </div>
+      </section>
+    );
+  }
+
+  const gitConflict = !conflict && hasGitConflictMarkers(content);
+  if (gitConflict) {
+    return (
+      <section className="merge-page" aria-label={`Resolve ${file.path}`}>
+        <div className="editor-toolbar conflict-toolbar">
+          <div className="editor-status conflict">
+            <AlertTriangle size={14} />
+            <span>Merge conflict</span>
+            <small>{file.path}</small>
+          </div>
+          <div className="editor-actions">
+            <button className="primary-action editor-save" disabled={saving} onClick={onSave}>
+              {saving ? <Loader2 className="spin" size={14} /> : <Save size={14} />}
+              Save resolved
+            </button>
+          </div>
+        </div>
+        <div className="merge-diff-frame">
+          <UnresolvedFile
+            file={gitConflictToMarkerFile(file.path, content)}
+            className="diff-view merge-conflict-view"
+            options={{
+              mergeConflictActionsType: "none",
+              overflow: "scroll",
+              tokenizeMaxLineLength: 400,
+              theme: {
+                light: "pierre-light",
+                dark: "pierre-dark",
+              },
+              themeType: "dark",
+            }}
+          />
+        </div>
+        <textarea
+          ref={textareaRef}
+          className="file-editor merge-editor"
+          spellCheck={false}
+          defaultValue={content}
+          onKeyDown={handleEditorKeyDown}
+          onScroll={handleEditorScroll}
+          onChange={(event) => onChangeDraft(event.target.value)}
+        />
+        {saveError ? <div className="editor-error">{saveError}</div> : null}
+      </section>
     );
   }
 
@@ -2074,7 +3389,9 @@ function FilePreview({
           ref={textareaRef}
           className="file-editor merge-editor"
           spellCheck={false}
-          value={content}
+          defaultValue={content}
+          onKeyDown={handleEditorKeyDown}
+          onScroll={handleEditorScroll}
           onChange={(event) => onChangeDraft(event.target.value)}
         />
         {saveError ? <div className="editor-error">{saveError}</div> : null}
@@ -2082,8 +3399,112 @@ function FilePreview({
     );
   }
 
+  const editorShellClassName = [
+    "file-editor-shell",
+    editorFindOpen ? "find-open" : "",
+    renderableMedia ? "media-source-open" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <section className="file-editor-shell" aria-label={file.path}>
+    <section
+      className={editorShellClassName}
+      aria-label={file.path}
+    >
+      {renderableMedia ? (
+        <MediaViewToolbar
+          canShowSource={canShowMediaSource}
+          mediaType={mediaType}
+          mode={fileViewMode}
+          path={file.path}
+          onChangeMode={setFileViewMode}
+        />
+      ) : null}
+      {editorFindOpen ? (
+        <div className="editor-findbar" onKeyDown={handleEditorFindKeyDown}>
+          <Search size={14} />
+          <input
+            aria-label="Find in file"
+            placeholder="Find"
+            readOnly={!editorReplaceOpen}
+            tabIndex={editorReplaceOpen ? 0 : -1}
+            value={editorFindQuery}
+            onChange={(event) => {
+              if (!editorReplaceOpen) {
+                return;
+              }
+              setEditorFindQuery(event.target.value);
+              setActiveEditorMatchIndex(0);
+            }}
+            onMouseDown={(event) => {
+              if (editorReplaceOpen) {
+                return;
+              }
+              event.preventDefault();
+              textareaRef.current?.focus({ preventScroll: true });
+            }}
+          />
+          <span className="editor-find-count">
+            {editorSearchPending
+              ? "..."
+              : editorFindQuery
+                ? `${editorMatches.length === 0 ? 0 : activeEditorMatchIndex + 1}/${editorMatches.length}`
+                : "0/0"}
+          </span>
+          <button
+            type="button"
+            className="ghost-button editor-find-action"
+            disabled={editorMatches.length === 0}
+            onClick={() => selectEditorMatch(activeEditorMatchIndex - 1)}
+          >
+            Prev
+          </button>
+          <button
+            type="button"
+            className="ghost-button editor-find-action"
+            disabled={editorMatches.length === 0}
+            onClick={() => selectEditorMatch(activeEditorMatchIndex + 1)}
+          >
+            Next
+          </button>
+          {editorReplaceOpen ? (
+            <>
+              <input
+                ref={replaceInputRef}
+                aria-label="Replace in file"
+                placeholder="Replace"
+                value={editorReplaceText}
+                onChange={(event) => setEditorReplaceText(event.target.value)}
+              />
+              <button
+                type="button"
+                className="ghost-button editor-find-action"
+                disabled={!activeEditorMatch}
+                onClick={replaceCurrentEditorMatch}
+              >
+                Replace
+              </button>
+              <button
+                type="button"
+                className="ghost-button editor-find-action"
+                disabled={editorMatches.length === 0}
+                onClick={replaceAllEditorMatches}
+              >
+                All
+              </button>
+            </>
+          ) : null}
+          <button
+            type="button"
+            className="icon-button editor-find-close"
+            aria-label="Close find"
+            onClick={closeEditorFind}
+          >
+            <X size={13} />
+          </button>
+        </div>
+      ) : null}
       {target ? (
         <section ref={frameRef} className="file-preview-frame target-preview" aria-hidden="true">
           <div className="file-preview-code" role="presentation">
@@ -2107,14 +3528,238 @@ function FilePreview({
           </div>
         </section>
       ) : null}
-      <textarea
-        ref={textareaRef}
-        className="file-editor"
-        spellCheck={false}
-        value={content}
-        onChange={(event) => onChangeDraft(event.target.value)}
-      />
+      <div
+        ref={stageRef}
+        className="file-editor-stage"
+        style={
+          {
+            "--editor-scroll-top": `${editorScrollTop}px`,
+            "--editor-scroll-left": `${editorScrollLeft}px`,
+            "--editor-line-height": `${editorLineHeight}px`,
+            "--editor-padding-top": `${editorPaddingTop}px`,
+          } as CSSProperties
+        }
+      >
+        <textarea
+          ref={lineNumberTextareaRef}
+          className="editor-line-number-gutter"
+          value={editorLineNumberText}
+          readOnly
+          tabIndex={-1}
+          aria-hidden="true"
+          spellCheck={false}
+        />
+        {visibleGitMarkers.length > 0 ? (
+          <>
+            <div className="editor-git-gutter" aria-label="File changes">
+              {visibleGitMarkers.map((marker) => (
+                <button
+                  key={marker.id}
+                  type="button"
+                  className={
+                    activeGitMarkerId === marker.id
+                      ? `editor-git-marker ${marker.kind} active`
+                      : `editor-git-marker ${marker.kind}`
+                  }
+                  aria-label={`${marker.kind} change at line ${marker.line}`}
+                  onClick={() => toggleGitMarker(marker)}
+                  style={
+                    {
+                      top: `calc(var(--editor-padding-top) + ${(marker.line - 1) * editorLineHeight}px - var(--editor-scroll-top))`,
+                      height: `${Math.max(1, marker.lineCount) * editorLineHeight}px`,
+                    } as CSSProperties
+                  }
+                />
+              ))}
+            </div>
+            <div className="editor-git-overview" aria-hidden="true">
+              {visibleGitMarkers.map((marker) => (
+                <span
+                  key={`overview-${marker.id}`}
+                  className={`editor-git-overview-marker ${marker.kind}`}
+                  style={
+                    {
+                      top: `${Math.max(0, ((marker.line - 1) / Math.max(1, lines.length)) * 100)}%`,
+                      height: `${Math.max(3, (marker.lineCount / Math.max(1, lines.length)) * 100)}%`,
+                    } as CSSProperties
+                  }
+                />
+              ))}
+            </div>
+          </>
+        ) : null}
+        {activeGitMarker ? (
+          <GitMarkerPopover
+            left={gitPopoverLeft}
+            marker={activeGitMarker}
+            top={Math.min(
+              Math.max(
+                editorPaddingTop +
+                  (activeGitMarker.line - 1) * editorLineHeight -
+                  editorScrollTop,
+                8,
+              ),
+              Math.max(8, editorViewportHeight - 190),
+            )}
+            onClose={() => setActiveGitMarkerId(null)}
+            onMoveHorizontal={(delta: number) =>
+              setGitPopoverLeftOffset((current) => current + delta)
+            }
+            onRevert={() => revertGitMarker(activeGitMarker)}
+          />
+        ) : null}
+        <textarea
+          ref={textareaRef}
+          className="file-editor"
+          spellCheck={false}
+          wrap="off"
+          defaultValue={content}
+          onBeforeInput={handleEditorBeforeInput}
+          onKeyDown={handleEditorKeyDown}
+          onPaste={handleEditorPaste}
+          onScroll={handleEditorScroll}
+          onChange={(event) => onChangeDraft(event.target.value)}
+        />
+      </div>
       {saveError ? <div className="editor-error">{saveError}</div> : null}
+    </section>
+  );
+}
+
+function MediaViewToolbar({
+  canShowSource,
+  mediaType,
+  mode,
+  path,
+  onChangeMode,
+}: {
+  canShowSource: boolean;
+  mediaType: string | null;
+  mode: FileViewMode;
+  path: string;
+  onChangeMode(mode: FileViewMode): void;
+}) {
+  return (
+    <div className="media-view-toolbar">
+      <div className="media-view-title" title={path}>
+        <ImageIcon size={14} />
+        <span>{fileNameFromPath(path)}</span>
+        {mediaType ? <small>{mediaType}</small> : null}
+      </div>
+      <div className="media-view-switch" role="tablist" aria-label="File view mode">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "preview"}
+          className={mode === "preview" ? "active" : ""}
+          onClick={() => onChangeMode("preview")}
+        >
+          <ImageIcon size={13} />
+          Preview
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "source"}
+          className={mode === "source" ? "active" : ""}
+          disabled={!canShowSource}
+          onClick={() => onChangeMode("source")}
+        >
+          <Code2 size={13} />
+          Source
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function GitMarkerPopover({
+  left,
+  marker,
+  top,
+  onClose,
+  onMoveHorizontal,
+  onRevert,
+}: {
+  left: number;
+  marker: EditorGitMarker;
+  top: number;
+  onClose(): void;
+  onMoveHorizontal(delta: number): void;
+  onRevert(): void;
+}) {
+  const previewLines = marker.diffLines.slice(0, 12);
+  const hiddenLineCount = Math.max(0, marker.diffLines.length - previewLines.length);
+
+  function startHorizontalDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    let lastClientX = event.clientX;
+
+    function handleMove(moveEvent: PointerEvent) {
+      onMoveHorizontal(moveEvent.clientX - lastClientX);
+      lastClientX = moveEvent.clientX;
+    }
+
+    function stopMove() {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", stopMove);
+      window.removeEventListener("pointercancel", stopMove);
+    }
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", stopMove);
+    window.addEventListener("pointercancel", stopMove);
+  }
+
+  return (
+    <section
+      className={`editor-git-popover ${marker.kind}`}
+      style={{ left, top } as CSSProperties}
+      aria-label="Change details"
+    >
+      <div className="editor-git-popover-head" onPointerDown={startHorizontalDrag}>
+        <div>
+          <span>{gitMarkerLabel(marker.kind)}</span>
+          <small>
+            line {marker.line}, +{marker.additions} -{marker.deletions}
+          </small>
+        </div>
+        <button
+          type="button"
+          className="icon-button editor-git-popover-close"
+          aria-label="Close change details"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={onClose}
+        >
+          <X size={12} />
+        </button>
+      </div>
+      <div className="editor-git-popover-diff" role="presentation">
+        {previewLines.map((line, index) => (
+          <pre
+            key={`${index}-${line}`}
+            className={
+              line.startsWith("+")
+                ? "added"
+                : line.startsWith("-")
+                  ? "deleted"
+                  : "context"
+            }
+          >
+            {line || " "}
+          </pre>
+        ))}
+        {hiddenLineCount > 0 ? (
+          <pre className="context">... {hiddenLineCount} more lines</pre>
+        ) : null}
+      </div>
+      <div className="editor-git-popover-actions">
+        <button type="button" className="ghost-button editor-git-revert" onClick={onRevert}>
+          <RotateCcw size={13} />
+          Rollback change
+        </button>
+      </div>
     </section>
   );
 }
@@ -2946,6 +4591,57 @@ function CommitDetails({
   );
 }
 
+function PullChoiceDialog({
+  error,
+  pending,
+  projectName,
+  onCancel,
+  onPull,
+}: {
+  error: string | null;
+  pending: boolean;
+  projectName: string;
+  onCancel(): void;
+  onPull(mode: PullMode): void;
+}) {
+  return (
+    <div className="pull-dialog-backdrop" role="presentation">
+      <section className="pull-dialog" role="dialog" aria-modal="true" aria-label="Pull branch">
+        <div className="pull-dialog-title">Pull current branch</div>
+        <div className="pull-dialog-copy">
+          Choose how to integrate remote changes for {projectName}.
+        </div>
+        <div className="pull-dialog-actions">
+          <button
+            className="ghost-button pull-action"
+            disabled={pending}
+            onClick={() => onPull("merge")}
+          >
+            {pending ? <Loader2 className="spin" size={13} /> : null}
+            Merge
+          </button>
+          <button
+            className="ghost-button pull-action"
+            disabled={pending}
+            onClick={() => onPull("rebase")}
+          >
+            Rebase
+          </button>
+          <button className="ghost-button pull-action quiet" disabled={pending} onClick={onCancel}>
+            Cancel
+          </button>
+        </div>
+        {error ? (
+          <div className="pull-dialog-error">
+            Pull stopped. Refresh is complete, check Changes for conflicts.
+            <span>{error}</span>
+          </div>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
 function ProjectSwitcherPopover({
   activeProjectId,
   projects,
@@ -3022,6 +4718,7 @@ function ProjectItem({
 
 function VirtualCommitList({
   commits,
+  graphWidthCommits,
   activeCommit,
   filter,
   loading,
@@ -3030,6 +4727,7 @@ function VirtualCommitList({
   onSelectWorkingTree,
 }: {
   commits: CommitInfo[];
+  graphWidthCommits: CommitInfo[];
   activeCommit: string | null;
   filter: string;
   loading: boolean;
@@ -3039,13 +4737,17 @@ function VirtualCommitList({
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const graphRows = useMemo(() => buildCommitGraph(commits), [commits]);
+  const graphWidthRows = useMemo(
+    () => buildCommitGraph(graphWidthCommits),
+    [graphWidthCommits],
+  );
   const commitGraphWidth = useMemo(
     () =>
       Math.max(
         30,
-        ...graphRows.map((row) => getCommitGraphWidth(row.laneCount)),
+        ...graphWidthRows.map((row) => getCommitGraphWidth(row.laneCount)),
       ),
-    [graphRows],
+    [graphWidthRows],
   );
   const tableStyle = {
     "--commit-graph-width": `${commitGraphWidth}px`,
@@ -3054,10 +4756,14 @@ function VirtualCommitList({
     count: graphRows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 28,
+    getItemKey: (index) => graphRows[index]?.commit.hash ?? index,
     overscan: 16,
-    directDomUpdates: true,
-    useFlushSync: false,
   });
+
+  useLayoutEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    virtualizer.scrollToIndex(0, { align: "start" });
+  }, [filter, graphRows.length, virtualizer]);
 
   if (loading) {
     return (
@@ -3100,7 +4806,10 @@ function VirtualCommitList({
         onSelectWorkingTree={onSelectWorkingTree}
       />
       <div ref={scrollRef} className="commit-list">
-        <div className="commit-list-spacer" ref={virtualizer.containerRef}>
+        <div
+          className="commit-list-spacer"
+          style={{ height: virtualizer.getTotalSize() } as CSSProperties}
+        >
           {virtualizer.getVirtualItems().map((virtualItem) => {
             const graphRow = graphRows[virtualItem.index];
             const commit = graphRow.commit;
@@ -3109,7 +4818,9 @@ function VirtualCommitList({
                 key={commit.hash}
                 className="commit-list-virtual-row"
                 data-index={virtualItem.index}
-                ref={virtualizer.measureElement}
+                style={{
+                  transform: `translate3d(0, ${virtualItem.start}px, 0)`,
+                }}
               >
                 <CommitRow
                   row={graphRow}
@@ -3400,6 +5111,357 @@ function filterCommits(commits: CommitInfo[], filter: string): CommitInfo[] {
       .toLowerCase()
       .includes(normalized),
   );
+}
+
+function wrapIndex(index: number, length: number): number {
+  if (length <= 0) {
+    return 0;
+  }
+  return (index + length) % length;
+}
+
+function nextMatchIndexAfter(matches: EditorTextMatch[], offset: number): number {
+  if (matches.length === 0) {
+    return 0;
+  }
+
+  const nextIndex = matches.findIndex((match) => match.start >= offset);
+  return nextIndex >= 0 ? nextIndex : 0;
+}
+
+function loadAppSettings(): AppSettings {
+  if (typeof localStorage === "undefined") {
+    return defaultAppSettings;
+  }
+
+  try {
+    const raw = localStorage.getItem(settingsStorageKey);
+    if (!raw) {
+      return defaultAppSettings;
+    }
+
+    return normalizeAppSettings(JSON.parse(raw));
+  } catch {
+    return defaultAppSettings;
+  }
+}
+
+function saveAppSettings(settings: AppSettings) {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+
+  localStorage.setItem(settingsStorageKey, JSON.stringify(settings));
+}
+
+function normalizeAppSettings(value: unknown): AppSettings {
+  const record = isRecord(value) ? value : {};
+  const shortcuts = isRecord(record.shortcuts) ? record.shortcuts : {};
+  return {
+    fontFamily:
+      typeof record.fontFamily === "string" && record.fontFamily.trim()
+        ? record.fontFamily
+        : defaultAppSettings.fontFamily,
+    fontSize: normalizePanelSize(record.fontSize, defaultAppSettings.fontSize, 10, 22),
+    fontWeight:
+      typeof record.fontWeight === "string" && record.fontWeight.trim()
+        ? record.fontWeight
+        : defaultAppSettings.fontWeight,
+    lineHeight: normalizePanelSize(
+      record.lineHeight,
+      defaultAppSettings.lineHeight,
+      1.2,
+      2,
+    ),
+    shortcuts: shortcutRows.reduce<Record<ShortcutAction, string>>((current, row) => {
+      const shortcut = shortcuts[row.action];
+      const trimmedShortcut = typeof shortcut === "string" ? shortcut.trim() : "";
+      return {
+        ...current,
+        [row.action]: trimmedShortcut
+          ? trimmedShortcut
+          : defaultAppSettings.shortcuts[row.action],
+      };
+    }, { ...defaultAppSettings.shortcuts }),
+  };
+}
+
+function matchesShortcut(event: globalThis.KeyboardEvent, shortcut: string): boolean {
+  const parts = shortcut
+    .split("+")
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean);
+  if (parts.length === 0) {
+    return false;
+  }
+
+  const key = parts.at(-1);
+  if (!key || key === "mod" || key === "ctrl" || key === "control") {
+    return false;
+  }
+
+  const expectsMod = parts.includes("mod");
+  const expectsCtrl = parts.includes("ctrl") || parts.includes("control");
+  const expectsMeta = parts.includes("cmd") || parts.includes("meta");
+  const expectsShift = parts.includes("shift");
+  const expectsAlt = parts.includes("alt") || parts.includes("option");
+  if (expectsMod && !(event.metaKey || event.ctrlKey)) {
+    return false;
+  }
+  if (!expectsMod && event.metaKey !== expectsMeta) {
+    return false;
+  }
+  if (!expectsMod && event.ctrlKey !== expectsCtrl) {
+    return false;
+  }
+  if (event.shiftKey !== expectsShift || event.altKey !== expectsAlt) {
+    return false;
+  }
+
+  return normalizeShortcutKey(event.key) === normalizeShortcutKey(key);
+}
+
+function normalizeShortcutKey(key: string): string {
+  const normalized = key.trim().toLowerCase();
+  if (normalized === "space") {
+    return " ";
+  }
+  if (normalized === "esc") {
+    return "escape";
+  }
+  if (normalized === "return") {
+    return "enter";
+  }
+  if (normalized === "backquote") {
+    return "`";
+  }
+  return normalized;
+}
+
+function getTextareaSelection(
+  textarea: HTMLTextAreaElement | null,
+): { start: number; end: number } | null {
+  if (!textarea) {
+    return null;
+  }
+
+  return {
+    start: textarea.selectionStart,
+    end: textarea.selectionEnd,
+  };
+}
+
+function measureEditorLineHeight(
+  style: CSSStyleDeclaration,
+  fallback: number,
+): number {
+  const lineHeight = parseCssPixels(style.lineHeight, fallback);
+  return lineHeight > 0 ? lineHeight : fallback;
+}
+
+function parseCssPixels(value: string, fallback: number): number {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function revertEditorGitMarker(content: string, marker: EditorGitMarker): string {
+  const newline = content.includes("\r\n") ? "\r\n" : "\n";
+  const hadTrailingNewline = content.endsWith("\n");
+  const lines = content.split(/\r?\n/);
+  if (hadTrailingNewline) {
+    lines.pop();
+  }
+
+  const startIndex = Math.max(0, marker.newStart - 1);
+  lines.splice(startIndex, marker.newLineCount, ...marker.oldLines);
+  const nextContent = lines.join(newline);
+  return hadTrailingNewline || marker.oldLines.length > 0 ? `${nextContent}${newline}` : nextContent;
+}
+
+function filterVisibleEditorGitMarkers(
+  markers: EditorGitMarker[],
+  content: string,
+): EditorGitMarker[] {
+  const lines = content.split(/\r?\n/);
+  if (content.endsWith("\n")) {
+    lines.pop();
+  }
+
+  return markers.filter((marker) => {
+    const startIndex = Math.max(0, marker.newStart - 1);
+    if (marker.newLineCount === 0) {
+      return !linesMatchAt(lines, startIndex, marker.oldLines);
+    }
+    return linesMatchAt(lines, startIndex, marker.newLines);
+  });
+}
+
+function linesMatchAt(lines: string[], startIndex: number, expected: string[]): boolean {
+  if (expected.length === 0) {
+    return true;
+  }
+  if (startIndex + expected.length > lines.length) {
+    return false;
+  }
+  return expected.every((line, index) => lines[startIndex + index] === line);
+}
+
+function utf16OffsetForLine(content: string, lineNumber: number): number {
+  if (lineNumber <= 1) {
+    return 0;
+  }
+
+  let currentLine = 1;
+  for (let index = 0; index < content.length; index += 1) {
+    if (content[index] !== "\n") {
+      continue;
+    }
+    currentLine += 1;
+    if (currentLine === lineNumber) {
+      return content.slice(0, index + 1).length;
+    }
+  }
+  return content.length;
+}
+
+function gitMarkerLabel(kind: EditorGitMarker["kind"]): string {
+  switch (kind) {
+    case "added":
+      return "Added lines";
+    case "deleted":
+      return "Deleted lines";
+    case "modified":
+      return "Modified lines";
+  }
+}
+
+function isChangedFileStatus(status: string): boolean {
+  return (
+    status === "added" ||
+    status === "conflict" ||
+    status === "modified" ||
+    status === "deleted" ||
+    status === "renamed" ||
+    status === "untracked"
+  );
+}
+
+function buildEditorGitMarkers(diff: string): EditorGitMarker[] {
+  if (!diff.trim()) {
+    return [];
+  }
+
+  const markers: EditorGitMarker[] = [];
+  let oldLine = 1;
+  let newLine = 1;
+  let markerIndex = 0;
+  let currentChange:
+    | {
+        oldStart: number;
+        newStart: number;
+        oldLines: string[];
+        newLines: string[];
+        diffLines: string[];
+        additions: number;
+        deletions: number;
+      }
+    | null = null;
+
+  const startChange = () => {
+    currentChange ??= {
+      oldStart: oldLine,
+      newStart: newLine,
+      oldLines: [],
+      newLines: [],
+      diffLines: [],
+      additions: 0,
+      deletions: 0,
+    };
+    return currentChange;
+  };
+
+  const flushChange = () => {
+    if (
+      !currentChange ||
+      (currentChange.additions === 0 && currentChange.deletions === 0)
+    ) {
+      currentChange = null;
+      return;
+    }
+
+    const kind =
+      currentChange.additions > 0 && currentChange.deletions > 0
+        ? "modified"
+        : currentChange.additions > 0
+          ? "added"
+          : "deleted";
+    const oldLineCount = currentChange.oldLines.length;
+    const newLineCount = currentChange.newLines.length;
+    const line = Math.max(1, currentChange.newStart);
+    const lineCount = Math.max(1, newLineCount || oldLineCount);
+    markers.push({
+      id: `${currentChange.oldStart}-${oldLineCount}-${currentChange.newStart}-${newLineCount}-${markerIndex}`,
+      line,
+      lineCount,
+      oldStart: currentChange.oldStart,
+      oldLineCount,
+      newStart: currentChange.newStart,
+      newLineCount,
+      additions: currentChange.additions,
+      deletions: currentChange.deletions,
+      kind,
+      oldLines: currentChange.oldLines,
+      newLines: currentChange.newLines,
+      diffLines: currentChange.diffLines,
+    });
+    markerIndex += 1;
+    currentChange = null;
+  };
+
+  for (const line of diff.split("\n")) {
+    const hunkMatch = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+    if (hunkMatch) {
+      flushChange();
+      oldLine = Number(hunkMatch[1]);
+      newLine = Number(hunkMatch[3]);
+      continue;
+    }
+
+    if (line.startsWith("diff --git ") || line.startsWith("+++ ") || line.startsWith("--- ")) {
+      flushChange();
+      continue;
+    }
+
+    if (line.startsWith("+")) {
+      const value = line.slice(1);
+      const change = startChange();
+      change.newLines.push(value);
+      change.diffLines.push(line);
+      change.additions += 1;
+      newLine += 1;
+      continue;
+    }
+
+    if (line.startsWith("-")) {
+      const value = line.slice(1);
+      const change = startChange();
+      change.oldLines.push(value);
+      change.diffLines.push(line);
+      change.deletions += 1;
+      oldLine += 1;
+      continue;
+    }
+
+    if (line.startsWith(" ")) {
+      flushChange();
+      oldLine += 1;
+      newLine += 1;
+      continue;
+    }
+  }
+
+  flushChange();
+  return markers;
 }
 
 function countDiffStats(files: ReturnType<typeof parseRepositoryDiff>["files"]) {
@@ -3737,6 +5799,23 @@ function previewTabId(mode: PreviewMode, path: string, commit: string | null): s
   return `${mode}:${commit ?? "worktree"}:${path}`;
 }
 
+function buildRequestedFilePath(parentPath: string | null, input: string): string | null {
+  const normalizedInput = input.trim().replaceAll("\\", "/");
+  if (!normalizedInput) {
+    return null;
+  }
+
+  if (normalizedInput.startsWith("/")) {
+    return normalizedInput.replace(/^\/+/, "");
+  }
+
+  if (!parentPath) {
+    return normalizedInput;
+  }
+
+  return `${parentPath.replace(/\/+$/, "")}/${normalizedInput}`;
+}
+
 function fileNameFromPath(path: string): string {
   return path.split("/").filter(Boolean).at(-1) ?? path;
 }
@@ -3801,6 +5880,21 @@ function conflictToMarkerFile(conflict: SaveConflict): FileContents {
       ensureTrailingNewline(conflict.proposedContent) +
       ">>>>>>> Your changes\n",
   };
+}
+
+function gitConflictToMarkerFile(path: string, content: string): FileContents {
+  return {
+    name: path,
+    contents: content,
+  };
+}
+
+function hasGitConflictMarkers(content: string): boolean {
+  return (
+    content.includes("<<<<<<<") &&
+    content.includes("=======") &&
+    content.includes(">>>>>>>")
+  );
 }
 
 function ensureTrailingNewline(value: string): string {

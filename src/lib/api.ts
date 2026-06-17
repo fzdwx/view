@@ -52,6 +52,7 @@ export interface CommitInfo {
 
 export type GitStatus =
   | "added"
+  | "conflict"
   | "deleted"
   | "ignored"
   | "modified"
@@ -74,6 +75,8 @@ export interface FileContent {
   content: string;
   binary: boolean;
   tooLarge: boolean;
+  mediaType: string | null;
+  mediaDataUrl: string | null;
 }
 
 export interface SaveConflict {
@@ -94,6 +97,24 @@ export interface FileSearchResult {
   score: number;
   lineNumber: number | null;
   lineText: string | null;
+}
+
+export interface EditorTextMatch {
+  start: number;
+  end: number;
+  lineNumber: number;
+  lineText: string;
+}
+
+export interface EditorSearchResponse {
+  matches: EditorTextMatch[];
+}
+
+export interface EditorReplaceResponse {
+  content: string;
+  matches: EditorTextMatch[];
+  selectionStart: number;
+  selectionEnd: number;
 }
 
 export interface TerminalSessionInfo {
@@ -174,6 +195,28 @@ export async function saveFileContent(
   });
 }
 
+export async function createProjectFile(
+  path: string,
+  filePath: string,
+): Promise<string> {
+  return invoke<string>("create_project_file", { path, filePath });
+}
+
+export async function renameProjectFile(
+  path: string,
+  fromPath: string,
+  toPath: string,
+): Promise<string> {
+  return invoke<string>("rename_project_file", { path, fromPath, toPath });
+}
+
+export async function deleteProjectFile(
+  path: string,
+  filePath: string,
+): Promise<void> {
+  return invoke<void>("delete_project_file", { path, filePath });
+}
+
 export async function searchFiles(
   path: string,
   query: string,
@@ -186,8 +229,43 @@ export async function searchFiles(
   });
 }
 
+export async function searchEditorText(
+  content: string,
+  query: string,
+): Promise<EditorSearchResponse> {
+  return invoke<EditorSearchResponse>("search_editor_text", {
+    content,
+    query,
+  });
+}
+
+export async function replaceEditorText(
+  content: string,
+  query: string,
+  replacement: string,
+  activeIndex: number,
+  replaceAll: boolean,
+): Promise<EditorReplaceResponse> {
+  return invoke<EditorReplaceResponse>("replace_editor_text", {
+    content,
+    query,
+    replacement,
+    activeIndex,
+    replaceAll,
+  });
+}
+
 export async function fetchRemotes(path: string): Promise<void> {
   return invoke<void>("fetch_remotes", { path });
+}
+
+export type PullMode = "merge" | "rebase";
+
+export async function pullCurrentBranch(
+  path: string,
+  mode: PullMode,
+): Promise<void> {
+  return invoke<void>("pull_current_branch", { path, mode });
 }
 
 export async function terminalSpawn(

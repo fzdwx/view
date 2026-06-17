@@ -8,6 +8,7 @@ use alacritty_terminal::vte::ansi::{Color as TerminalColorValue, NamedColor};
 use alacritty_terminal::vte::ansi::{
     Processor as TerminalProcessor, StdSyncHandler as TerminalSyncHandler,
 };
+use base64::{engine::general_purpose, Engine as _};
 use fff_search::{
     FFFMode, FilePicker, FilePickerOptions, FuzzySearchOptions, GrepConfig, GrepMode,
     GrepSearchOptions, PaginationArgs, QueryParser, SharedFilePicker, SharedFrecency,
@@ -31,6 +32,7 @@ use tauri::State;
 use tungstenite::{accept, Error as WsError, Message, WebSocket};
 
 const MAX_TEXT_FILE_BYTES: u64 = 1_048_576;
+const MAX_MEDIA_FILE_BYTES: u64 = 5_242_880;
 const DEFAULT_FILE_SEARCH_LIMIT: usize = 50;
 const MAX_FILE_SEARCH_LIMIT: usize = 200;
 const FILE_SEARCH_SCAN_TIMEOUT: Duration = Duration::from_secs(10);
@@ -122,6 +124,8 @@ struct FileContent {
     content: String,
     binary: bool,
     too_large: bool,
+    media_type: Option<String>,
+    media_data_url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -131,6 +135,40 @@ struct FileSearchResult {
     score: i32,
     line_number: Option<usize>,
     line_text: Option<String>,
+}
+
+#[derive(Clone)]
+struct EditorTextMatchRange {
+    start_byte: usize,
+    end_byte: usize,
+    start_utf16: usize,
+    end_utf16: usize,
+    line_number: usize,
+    line_text: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EditorTextMatch {
+    start: usize,
+    end: usize,
+    line_number: usize,
+    line_text: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EditorSearchResponse {
+    matches: Vec<EditorTextMatch>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EditorReplaceResponse {
+    content: String,
+    matches: Vec<EditorTextMatch>,
+    selection_start: usize,
+    selection_end: usize,
 }
 
 #[derive(Deserialize)]
@@ -178,6 +216,11 @@ enum TerminalParserEvent {
     Resize(u16, u16),
 }
 
+#[derive(Clone)]
+enum TerminalUiEvent {
+    Title(Option<String>),
+}
+
 struct TerminalSession {
     parser_tx: mpsc::Sender<TerminalParserEvent>,
     ws_shutdown_tx: mpsc::Sender<()>,
@@ -188,12 +231,22 @@ struct TerminalSession {
 #[derive(Clone)]
 struct TerminalEventProxy {
     input_tx: mpsc::Sender<Vec<u8>>,
+    ui_event_tx: mpsc::Sender<TerminalUiEvent>,
 }
 
 impl EventListener for TerminalEventProxy {
     fn send_event(&self, event: TerminalEvent) {
-        if let TerminalEvent::PtyWrite(text) = event {
-            let _ = self.input_tx.send(text.into_bytes());
+        match event {
+            TerminalEvent::PtyWrite(text) => {
+                let _ = self.input_tx.send(text.into_bytes());
+            }
+            TerminalEvent::Title(title) => {
+                let _ = self.ui_event_tx.send(TerminalUiEvent::Title(Some(title)));
+            }
+            TerminalEvent::ResetTitle => {
+                let _ = self.ui_event_tx.send(TerminalUiEvent::Title(None));
+            }
+            _ => {}
         }
     }
 }
@@ -244,6 +297,7 @@ struct TerminalFrameModes {
 struct TerminalFrame {
     #[serde(rename = "type")]
     message_type: &'static str,
+    title: Option<String>,
     rows: usize,
     cols: usize,
     cursor_row: usize,
@@ -337,6 +391,24 @@ fn save_file_content(request: SaveFileRequest) -> Result<SaveFileResponse, Strin
 }
 
 #[tauri::command]
+fn create_project_file(path: String, file_path: String) -> Result<String, String> {
+    let root = repository_root(&path)?;
+    create_repo_file(&root, &file_path)
+}
+
+#[tauri::command]
+fn rename_project_file(path: String, from_path: String, to_path: String) -> Result<String, String> {
+    let root = repository_root(&path)?;
+    rename_repo_file(&root, &from_path, &to_path)
+}
+
+#[tauri::command]
+fn delete_project_file(path: String, file_path: String) -> Result<(), String> {
+    let root = repository_root(&path)?;
+    delete_repo_file(&root, &file_path)
+}
+
+#[tauri::command]
 fn search_files(
     path: String,
     query: String,
@@ -347,9 +419,54 @@ fn search_files(
 }
 
 #[tauri::command]
+fn search_editor_text(content: String, query: String) -> Result<EditorSearchResponse, String> {
+    Ok(EditorSearchResponse {
+        matches: editor_text_matches(&content, &query)
+            .into_iter()
+            .map(EditorTextMatch::from)
+            .collect(),
+    })
+}
+
+#[tauri::command]
+fn replace_editor_text(
+    content: String,
+    query: String,
+    replacement: String,
+    active_index: usize,
+    replace_all: bool,
+) -> Result<EditorReplaceResponse, String> {
+    Ok(replace_editor_content(
+        &content,
+        &query,
+        &replacement,
+        active_index,
+        replace_all,
+    ))
+}
+
+#[tauri::command]
 fn fetch_remotes(path: String) -> Result<(), String> {
     let root = repository_root(&path)?;
     git(&root, &["fetch", "--all", "--prune"])?;
+    Ok(())
+}
+
+#[tauri::command]
+fn pull_current_branch(path: String, mode: String) -> Result<(), String> {
+    let root = repository_root(&path)?;
+    let branch = git(&root, &["symbolic-ref", "--quiet", "--short", "HEAD"])
+        .map(|value| value.trim().to_string())
+        .unwrap_or_default();
+    if branch.is_empty() {
+        return Err("Cannot pull while HEAD is detached".to_string());
+    }
+
+    match mode.as_str() {
+        "merge" => git(&root, &["pull", "--no-rebase"])?,
+        "rebase" => git(&root, &["pull", "--rebase"])?,
+        _ => return Err("Pull mode must be merge or rebase".to_string()),
+    };
     Ok(())
 }
 
@@ -716,12 +833,20 @@ fn parse_name_status_line(line: &str) -> Option<TreeFile> {
 }
 
 fn name_status_code_to_status(code: &str) -> &'static str {
+    if is_unmerged_status_code(code) {
+        return "conflict";
+    }
+
     match code.chars().next().unwrap_or('M') {
         'A' => "added",
         'D' => "deleted",
         'R' => "renamed",
         _ => "modified",
     }
+}
+
+fn is_unmerged_status_code(code: &str) -> bool {
+    code.contains('U') || matches!(code, "DD" | "AA")
 }
 
 fn normalize_git_path(path: &str) -> String {
@@ -731,6 +856,79 @@ fn normalize_git_path(path: &str) -> String {
         .or_else(|| path.trim().trim_matches('"').strip_prefix("a/"))
         .unwrap_or_else(|| path.trim().trim_matches('"'))
         .to_string()
+}
+
+fn normalize_user_repo_path(path: &str) -> Result<String, String> {
+    let trimmed = path.trim().trim_matches('"').replace('\\', "/");
+    if trimmed
+        .split('/')
+        .next()
+        .is_some_and(|part| part.len() == 2 && part.ends_with(':'))
+    {
+        return Err("Use a path relative to the repository root".to_string());
+    }
+
+    let mut parts = Vec::new();
+    for part in trimmed.split('/') {
+        let part = part.trim();
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        if part == ".." {
+            return Err("File path cannot contain ..".to_string());
+        }
+        validate_cross_platform_path_part(part)?;
+        parts.push(part);
+    }
+
+    if parts.is_empty() {
+        return Err("File path is required".to_string());
+    }
+
+    Ok(parts.join("/"))
+}
+
+fn validate_cross_platform_path_part(part: &str) -> Result<(), String> {
+    if part.chars().any(|character| {
+        matches!(character, '<' | '>' | ':' | '"' | '|' | '?' | '*') || character.is_control()
+    }) {
+        return Err("File path contains characters that are invalid on Windows".to_string());
+    }
+    if part.ends_with(' ') || part.ends_with('.') {
+        return Err("File path cannot contain names ending with a space or dot".to_string());
+    }
+
+    let stem = part.split('.').next().unwrap_or(part).to_ascii_uppercase();
+    let reserved = matches!(
+        stem.as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    );
+    if reserved {
+        return Err("File path contains a Windows reserved name".to_string());
+    }
+
+    Ok(())
 }
 
 fn git_files(root: &Path) -> Result<Vec<TreeFile>, String> {
@@ -757,24 +955,10 @@ fn git_files(root: &Path) -> Result<Vec<TreeFile>, String> {
 
 fn resolve_existing_repo_file(root: &Path, file_path: &str) -> Result<(String, PathBuf), String> {
     let normalized = normalize_git_path(file_path);
-    if normalized.is_empty()
-        || normalized.starts_with("../")
-        || normalized == ".."
-        || Path::new(&normalized).is_absolute()
-    {
-        return Err("Invalid file path".to_string());
-    }
-
-    let root = root
-        .canonicalize()
-        .map_err(|error| format!("Failed to resolve repository root: {error}"))?;
-    let full_path = root.join(&normalized);
+    let full_path = resolve_repo_child_path(root, &normalized)?;
     let canonical = full_path
         .canonicalize()
         .map_err(|error| format!("Failed to open file: {error}"))?;
-    if !canonical.starts_with(&root) {
-        return Err("File is outside the repository".to_string());
-    }
     if !canonical.is_file() {
         return Err("Selected path is not a file".to_string());
     }
@@ -782,26 +966,127 @@ fn resolve_existing_repo_file(root: &Path, file_path: &str) -> Result<(String, P
     Ok((normalized, canonical))
 }
 
+fn resolve_repo_child_path(root: &Path, normalized: &str) -> Result<PathBuf, String> {
+    if normalized.is_empty() || Path::new(normalized).is_absolute() {
+        return Err("Invalid file path".to_string());
+    }
+
+    let root = root
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve repository root: {error}"))?;
+    let full_path = root.join(normalized);
+    let parent = full_path
+        .parent()
+        .ok_or_else(|| "Selected file has no parent directory".to_string())?;
+    let canonical_parent = parent
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve parent directory: {error}"))?;
+    if !canonical_parent.starts_with(&root) {
+        return Err("File is outside the repository".to_string());
+    }
+
+    Ok(full_path)
+}
+
+fn resolve_new_repo_child_path(root: &Path, normalized: &str) -> Result<PathBuf, String> {
+    if normalized.is_empty() || Path::new(normalized).is_absolute() {
+        return Err("Invalid file path".to_string());
+    }
+
+    let root = root
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve repository root: {error}"))?;
+    let mut current = root.clone();
+    for part in normalized.split('/') {
+        current.push(part);
+        if !current.exists() {
+            break;
+        }
+
+        let canonical = current
+            .canonicalize()
+            .map_err(|error| format!("Failed to resolve path: {error}"))?;
+        if !canonical.starts_with(&root) {
+            return Err("File is outside the repository".to_string());
+        }
+    }
+
+    Ok(root.join(normalized))
+}
+
+fn create_repo_file(root: &Path, file_path: &str) -> Result<String, String> {
+    let normalized = normalize_user_repo_path(file_path)?;
+    let full_path = resolve_new_repo_child_path(root, &normalized)?;
+    if full_path.exists() {
+        return Err("File already exists".to_string());
+    }
+
+    let parent = full_path
+        .parent()
+        .ok_or_else(|| "Selected file has no parent directory".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| format!("Failed to create directories: {error}"))?;
+    fs::write(&full_path, []).map_err(|error| format!("Failed to create file: {error}"))?;
+    Ok(normalized)
+}
+
+fn rename_repo_file(root: &Path, from_path: &str, to_path: &str) -> Result<String, String> {
+    let (_, source) = resolve_existing_repo_file(root, from_path)?;
+    let normalized_to = normalize_user_repo_path(to_path)?;
+    let destination = resolve_repo_child_path(root, &normalized_to)?;
+    if destination.exists() {
+        return Err("Destination already exists".to_string());
+    }
+    let parent = destination
+        .parent()
+        .ok_or_else(|| "Selected file has no parent directory".to_string())?;
+    if !parent.exists() {
+        return Err("Destination directory does not exist".to_string());
+    }
+
+    fs::rename(&source, &destination).map_err(|error| format!("Failed to rename file: {error}"))?;
+    Ok(normalized_to)
+}
+
+fn delete_repo_file(root: &Path, file_path: &str) -> Result<(), String> {
+    let (_, canonical) = resolve_existing_repo_file(root, file_path)?;
+    fs::remove_file(&canonical).map_err(|error| format!("Failed to delete file: {error}"))
+}
+
 fn read_file_content(root: &Path, file_path: &str) -> Result<FileContent, String> {
     let (normalized, canonical) = resolve_existing_repo_file(root, file_path)?;
     let metadata = fs::metadata(&canonical)
         .map_err(|error| format!("Failed to read file metadata: {error}"))?;
-    if metadata.len() > MAX_TEXT_FILE_BYTES {
+    let media_type = media_type_for_path(&canonical).map(str::to_string);
+    let max_bytes = if media_type.is_some() {
+        MAX_MEDIA_FILE_BYTES
+    } else {
+        MAX_TEXT_FILE_BYTES
+    };
+
+    if metadata.len() > max_bytes {
         return Ok(FileContent {
             path: normalized,
             content: String::new(),
-            binary: false,
+            binary: media_type.is_some(),
             too_large: true,
+            media_type,
+            media_data_url: None,
         });
     }
 
     let bytes = fs::read(&canonical).map_err(|error| format!("Failed to read file: {error}"))?;
+    let media_data_url = media_type
+        .as_deref()
+        .map(|mime_type| media_data_url(mime_type, &bytes));
+
     if bytes.contains(&0) {
         return Ok(FileContent {
             path: normalized,
             content: String::new(),
             binary: true,
             too_large: false,
+            media_type,
+            media_data_url,
         });
     }
 
@@ -810,6 +1095,8 @@ fn read_file_content(root: &Path, file_path: &str) -> Result<FileContent, String
         content: String::from_utf8_lossy(&bytes).to_string(),
         binary: false,
         too_large: false,
+        media_type,
+        media_data_url,
     })
 }
 
@@ -868,9 +1155,186 @@ fn write_file_content(
             content: content.to_string(),
             binary: false,
             too_large: false,
+            media_type: None,
+            media_data_url: None,
         }),
         conflict: None,
     })
+}
+
+fn media_type_for_path(path: &Path) -> Option<&'static str> {
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    match extension.as_str() {
+        "avif" => Some("image/avif"),
+        "bmp" => Some("image/bmp"),
+        "gif" => Some("image/gif"),
+        "ico" => Some("image/x-icon"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "png" => Some("image/png"),
+        "svg" => Some("image/svg+xml"),
+        "webp" => Some("image/webp"),
+        _ => None,
+    }
+}
+
+fn media_data_url(media_type: &str, bytes: &[u8]) -> String {
+    format!(
+        "data:{media_type};base64,{}",
+        general_purpose::STANDARD.encode(bytes)
+    )
+}
+
+impl From<EditorTextMatchRange> for EditorTextMatch {
+    fn from(value: EditorTextMatchRange) -> Self {
+        Self {
+            start: value.start_utf16,
+            end: value.end_utf16,
+            line_number: value.line_number,
+            line_text: value.line_text,
+        }
+    }
+}
+
+fn replace_editor_content(
+    content: &str,
+    query: &str,
+    replacement: &str,
+    active_index: usize,
+    replace_all: bool,
+) -> EditorReplaceResponse {
+    let matches = editor_text_matches(content, query);
+    if matches.is_empty() {
+        return EditorReplaceResponse {
+            content: content.to_string(),
+            matches: Vec::new(),
+            selection_start: 0,
+            selection_end: 0,
+        };
+    }
+
+    let (next_content, selection_start, selection_end) = if replace_all {
+        let mut next_content = String::with_capacity(content.len());
+        let mut cursor = 0;
+        for text_match in &matches {
+            next_content.push_str(&content[cursor..text_match.start_byte]);
+            next_content.push_str(replacement);
+            cursor = text_match.end_byte;
+        }
+        next_content.push_str(&content[cursor..]);
+        (next_content, 0, 0)
+    } else {
+        let text_match = &matches[active_index.min(matches.len() - 1)];
+        let mut next_content = String::with_capacity(
+            content.len()
+                + replacement
+                    .len()
+                    .saturating_sub(text_match.end_byte - text_match.start_byte),
+        );
+        next_content.push_str(&content[..text_match.start_byte]);
+        next_content.push_str(replacement);
+        next_content.push_str(&content[text_match.end_byte..]);
+
+        let selection_start = utf16_offset_at(content, text_match.start_byte);
+        let selection_end = selection_start + replacement.encode_utf16().count();
+        (next_content, selection_start, selection_end)
+    };
+
+    let next_matches = editor_text_matches(&next_content, query)
+        .into_iter()
+        .map(EditorTextMatch::from)
+        .collect();
+
+    EditorReplaceResponse {
+        content: next_content,
+        matches: next_matches,
+        selection_start,
+        selection_end,
+    }
+}
+
+fn editor_text_matches(content: &str, query: &str) -> Vec<EditorTextMatchRange> {
+    let trimmed_query = query.trim();
+    if trimmed_query.is_empty() {
+        return Vec::new();
+    }
+
+    let (haystack, haystack_indices) = lowercase_with_byte_indices(content);
+    let needle = trimmed_query.to_lowercase();
+    let mut matches = Vec::new();
+    let mut search_from = 0;
+
+    while let Some(relative_start) = haystack[search_from..].find(&needle) {
+        let lower_start = search_from + relative_start;
+        let lower_end = lower_start + needle.len();
+        let Some(&start_byte) = haystack_indices.get(lower_start) else {
+            break;
+        };
+        let mut end_byte = haystack_indices
+            .get(lower_end)
+            .copied()
+            .unwrap_or(content.len());
+        if end_byte == start_byte {
+            if let Some(character) = content[start_byte..].chars().next() {
+                end_byte = start_byte + character.len_utf8();
+            }
+        }
+        if end_byte > start_byte {
+            let (line_number, line_text) = line_for_byte_range(content, start_byte);
+            matches.push(EditorTextMatchRange {
+                start_byte,
+                end_byte,
+                start_utf16: utf16_offset_at(content, start_byte),
+                end_utf16: utf16_offset_at(content, end_byte),
+                line_number,
+                line_text,
+            });
+        }
+        search_from = lower_start + needle.len().max(1);
+    }
+
+    matches
+}
+
+fn lowercase_with_byte_indices(content: &str) -> (String, Vec<usize>) {
+    let mut lowered = String::with_capacity(content.len());
+    let mut indices = Vec::with_capacity(content.len());
+
+    for (byte_index, character) in content.char_indices() {
+        for lowered_character in character.to_lowercase() {
+            lowered.push(lowered_character);
+            for _ in 0..lowered_character.len_utf8() {
+                indices.push(byte_index);
+            }
+        }
+    }
+
+    (lowered, indices)
+}
+
+fn utf16_offset_at(content: &str, byte_index: usize) -> usize {
+    content[..byte_index].encode_utf16().count()
+}
+
+fn line_for_byte_range(content: &str, start_byte: usize) -> (usize, String) {
+    let line_number = content[..start_byte]
+        .bytes()
+        .filter(|byte| *byte == b'\n')
+        .count()
+        + 1;
+    let line_start = content[..start_byte]
+        .rfind('\n')
+        .map(|index| index + 1)
+        .unwrap_or(0);
+    let line_end = content[start_byte..]
+        .find('\n')
+        .map(|index| start_byte + index)
+        .unwrap_or(content.len());
+    (
+        line_number,
+        content[line_start..line_end]
+            .trim_end_matches('\r')
+            .to_string(),
+    )
 }
 
 fn resolve_terminal_cwd(root: &Path, cwd: Option<&str>) -> Result<PathBuf, String> {
@@ -991,7 +1455,10 @@ fn terminal_frame_modes(mode: TermMode) -> TerminalFrameModes {
     }
 }
 
-fn terminal_frame(term: &Term<TerminalEventProxy>) -> Result<String, String> {
+fn terminal_frame(
+    term: &Term<TerminalEventProxy>,
+    title: Option<&str>,
+) -> Result<String, String> {
     let grid = term.grid();
     let cols = grid.columns();
     let rows = grid.screen_lines();
@@ -1074,6 +1541,7 @@ fn terminal_frame(term: &Term<TerminalEventProxy>) -> Result<String, String> {
 
     serde_json::to_string(&TerminalFrame {
         message_type: "frame",
+        title: title.map(str::to_string),
         rows,
         cols,
         cursor_row,
@@ -1083,6 +1551,19 @@ fn terminal_frame(term: &Term<TerminalEventProxy>) -> Result<String, String> {
         lines,
     })
     .map_err(|error| format!("Failed to serialize terminal frame: {error}"))
+}
+
+fn drain_terminal_ui_events(
+    ui_event_rx: &mpsc::Receiver<TerminalUiEvent>,
+    title: &mut Option<String>,
+) {
+    while let Ok(event) = ui_event_rx.try_recv() {
+        match event {
+            TerminalUiEvent::Title(next_title) => {
+                *title = next_title;
+            }
+        }
+    }
 }
 
 fn spawn_terminal_session(
@@ -1122,6 +1603,7 @@ fn spawn_terminal_session(
         .map_err(|error| format!("Failed to open terminal writer: {error}"))?;
     let (input_tx, input_rx) = mpsc::channel::<Vec<u8>>();
     let (parser_tx, parser_rx) = mpsc::channel::<TerminalParserEvent>();
+    let (ui_event_tx, ui_event_rx) = mpsc::channel::<TerminalUiEvent>();
     thread::spawn(move || {
         let mut writer = writer;
         while let Ok(input) = input_rx.recv() {
@@ -1196,10 +1678,12 @@ fn spawn_terminal_session(
             &TermSize::new(initial_cols, initial_rows),
             TerminalEventProxy {
                 input_tx: parser_input_tx,
+                ui_event_tx,
             },
         );
         let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
-        if let Ok(frame) = terminal_frame(&term) {
+        let mut title: Option<String> = None;
+        if let Ok(frame) = terminal_frame(&term, title.as_deref()) {
             let _ = reader_output_tx.send(TerminalWsEvent::Frame(frame));
         }
 
@@ -1222,8 +1706,9 @@ fn spawn_terminal_session(
             while let Ok(event) = parser_rx.try_recv() {
                 apply_event(event, &mut term, &mut processor);
             }
+            drain_terminal_ui_events(&ui_event_rx, &mut title);
 
-            match terminal_frame(&term) {
+            match terminal_frame(&term, title.as_deref()) {
                 Ok(frame) => {
                     if reader_output_tx
                         .send(TerminalWsEvent::Frame(frame))
@@ -1705,7 +2190,9 @@ fn parse_status_entries(status: &str) -> Vec<(String, String)> {
                 .unwrap_or(raw_path)
                 .trim_matches('"')
                 .to_string();
-            let status = if code == "??" {
+            let status = if is_unmerged_status_code(code) {
+                "conflict"
+            } else if code == "??" {
                 "untracked"
             } else if code.contains('R') {
                 "renamed"
@@ -1770,7 +2257,7 @@ mod tests {
         let mut term = Term::new(
             TerminalConfig::default(),
             &TermSize::new(20, 6),
-            TerminalEventProxy { input_tx },
+            test_terminal_event_proxy(input_tx),
         );
         let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
 
@@ -1780,7 +2267,7 @@ mod tests {
         );
 
         let frame: serde_json::Value =
-            serde_json::from_str(&terminal_frame(&term).expect("terminal frame"))
+            serde_json::from_str(&terminal_frame(&term, None).expect("terminal frame"))
                 .expect("frame json");
         assert_eq!(frame["type"], "frame");
         assert_eq!(frame["rows"], 6);
@@ -1807,7 +2294,7 @@ mod tests {
         let mut term = Term::new(
             TerminalConfig::default(),
             &TermSize::new(20, 6),
-            TerminalEventProxy { input_tx },
+            test_terminal_event_proxy(input_tx),
         );
         let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
 
@@ -1817,7 +2304,7 @@ mod tests {
         );
 
         let frame: serde_json::Value =
-            serde_json::from_str(&terminal_frame(&term).expect("terminal frame"))
+            serde_json::from_str(&terminal_frame(&term, None).expect("terminal frame"))
                 .expect("frame json");
         assert_eq!(frame["modes"]["appCursor"], true);
         assert_eq!(frame["modes"]["bracketedPaste"], true);
@@ -1832,7 +2319,7 @@ mod tests {
         let mut term = Term::new(
             TerminalConfig::default(),
             &TermSize::new(20, 6),
-            TerminalEventProxy { input_tx },
+            test_terminal_event_proxy(input_tx),
         );
         let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
 
@@ -1854,18 +2341,42 @@ mod tests {
         let mut term = Term::new(
             TerminalConfig::default(),
             &TermSize::new(20, 6),
-            TerminalEventProxy { input_tx },
+            test_terminal_event_proxy(input_tx),
         );
         let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
 
         processor.advance(&mut term, b"\x1b[?1000h\x1b[?1005h");
 
         let frame: serde_json::Value =
-            serde_json::from_str(&terminal_frame(&term).expect("terminal frame"))
+            serde_json::from_str(&terminal_frame(&term, None).expect("terminal frame"))
                 .expect("frame json");
         assert_eq!(frame["modes"]["mouseReportClick"], true);
         assert_eq!(frame["modes"]["utf8Mouse"], true);
         assert_eq!(frame["modes"]["sgrMouse"], false);
+    }
+
+    #[test]
+    fn terminal_frame_exposes_title_protocol() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        let (ui_event_tx, ui_event_rx) = mpsc::channel::<TerminalUiEvent>();
+        let mut term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(20, 6),
+            TerminalEventProxy {
+                input_tx,
+                ui_event_tx,
+            },
+        );
+        let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
+        let mut title = None;
+
+        processor.advance(&mut term, b"\x1b]0;View Title Protocol\x07");
+        drain_terminal_ui_events(&ui_event_rx, &mut title);
+        let frame: serde_json::Value =
+            serde_json::from_str(&terminal_frame(&term, title.as_deref()).expect("terminal frame"))
+                .expect("frame json");
+
+        assert_eq!(frame["title"], "View Title Protocol");
     }
 
     #[test]
@@ -1965,6 +2476,14 @@ mod tests {
             "killing both terminal sessions should clear the registry"
         );
         fs::remove_dir_all(repo).ok();
+    }
+
+    fn test_terminal_event_proxy(input_tx: mpsc::Sender<Vec<u8>>) -> TerminalEventProxy {
+        let (ui_event_tx, _ui_event_rx) = mpsc::channel::<TerminalUiEvent>();
+        TerminalEventProxy {
+            input_tx,
+            ui_event_tx,
+        }
     }
 
     fn connect_terminal_websocket(
@@ -2115,6 +2634,113 @@ mod tests {
     }
 
     #[test]
+    fn create_repo_file_accepts_repo_root_shortcut_and_creates_parents() {
+        let repo = create_basic_repo();
+
+        let created = create_repo_file(&repo, "/aaa/bbb/cc/asd.txt").expect("create nested file");
+
+        assert_eq!(created, "aaa/bbb/cc/asd.txt");
+        assert!(
+            repo.join("aaa")
+                .join("bbb")
+                .join("cc")
+                .join("asd.txt")
+                .is_file(),
+            "leading slash should mean repository root, not filesystem root"
+        );
+
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn create_repo_file_normalizes_backslashes_without_stripping_folder_names() {
+        let repo = create_basic_repo();
+
+        let created = create_repo_file(&repo, "a\\bbb.txt").expect("create windows-style path");
+
+        assert_eq!(created, "a/bbb.txt");
+        assert!(repo.join("a").join("bbb.txt").is_file());
+
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn create_repo_file_rejects_paths_that_are_not_cross_platform() {
+        let repo = create_basic_repo();
+
+        for path in [
+            "../outside.txt",
+            "C:/outside.txt",
+            "bad:name.txt",
+            "bad?.txt",
+            "name-with-dot./file.txt",
+            "CON",
+            "aux.txt",
+        ] {
+            assert!(
+                create_repo_file(&repo, path).is_err(),
+                "{path:?} should be rejected"
+            );
+        }
+
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn rename_repo_file_moves_files_when_destination_parent_exists() {
+        let repo = create_basic_repo();
+        fs::create_dir_all(repo.join("src")).expect("create src");
+        fs::write(repo.join("old.txt"), "old\n").expect("write old file");
+
+        let renamed =
+            rename_repo_file(&repo, "old.txt", "src/new.txt").expect("rename project file");
+
+        assert_eq!(renamed, "src/new.txt");
+        assert!(!repo.join("old.txt").exists());
+        assert_eq!(
+            fs::read_to_string(repo.join("src").join("new.txt")).expect("read renamed file"),
+            "old\n"
+        );
+
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn rename_repo_file_rejects_missing_parent_and_existing_destination() {
+        let repo = create_basic_repo();
+        fs::write(repo.join("old.txt"), "old\n").expect("write old file");
+        fs::write(repo.join("exists.txt"), "exists\n").expect("write existing file");
+
+        assert!(
+            rename_repo_file(&repo, "old.txt", "missing/new.txt").is_err(),
+            "rename should not recursively create destination directories"
+        );
+        assert!(
+            rename_repo_file(&repo, "old.txt", "exists.txt").is_err(),
+            "rename should not overwrite an existing destination"
+        );
+
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn delete_repo_file_removes_files_but_rejects_directories() {
+        let repo = create_basic_repo();
+        fs::create_dir_all(repo.join("dir")).expect("create dir");
+        fs::write(repo.join("note.txt"), "hello\n").expect("write note");
+
+        delete_repo_file(&repo, "note.txt").expect("delete file");
+
+        assert!(!repo.join("note.txt").exists());
+        assert!(
+            delete_repo_file(&repo, "dir").is_err(),
+            "directory deletion should stay disabled"
+        );
+
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
     fn file_content_reads_text_and_rejects_outside_paths() {
         let repo = create_basic_repo();
         fs::write(repo.join("note.txt"), "hello\n").expect("write text");
@@ -2124,11 +2750,67 @@ mod tests {
         assert_eq!(content.content, "hello\n");
         assert!(!content.binary);
         assert!(!content.too_large);
+        assert!(content.media_type.is_none());
+        assert!(content.media_data_url.is_none());
 
         assert!(
             read_file_content(&repo, "../note.txt").is_err(),
             "file content should not read outside the repository"
         );
+
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn file_content_renders_svg_as_text_and_media_preview() {
+        let repo = create_basic_repo();
+        fs::write(
+            repo.join("logo.svg"),
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><rect width="4" height="4"/></svg>"#,
+        )
+        .expect("write svg");
+
+        let content = read_file_content(&repo, "logo.svg").expect("svg content");
+
+        assert_eq!(content.path, "logo.svg");
+        assert_eq!(content.media_type.as_deref(), Some("image/svg+xml"));
+        assert!(
+            content
+                .media_data_url
+                .as_deref()
+                .is_some_and(|url| url.starts_with("data:image/svg+xml;base64,")),
+            "svg should include a renderable preview URL"
+        );
+        assert!(!content.binary);
+        assert!(content.content.contains("<svg"));
+
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn file_content_renders_binary_images_as_media_preview() {
+        let repo = create_basic_repo();
+        fs::write(
+            repo.join("pixel.png"),
+            [
+                0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n', 0, 0, 0, 0,
+            ],
+        )
+        .expect("write png");
+
+        let content = read_file_content(&repo, "pixel.png").expect("png content");
+
+        assert_eq!(content.path, "pixel.png");
+        assert_eq!(content.media_type.as_deref(), Some("image/png"));
+        assert!(
+            content
+                .media_data_url
+                .as_deref()
+                .is_some_and(|url| url.starts_with("data:image/png;base64,")),
+            "binary image should include a renderable preview URL"
+        );
+        assert!(content.binary);
+        assert!(content.content.is_empty());
 
         fs::remove_dir_all(repo).ok();
     }
@@ -2245,6 +2927,68 @@ mod tests {
 
         let results = search_project_files(&repo, "   ", Some(5)).expect("empty search");
         assert!(results.is_empty());
+
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn editor_search_returns_utf16_offsets() {
+        let response =
+            search_editor_text("a😀 beta\n第二个 Beta\n".to_string(), "beta".to_string())
+                .expect("editor search");
+
+        assert_eq!(response.matches.len(), 2);
+        assert_eq!(response.matches[0].start, 4);
+        assert_eq!(response.matches[0].end, 8);
+        assert_eq!(response.matches[0].line_number, 1);
+        assert_eq!(response.matches[0].line_text, "a😀 beta");
+        assert_eq!(response.matches[1].line_number, 2);
+        assert_eq!(response.matches[1].line_text, "第二个 Beta");
+    }
+
+    #[test]
+    fn editor_replace_can_replace_all_matches() {
+        let response = replace_editor_text(
+            "Alpha beta BETA".to_string(),
+            "beta".to_string(),
+            "gamma".to_string(),
+            0,
+            true,
+        )
+        .expect("editor replace");
+
+        assert_eq!(response.content, "Alpha gamma gamma");
+        assert!(response.matches.is_empty());
+        assert_eq!(response.selection_start, 0);
+        assert_eq!(response.selection_end, 0);
+    }
+
+    #[test]
+    fn status_entries_mark_unmerged_files_as_conflicts() {
+        let statuses = parse_status_entries("UU src/app.ts\n U src/lib.rs\nAA README.md\n");
+
+        assert_eq!(
+            statuses,
+            vec![
+                ("src/app.ts".to_string(), "conflict".to_string()),
+                ("src/lib.rs".to_string(), "conflict".to_string()),
+                ("README.md".to_string(), "conflict".to_string()),
+            ]
+        );
+        assert_eq!(name_status_code_to_status("U"), "conflict");
+        assert_eq!(name_status_code_to_status("UU"), "conflict");
+    }
+
+    #[test]
+    fn pull_current_branch_rejects_unknown_mode() {
+        let repo = create_basic_repo();
+        fs::write(repo.join("base.txt"), "base\n").expect("write base");
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-m", "base"]);
+
+        let error = pull_current_branch(repo.to_string_lossy().to_string(), "squash".to_string())
+            .expect_err("unknown pull mode should be rejected");
+        assert_eq!(error, "Pull mode must be merge or rebase");
 
         fs::remove_dir_all(repo).ok();
     }
@@ -2388,8 +3132,14 @@ pub fn run() {
             get_project_files,
             get_file_content,
             save_file_content,
+            create_project_file,
+            rename_project_file,
+            delete_project_file,
             search_files,
+            search_editor_text,
+            replace_editor_text,
             fetch_remotes,
+            pull_current_branch,
             terminal_spawn,
             terminal_resize,
             terminal_kill

@@ -4732,6 +4732,7 @@ name = "view"
 version = "0.1.0"
 dependencies = [
  "alacritty_terminal",
+ "base64 0.22.1",
  "fff-search",
  "portable-pty",
  "serde",

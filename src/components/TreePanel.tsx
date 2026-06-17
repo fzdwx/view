@@ -1,16 +1,21 @@
-import { themeToTreeStyles } from "@pierre/trees";
+import { prepareFileTreeInput, themeToTreeStyles } from "@pierre/trees";
 import { FileTree, useFileTree } from "@pierre/trees/react";
 import pierreDarkTheme from "@pierre/theme/pierre-dark";
 import type {
+  ContextMenuItem,
+  ContextMenuOpenContext,
   FileTreeDirectoryHandle,
+  FileTreeIcons,
   FileTreeInitialExpansion,
   FileTreeItemHandle,
   GitStatusEntry,
 } from "@pierre/trees";
+import { FilePlus2, Pencil, Trash2, X } from "lucide-react";
 import {
   type CSSProperties,
   type DragEvent,
   type ReactNode,
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -42,6 +47,11 @@ const treeDarkThemeStyles = themeToTreeStyles({
   },
 }) as CSSProperties;
 
+const fileTreeIcons: FileTreeIcons = {
+  set: "complete",
+  colored: true,
+};
+
 interface TreePanelProps {
   files: TreeFile[];
   selectedPath: string | null;
@@ -52,10 +62,13 @@ interface TreePanelProps {
   emptyCopy?: string;
   onDragEnd?(): void;
   onDragStart?(event: DragEvent<HTMLDivElement>): void;
+  onCreateFile?(parentPath: string | null): void;
+  onDeleteFile?(path: string): void;
+  onRenameFile?(fromPath: string, toPath: string): void;
   onSelectPath(path: string): void;
 }
 
-export function TreePanel({
+export const TreePanel = memo(function TreePanel({
   files,
   selectedPath,
   title = "Files",
@@ -65,25 +78,36 @@ export function TreePanel({
   emptyCopy = "There are no files to show.",
   onDragEnd,
   onDragStart,
+  onCreateFile,
+  onDeleteFile,
+  onRenameFile,
   onSelectPath,
 }: TreePanelProps) {
   const treeData = useMemo(() => {
-    const paths = files.map((file) => file.path);
-    const gitStatus = files
-      .filter((file) => file.status)
-      .map((file) => ({
-        path: file.path,
-        status: file.status,
-      })) as GitStatusEntry[];
+    const inputPaths = uniqueInputPaths(files);
+    const preparedInput = prepareFileTreeInput(inputPaths);
+    const paths = preparedInput.paths;
+    const selectablePaths = new Set(paths);
+    const statusByPath = new Map<string, TreeFile["status"]>();
+    for (const file of files) {
+      if (file.status && selectablePaths.has(file.path)) {
+        statusByPath.set(file.path, file.status);
+      }
+    }
+    const gitStatus = [...statusByPath].map(([path, status]) => ({
+      path,
+      status: status === "conflict" ? "modified" : status,
+    })) as GitStatusEntry[];
 
     return {
       paths,
-      selectablePaths: new Set(paths),
+      preparedInput,
+      selectablePaths,
       gitStatus,
     };
   }, [files]);
 
-  const { paths, selectablePaths, gitStatus } = treeData;
+  const { paths, preparedInput, selectablePaths, gitStatus } = treeData;
   const selectablePathsRef = useRef(selectablePaths);
   const onSelectPathRef = useRef(onSelectPath);
 
@@ -91,12 +115,25 @@ export function TreePanel({
   onSelectPathRef.current = onSelectPath;
 
   const { model } = useFileTree({
-    paths,
+    preparedInput,
     gitStatus,
     initialExpansion,
     initialSelectedPaths: selectedPath ? [selectedPath] : [],
     density: "compact",
+    icons: fileTreeIcons,
+    renaming: onRenameFile
+      ? {
+          canRename: (item) => !item.isFolder,
+          onRename: (event) => {
+            onRenameFile(event.sourcePath, event.destinationPath);
+          },
+          onError: (error) => {
+            console.warn("File tree rename failed", error);
+          },
+        }
+      : false,
     search: true,
+    stickyFolders: true,
     onSelectionChange: ([path]) => {
       if (path && selectablePathsRef.current.has(path)) {
         onSelectPathRef.current(path);
@@ -124,12 +161,14 @@ export function TreePanel({
 
   useEffect(() => {
     model.resetPaths(paths, {
+      preparedInput,
       initialExpandedPaths:
         initialExpansion === "open" ? directoryPathsFor(paths) : [],
     });
     model.setGitStatus(gitStatus);
+    model.setIcons(fileTreeIcons);
     model.setSearch(null);
-  }, [initialExpansion, model, paths, gitStatus]);
+  }, [initialExpansion, model, paths, preparedInput, gitStatus]);
 
   useEffect(() => {
     syncSelectedPath();
@@ -140,6 +179,16 @@ export function TreePanel({
       <div className="tree-empty-state">
         <div className="empty-title">{emptyTitle}</div>
         <div className="empty-copy">{emptyCopy}</div>
+        {onCreateFile ? (
+          <button
+            className="ghost-button tree-empty-action"
+            type="button"
+            onClick={() => onCreateFile(null)}
+          >
+            <FilePlus2 size={14} />
+            New file
+          </button>
+        ) : null}
       </div>
     );
   }
@@ -163,11 +212,108 @@ export function TreePanel({
             }}
           >
             <span className="tree-title">{title}</span>
-            <span>{files.length}</span>
+            <span className="tree-header-actions">
+              {onCreateFile ? (
+                <button
+                  className="icon-button tree-action-button"
+                  type="button"
+                  aria-label="New file"
+                  title="New file"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onCreateFile(null);
+                  }}
+                >
+                  <FilePlus2 size={13} />
+                </button>
+              ) : null}
+              <span>{files.length}</span>
+            </span>
           </div>
         ) : null
       }
+      renderContextMenu={
+        onCreateFile || onDeleteFile || onRenameFile
+          ? (item, context) => (
+              <TreeContextMenu
+                item={item}
+                context={context}
+                onCreateFile={onCreateFile}
+                onDeleteFile={onDeleteFile}
+                onStartRename={
+                  onRenameFile
+                    ? (path) => {
+                        context.close({ restoreFocus: false });
+                        model.startRenaming(path);
+                      }
+                    : undefined
+                }
+              />
+            )
+          : undefined
+      }
     />
+  );
+});
+
+function TreeContextMenu({
+  context,
+  item,
+  onCreateFile,
+  onDeleteFile,
+  onStartRename,
+}: {
+  context: ContextMenuOpenContext;
+  item: ContextMenuItem;
+  onCreateFile?(parentPath: string | null): void;
+  onDeleteFile?(path: string): void;
+  onStartRename?(path: string): void;
+}) {
+  const parentPath =
+    item.kind === "directory" ? item.path : parentPathFromTreePath(item.path);
+
+  return (
+    <div className="tree-context-menu" data-file-tree-context-menu-root="true">
+      {onCreateFile ? (
+        <button
+          type="button"
+          onClick={() => {
+            context.close();
+            onCreateFile(parentPath);
+          }}
+        >
+          <FilePlus2 size={13} />
+          New file
+        </button>
+      ) : null}
+      {onStartRename ? (
+        <button
+          type="button"
+          disabled={item.kind === "directory"}
+          onClick={() => onStartRename(item.path)}
+        >
+          <Pencil size={13} />
+          Rename
+        </button>
+      ) : null}
+      {onDeleteFile ? (
+        <button
+          type="button"
+          disabled={item.kind === "directory"}
+          onClick={() => {
+            context.close();
+            onDeleteFile(item.path);
+          }}
+        >
+          <Trash2 size={13} />
+          Delete
+        </button>
+      ) : null}
+      <button type="button" onClick={() => context.close()}>
+        <X size={13} />
+        Close
+      </button>
+    </div>
   );
 }
 
@@ -182,6 +328,14 @@ function ancestorDirectoryPaths(path: string): string[] {
   return directories;
 }
 
+function parentPathFromTreePath(path: string): string | null {
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length <= 1) {
+    return null;
+  }
+  return `${parts.slice(0, -1).join("/")}/`;
+}
+
 function directoryPathsFor(paths: readonly string[]): string[] {
   const directories = new Set<string>();
   for (const path of paths) {
@@ -190,6 +344,22 @@ function directoryPathsFor(paths: readonly string[]): string[] {
     }
   }
   return [...directories];
+}
+
+function uniqueInputPaths(files: readonly TreeFile[]): string[] {
+  const seenPaths = new Set<string>();
+  const paths: string[] = [];
+
+  for (const file of files) {
+    const path = file.path;
+    if (!path || seenPaths.has(path)) {
+      continue;
+    }
+    seenPaths.add(path);
+    paths.push(path);
+  }
+
+  return paths;
 }
 
 function isDirectoryHandle(

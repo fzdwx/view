@@ -15,7 +15,14 @@ interface TerminalPanelProps {
 
 type TerminalTab = {
   id: string;
+  baseTitle: string;
   title: string;
+};
+
+type TerminalWorkspace = {
+  tabs: TerminalTab[];
+  activeTabId: string;
+  nextTabIndex: number;
 };
 
 type TerminalRun = {
@@ -48,6 +55,7 @@ type TerminalModes = {
 
 type TerminalFrame = {
   type: "frame";
+  title: string | null;
   rows: number;
   cols: number;
   cursorRow: number;
@@ -371,9 +379,14 @@ function TerminalRows({ frame }: { frame: TerminalFrame }) {
 interface TerminalSessionViewProps {
   active: boolean;
   projectPath: string;
+  onTitleChange(title: string | null): void;
 }
 
-function TerminalSessionView({ active, projectPath }: TerminalSessionViewProps) {
+function TerminalSessionView({
+  active,
+  projectPath,
+  onTitleChange,
+}: TerminalSessionViewProps) {
   const screenRef = useRef<HTMLDivElement | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const sessionIdRef = useRef<string | null>(null);
@@ -383,6 +396,7 @@ function TerminalSessionView({ active, projectPath }: TerminalSessionViewProps) 
   const resizeFrameRef = useRef<number | null>(null);
   const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null);
   const activeRef = useRef(active);
+  const titleChangeRef = useRef(onTitleChange);
   const pendingFrameRef = useRef<TerminalFrame | null>(null);
   const frameFlushRef = useRef<number | null>(null);
   const modesRef = useRef<TerminalModes>(DEFAULT_TERMINAL_MODES);
@@ -392,10 +406,11 @@ function TerminalSessionView({ active, projectPath }: TerminalSessionViewProps) 
 
   useEffect(() => {
     activeRef.current = active;
+    titleChangeRef.current = onTitleChange;
     if (active) {
       screenRef.current?.focus({ preventScroll: true });
     }
-  }, [active]);
+  }, [active, onTitleChange]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -698,6 +713,7 @@ function TerminalSessionView({ active, projectPath }: TerminalSessionViewProps) 
           try {
             const message = JSON.parse(event.data) as TerminalFrame | TerminalClose;
             if (message.type === "frame") {
+              titleChangeRef.current(message.title ?? null);
               queueFrame(message);
             } else if (message.type === "close") {
               if (frameFlushRef.current != null) {
@@ -724,6 +740,7 @@ function TerminalSessionView({ active, projectPath }: TerminalSessionViewProps) 
         setClosed({ type: "close", exitCode: null });
         setFrame({
           type: "frame",
+          title: null,
           rows: 1,
           cols: 80,
           cursorRow: 0,
@@ -821,46 +838,152 @@ function TerminalSessionView({ active, projectPath }: TerminalSessionViewProps) 
 }
 
 export function TerminalPanel({ active, projectPath }: TerminalPanelProps) {
-  const nextTabIdRef = useRef(1);
-  const [tabs, setTabs] = useState<TerminalTab[]>(() => [
-    { id: "terminal-1", title: "Terminal 1" },
-  ]);
-  const [activeTabId, setActiveTabId] = useState("terminal-1");
+  const [workspaces, setWorkspaces] = useState<Record<string, TerminalWorkspace>>({});
   const unavailableMessage = !projectPath
     ? "Open a repository first."
     : !isTauriRuntime()
       ? "Terminal is available in Tauri."
       : null;
+  const activeWorkspace = projectPath
+    ? (workspaces[projectPath] ?? createInitialTerminalWorkspace())
+    : null;
+  const workspaceEntries: Array<[string, TerminalWorkspace]> =
+    projectPath && activeWorkspace && !workspaces[projectPath]
+      ? [...Object.entries(workspaces), [projectPath, activeWorkspace]]
+      : Object.entries(workspaces);
 
   useEffect(() => {
-    nextTabIdRef.current = 1;
-    const firstTab = { id: "terminal-1", title: "Terminal 1" };
-    setTabs([firstTab]);
-    setActiveTabId(firstTab.id);
+    if (!projectPath || !isTauriRuntime()) {
+      return;
+    }
+
+    setWorkspaces((currentWorkspaces) =>
+      currentWorkspaces[projectPath]
+        ? currentWorkspaces
+        : {
+            ...currentWorkspaces,
+            [projectPath]: createInitialTerminalWorkspace(),
+          },
+    );
   }, [projectPath]);
 
   const addTab = () => {
-    const nextIndex = nextTabIdRef.current + 1;
-    nextTabIdRef.current = nextIndex;
-    const tab = {
-      id: `terminal-${Date.now()}-${nextIndex}`,
-      title: `Terminal ${nextIndex}`,
-    };
-    setTabs((currentTabs) => [...currentTabs, tab]);
-    setActiveTabId(tab.id);
+    if (!projectPath) {
+      return;
+    }
+
+    setWorkspaces((currentWorkspaces) => {
+      const workspace = currentWorkspaces[projectPath] ?? createInitialTerminalWorkspace();
+      const nextIndex = workspace.nextTabIndex + 1;
+      const tab = {
+        id: `terminal-${Date.now()}-${nextIndex}`,
+        baseTitle: `Terminal ${nextIndex}`,
+        title: `Terminal ${nextIndex}`,
+      };
+
+      return {
+        ...currentWorkspaces,
+        [projectPath]: {
+          tabs: [...workspace.tabs, tab],
+          activeTabId: tab.id,
+          nextTabIndex: nextIndex,
+        },
+      };
+    });
   };
 
   const closeTab = (tabId: string) => {
-    const index = tabs.findIndex((tab) => tab.id === tabId);
-    if (index < 0) {
+    if (!projectPath) {
       return;
     }
-    const nextTabs = tabs.filter((tab) => tab.id !== tabId);
-    setTabs(nextTabs);
-    if (activeTabId === tabId) {
+
+    setWorkspaces((currentWorkspaces) => {
+      const workspace = currentWorkspaces[projectPath];
+      if (!workspace) {
+        return currentWorkspaces;
+      }
+
+      const index = workspace.tabs.findIndex((tab) => tab.id === tabId);
+      if (index < 0) {
+        return currentWorkspaces;
+      }
+
+      const nextTabs = workspace.tabs.filter((tab) => tab.id !== tabId);
       const fallback = nextTabs[Math.max(0, index - 1)] ?? nextTabs[0] ?? null;
-      setActiveTabId(fallback?.id ?? "");
+      return {
+        ...currentWorkspaces,
+        [projectPath]: {
+          ...workspace,
+          tabs: nextTabs,
+          activeTabId:
+            workspace.activeTabId === tabId
+              ? (fallback?.id ?? "")
+              : workspace.activeTabId,
+        },
+      };
+    });
+  };
+
+  const selectTab = (tabId: string) => {
+    if (!projectPath) {
+      return;
     }
+
+    setWorkspaces((currentWorkspaces) => {
+      const workspace = currentWorkspaces[projectPath];
+      if (!workspace) {
+        return currentWorkspaces;
+      }
+
+      return {
+        ...currentWorkspaces,
+        [projectPath]: {
+          ...workspace,
+          activeTabId: tabId,
+        },
+      };
+    });
+  };
+
+  const updateTabTitle = (tabId: string, title: string | null) => {
+    if (!projectPath) {
+      return;
+    }
+
+    setWorkspaces((currentWorkspaces) => {
+      const workspace = currentWorkspaces[projectPath];
+      if (!workspace) {
+        return currentWorkspaces;
+      }
+
+      let changed = false;
+      const nextTabs = workspace.tabs.map((tab) => {
+        if (tab.id !== tabId) {
+          return tab;
+        }
+        const nextTitle = title?.trim() || tab.baseTitle;
+        if (tab.title === nextTitle) {
+          return tab;
+        }
+        changed = true;
+        return {
+          ...tab,
+          title: nextTitle,
+        };
+      });
+
+      if (!changed) {
+        return currentWorkspaces;
+      }
+
+      return {
+        ...currentWorkspaces,
+        [projectPath]: {
+          ...workspace,
+          tabs: nextTabs,
+        },
+      };
+    });
   };
 
   return (
@@ -873,12 +996,21 @@ export function TerminalPanel({ active, projectPath }: TerminalPanelProps) {
             <div className="terminal-header-title" aria-label="Terminal">
               <TerminalSquare size={14} />
             </div>
+            <button
+              type="button"
+              className="terminal-tab-add"
+              aria-label="New terminal"
+              title="New terminal"
+              onClick={addTab}
+            >
+              <Plus size={14} />
+            </button>
             <div className="terminal-tabs" role="tablist" aria-label="Terminals">
-              {tabs.map((tab) => (
+              {activeWorkspace?.tabs.map((tab) => (
                 <div
                   key={tab.id}
                   className={
-                    tab.id === activeTabId
+                    tab.id === activeWorkspace.activeTabId
                       ? "terminal-tab-shell terminal-tab-active"
                       : "terminal-tab-shell"
                   }
@@ -887,10 +1019,10 @@ export function TerminalPanel({ active, projectPath }: TerminalPanelProps) {
                     type="button"
                     className="terminal-tab"
                     role="tab"
-                    aria-selected={tab.id === activeTabId}
-                    onClick={() => setActiveTabId(tab.id)}
+                    aria-selected={tab.id === activeWorkspace.activeTabId}
+                    onClick={() => selectTab(tab.id)}
                   >
-                    {tab.title}
+                    <span>{tab.title}</span>
                   </button>
                   <button
                     type="button"
@@ -903,42 +1035,48 @@ export function TerminalPanel({ active, projectPath }: TerminalPanelProps) {
                 </div>
               ))}
             </div>
-            <button
-              type="button"
-              className="terminal-tab-add"
-              aria-label="New terminal"
-              title="New terminal"
-              onClick={addTab}
-            >
-              <Plus size={14} />
-            </button>
           </div>
           <div className="terminal-session-stack">
-            {tabs.length === 0 ? (
+            {activeWorkspace?.tabs.length === 0 ? (
               <button type="button" className="terminal-new-empty" onClick={addTab}>
                 New terminal
               </button>
             ) : (
-              tabs.map((tab) => (
-                <div
-                  key={tab.id}
-                  className={
-                    tab.id === activeTabId
-                      ? "terminal-session-layer"
-                      : "terminal-session-layer terminal-session-layer-hidden"
-                  }
-                  aria-hidden={tab.id !== activeTabId}
-                >
-                  <TerminalSessionView
-                    active={active && tab.id === activeTabId}
-                    projectPath={projectPath!}
-                  />
-                </div>
-              ))
+              workspaceEntries.flatMap(([workspaceProjectPath, workspace]) =>
+                workspace.tabs.map((tab) => {
+                  const isActiveProject = workspaceProjectPath === projectPath;
+                  const isActiveTab = tab.id === workspace.activeTabId;
+                  return (
+                    <div
+                      key={`${workspaceProjectPath}:${tab.id}`}
+                      className={
+                        isActiveProject && isActiveTab
+                          ? "terminal-session-layer"
+                          : "terminal-session-layer terminal-session-layer-hidden"
+                      }
+                      aria-hidden={!isActiveProject || !isActiveTab}
+                    >
+                      <TerminalSessionView
+                        active={active && isActiveProject && isActiveTab}
+                        projectPath={workspaceProjectPath}
+                        onTitleChange={(title) => updateTabTitle(tab.id, title)}
+                      />
+                    </div>
+                  );
+                }),
+              )
             )}
           </div>
         </>
       )}
     </section>
   );
+}
+
+function createInitialTerminalWorkspace(): TerminalWorkspace {
+  return {
+    tabs: [{ id: "terminal-1", baseTitle: "Terminal 1", title: "Terminal 1" }],
+    activeTabId: "terminal-1",
+    nextTabIndex: 1,
+  };
 }
