@@ -124,6 +124,11 @@ export interface TerminalSessionInfo {
   wsUrl: string;
 }
 
+export interface SystemFont {
+  family: string;
+  monospace: boolean;
+}
+
 export async function loadRepository(
   path: string,
   commit?: string | null,
@@ -259,6 +264,37 @@ export async function fetchRemotes(path: string): Promise<void> {
   return invoke<void>("fetch_remotes", { path });
 }
 
+export async function checkoutBranch(
+  path: string,
+  refName: string,
+): Promise<void> {
+  return invoke<void>("checkout_branch", { path, refName });
+}
+
+export async function createBranch(
+  path: string,
+  name: string,
+  startPoint: string,
+): Promise<void> {
+  return invoke<void>("create_branch", { path, name, startPoint });
+}
+
+export async function renameBranch(
+  path: string,
+  refName: string,
+  newName: string,
+): Promise<void> {
+  return invoke<void>("rename_branch", { path, refName, newName });
+}
+
+export async function deleteBranch(
+  path: string,
+  refName: string,
+  force: boolean,
+): Promise<void> {
+  return invoke<void>("delete_branch", { path, refName, force });
+}
+
 export type PullMode = "merge" | "rebase";
 
 export async function pullCurrentBranch(
@@ -292,6 +328,10 @@ export async function terminalResize(
 
 export async function terminalKill(id: string): Promise<void> {
   return invoke<void>("terminal_kill", { id });
+}
+
+export async function listSystemFonts(): Promise<SystemFont[]> {
+  return invoke<SystemFont[]>("list_system_fonts");
 }
 
 export function isTauriRuntime(): boolean {

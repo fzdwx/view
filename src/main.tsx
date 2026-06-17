@@ -8,6 +8,7 @@ import {
   createRouter,
 } from "@tanstack/react-router";
 import { App } from "./App";
+import { SettingsWindowApp } from "./components/SettingsWindowApp";
 import "./styles.css";
 
 const queryClient = new QueryClient();
@@ -32,8 +33,32 @@ declare module "@tanstack/react-router" {
   }
 }
 
-createRoot(document.getElementById("root")!).render(
-  <QueryClientProvider client={queryClient}>
-    <RouterProvider router={router} />
-  </QueryClientProvider>,
-);
+function RootApp() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      {isSettingsWindowRoute() ? (
+        <SettingsWindowApp />
+      ) : (
+        <RouterProvider router={router} />
+      )}
+    </QueryClientProvider>
+  );
+}
+
+function rootElement(): HTMLElement {
+  const element = document.getElementById("root");
+  if (!element) {
+    throw new Error("Missing root element");
+  }
+
+  return element;
+}
+
+function isSettingsWindowRoute(): boolean {
+  const url = new URL(window.location.href);
+  return (
+    url.pathname === "/settings" || url.searchParams.get("window") === "settings"
+  );
+}
+
+createRoot(rootElement()).render(<RootApp />);

@@ -2,6 +2,7 @@ import {
   type CSSProperties,
   type DragEvent,
   type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type UIEvent,
@@ -30,8 +31,8 @@ import {
   GitCommitHorizontal,
   GitPullRequestArrow,
   Image as ImageIcon,
-  Keyboard,
   Loader2,
+  PenLine,
   Plus,
   RotateCcw,
   Search,
@@ -39,7 +40,7 @@ import {
   Settings as SettingsIcon,
   Tag,
   TerminalSquare,
-  Type,
+  Trash2,
   X,
 } from "lucide-react";
 import { DiffPanel } from "./components/DiffPanel";
@@ -55,7 +56,10 @@ import {
   type RepositoryPayload,
   type SaveConflict,
   type TagInfo,
+  checkoutBranch,
+  createBranch,
   createProjectFile,
+  deleteBranch,
   deleteProjectFile,
   fetchRemotes,
   getCommits,
@@ -66,6 +70,7 @@ import {
   loadRepository,
   pullCurrentBranch,
   renameProjectFile,
+  renameBranch,
   replaceEditorText,
   saveFileContent,
   searchEditorText,
@@ -83,6 +88,14 @@ import {
   saveProjects,
   upsertProject,
 } from "./lib/projects";
+import {
+  appFontCss,
+  loadAppSettings,
+  monoFontCss,
+  saveAppSettings,
+} from "./lib/settings";
+import { subscribeToSettingsChanges } from "./lib/settingsEvents";
+import { openSettingsWindow } from "./lib/settingsWindow";
 
 type PreviewMode = "file" | "diff";
 type FileViewMode = "preview" | "source";
@@ -92,79 +105,10 @@ type ProjectDock = TreeDock | "panel";
 type EditorDock = "left" | "right";
 type GitPanelId = "branches" | "history" | "details";
 type ToolPanelId = "project" | "git" | "terminal" | GitPanelId;
+type BranchActionKind = "checkout" | "create" | "rename" | "delete";
 
 const defaultGitPanelOrder: GitPanelId[] = ["branches", "history", "details"];
 const layoutStorageKey = "view.workbench-layout.v1";
-const settingsStorageKey = "view.settings.v1";
-
-type ShortcutAction =
-  | "commandPanel"
-  | "saveFile"
-  | "pullCurrentBranch"
-  | "openGitLog"
-  | "openTerminal"
-  | "switchProject";
-
-interface AppSettings {
-  fontFamily: string;
-  fontSize: number;
-  fontWeight: string;
-  lineHeight: number;
-  shortcuts: Record<ShortcutAction, string>;
-}
-
-const defaultAppSettings: AppSettings = {
-  fontFamily:
-    '"SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-  fontSize: 12,
-  fontWeight: "400",
-  lineHeight: 1.56,
-  shortcuts: {
-    commandPanel: "Mod+P",
-    saveFile: "Mod+S",
-    pullCurrentBranch: "Mod+T",
-    openGitLog: "Mod+G",
-    openTerminal: "Mod+`",
-    switchProject: "Mod+O",
-  },
-};
-
-const shortcutRows: Array<{
-  action: ShortcutAction;
-  label: string;
-  description: string;
-}> = [
-  {
-    action: "commandPanel",
-    label: "Command panel",
-    description: "Search files and commands",
-  },
-  {
-    action: "saveFile",
-    label: "Save file",
-    description: "Save the active editor tab",
-  },
-  {
-    action: "pullCurrentBranch",
-    label: "Pull branch",
-    description: "Choose merge or rebase",
-  },
-  {
-    action: "openGitLog",
-    label: "Open Git log",
-    description: "Focus the Git panel",
-  },
-  {
-    action: "openTerminal",
-    label: "Open terminal",
-    description: "Focus the terminal panel",
-  },
-  {
-    action: "switchProject",
-    label: "Switch project",
-    description: "Open the project switcher",
-  },
-];
 
 interface PanelSizes {
   rail: number;
@@ -281,7 +225,6 @@ type EditorSearchHighlightSegment =
       readonly text: string;
     }
   | {
-      readonly active: boolean;
       readonly kind: "match";
       readonly text: string;
     };
@@ -332,7 +275,6 @@ export function App() {
   const [debouncedCommandQuery, setDebouncedCommandQuery] = useState("");
   const [commandSelectionIndex, setCommandSelectionIndex] = useState(0);
   const [projectSwitcherOpen, setProjectSwitcherOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [pullChoiceOpen, setPullChoiceOpen] = useState(false);
   const [pullPending, setPullPending] = useState(false);
   const [pullError, setPullError] = useState<string | null>(null);
@@ -351,6 +293,14 @@ export function App() {
   useEffect(() => {
     saveAppSettings(appSettings);
   }, [appSettings]);
+
+  useEffect(
+    () =>
+      subscribeToSettingsChanges(() => {
+        setAppSettings(loadAppSettings());
+      }),
+    [],
+  );
 
   useEffect(() => {
     saveWorkbenchLayout({
@@ -577,6 +527,10 @@ export function App() {
   const currentBranchRef =
     payload?.summary.branches.find((branch) => branch.current)?.refName ?? null;
   const selectedBranchRef = activeBranchRef ?? currentBranchRef;
+  const selectedBranch =
+    payload?.summary.branches.find(
+      (branch) => branch.refName === selectedBranchRef,
+    ) ?? null;
   const selectedCommit =
     commits.find((commit) => commit.hash === activeCommit) ?? null;
   const commandResults =
@@ -601,8 +555,8 @@ export function App() {
   }, [activeProject, editorDrafts, previewTabs]);
   const appShellStyle = {
     gridTemplateColumns: "56px minmax(0, 1fr)",
-    "--app-font-family": appSettings.fontFamily,
-    "--mono": appSettings.fontFamily,
+    "--app-font-family": appFontCss(appSettings),
+    "--mono": monoFontCss(appSettings),
     "--editor-font-size": `${appSettings.fontSize}px`,
     "--editor-font-weight": appSettings.fontWeight,
     "--editor-line-height": String(appSettings.lineHeight),
@@ -806,7 +760,6 @@ export function App() {
       if (matchesShortcut(event, appSettings.shortcuts.switchProject)) {
         event.preventDefault();
         setProjectSwitcherOpen((open) => !open);
-        setSettingsOpen(false);
         return;
       }
 
@@ -1140,6 +1093,7 @@ export function App() {
 
   async function refreshProjectFileState(projectPath: string) {
     await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["commits", projectPath] }),
       queryClient.invalidateQueries({ queryKey: ["project-files", projectPath] }),
       queryClient.invalidateQueries({ queryKey: ["repository", projectPath] }),
       queryClient.invalidateQueries({ queryKey: ["file-content", projectPath] }),
@@ -1429,6 +1383,101 @@ export function App() {
     }
   }
 
+  async function performBranchAction(action: BranchActionKind, branch: BranchInfo) {
+    if (!activeProject || !isTauriRuntime()) {
+      return;
+    }
+
+    const branchLabel = branch.name;
+    try {
+      if (action === "checkout") {
+        if (
+          !confirmDiscardProjectDrafts(
+            activeProject.activePath,
+            `checkout ${branchLabel}`,
+          )
+        ) {
+          return;
+        }
+        await checkoutBranch(activeProject.activePath, branch.refName);
+        discardDraftsForProject(activeProject.activePath);
+        setActiveBranchRef(null);
+        setActiveCommit(null);
+        setSelectedChangePath(null);
+        setPreviewMode("diff");
+        setActivePreviewTabId(null);
+        await refreshProjectFileState(activeProject.activePath);
+        return;
+      }
+
+      if (action === "create") {
+        const defaultName = defaultNewBranchName(branch);
+        const name = window.prompt(`New branch from ${branchLabel}`, defaultName);
+        if (!name) {
+          return;
+        }
+        if (
+          !confirmDiscardProjectDrafts(
+            activeProject.activePath,
+            `create and checkout ${name}`,
+          )
+        ) {
+          return;
+        }
+        await createBranch(activeProject.activePath, name, branch.refName);
+        discardDraftsForProject(activeProject.activePath);
+        setActiveBranchRef(null);
+        setActiveCommit(null);
+        setSelectedChangePath(null);
+        setPreviewMode("diff");
+        setActivePreviewTabId(null);
+        await refreshProjectFileState(activeProject.activePath);
+        return;
+      }
+
+      if (action === "rename") {
+        if (branch.branchType !== "local") {
+          window.alert("Only local branches can be renamed.");
+          return;
+        }
+        const nextName = window.prompt(`Rename ${branchLabel}`, branch.name);
+        if (!nextName || nextName === branch.name) {
+          return;
+        }
+        await renameBranch(activeProject.activePath, branch.refName, nextName);
+        setActiveBranchRef(`refs/heads/${nextName}`);
+        await refreshProjectFileState(activeProject.activePath);
+        return;
+      }
+
+      if (action === "delete") {
+        if (branch.branchType !== "local") {
+          window.alert("Only local branches can be deleted here.");
+          return;
+        }
+        if (!window.confirm(`Delete local branch ${branchLabel}?`)) {
+          return;
+        }
+        try {
+          await deleteBranch(activeProject.activePath, branch.refName, false);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!window.confirm(`${message}\n\nForce delete ${branchLabel}?`)) {
+            return;
+          }
+          await deleteBranch(activeProject.activePath, branch.refName, true);
+        }
+        if (activeBranchRef === branch.refName) {
+          setActiveBranchRef(null);
+        }
+        await refreshProjectFileState(activeProject.activePath);
+      }
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : String(error));
+      await refreshProjectFileState(activeProject.activePath);
+    }
+  }
+
   function updateEditorDraft(content: string) {
     if (!editorKey || !currentFileContent) {
       return;
@@ -1583,6 +1632,7 @@ export function App() {
             branches={payload.summary.branches}
             tags={payload.summary.tags}
             activeRef={selectedBranchRef}
+            onBranchAction={performBranchAction}
             onSelect={(refName) => {
               setActiveBranchRef(refName);
               setActiveCommit(null);
@@ -1602,6 +1652,7 @@ export function App() {
           commits={filteredCommits}
           graphWidthCommits={commits}
           activeCommit={activeCommit}
+          branch={selectedBranch}
           filter={commitFilter}
           loading={commitsQuery.isLoading}
           onChangeFilter={setCommitFilter}
@@ -1810,30 +1861,17 @@ export function App() {
 
         <div className="rail-spacer" />
         <button
-          className={
-            settingsOpen
-              ? "activity-button rail-project-button active"
-              : "activity-button rail-project-button"
-          }
+          className="activity-button rail-project-button"
           aria-label="Settings"
           title="Settings"
           onClick={() => {
-            setSettingsOpen((open) => !open);
             setProjectSwitcherOpen(false);
+            void openSettingsWindow();
           }}
         >
           <SettingsIcon size={18} />
         </button>
       </aside>
-
-      {settingsOpen ? (
-        <SettingsPage
-          settings={appSettings}
-          onChange={setAppSettings}
-          onClose={() => setSettingsOpen(false)}
-          onReset={() => setAppSettings(defaultAppSettings)}
-        />
-      ) : null}
 
       {pullChoiceOpen ? (
         <PullChoiceDialog
@@ -2054,138 +2092,6 @@ export function App() {
         onSelectIndex={setCommandSelectionIndex}
       />
     </main>
-  );
-}
-
-function SettingsPage({
-  settings,
-  onChange,
-  onClose,
-  onReset,
-}: {
-  settings: AppSettings;
-  onChange(settings: AppSettings): void;
-  onClose(): void;
-  onReset(): void;
-}) {
-  const updateShortcut = (action: ShortcutAction, shortcut: string) => {
-    onChange({
-      ...settings,
-      shortcuts: {
-        ...settings.shortcuts,
-        [action]: shortcut,
-      },
-    });
-  };
-
-  return (
-    <section className="settings-page" aria-label="Settings">
-      <div className="settings-panel">
-        <div className="settings-head">
-          <div>
-            <span>Settings</span>
-            <small>Editor, terminal and shortcuts</small>
-          </div>
-          <button className="icon-button" aria-label="Close settings" onClick={onClose}>
-            <X size={14} />
-          </button>
-        </div>
-        <div className="settings-body">
-          <section className="settings-section">
-            <div className="settings-section-title">
-              <Type size={14} />
-              <span>Font</span>
-            </div>
-            <label className="settings-field wide">
-              <span>Family</span>
-              <input
-                value={settings.fontFamily}
-                spellCheck={false}
-                onChange={(event) =>
-                  onChange({ ...settings, fontFamily: event.target.value })
-                }
-              />
-            </label>
-            <div className="settings-grid">
-              <label className="settings-field">
-                <span>Size</span>
-                <input
-                  type="number"
-                  min={10}
-                  max={22}
-                  value={settings.fontSize}
-                  onChange={(event) =>
-                    onChange({
-                      ...settings,
-                      fontSize: clamp(Number(event.target.value), 10, 22),
-                    })
-                  }
-                />
-              </label>
-              <label className="settings-field">
-                <span>Weight</span>
-                <select
-                  value={settings.fontWeight}
-                  onChange={(event) =>
-                    onChange({ ...settings, fontWeight: event.target.value })
-                  }
-                >
-                  <option value="300">Light</option>
-                  <option value="400">Regular</option>
-                  <option value="500">Medium</option>
-                  <option value="600">Semibold</option>
-                </select>
-              </label>
-              <label className="settings-field">
-                <span>Line height</span>
-                <input
-                  type="number"
-                  min={1.2}
-                  max={2}
-                  step={0.05}
-                  value={settings.lineHeight}
-                  onChange={(event) =>
-                    onChange({
-                      ...settings,
-                      lineHeight: clamp(Number(event.target.value), 1.2, 2),
-                    })
-                  }
-                />
-              </label>
-            </div>
-          </section>
-          <section className="settings-section">
-            <div className="settings-section-title">
-              <Keyboard size={14} />
-              <span>Shortcuts</span>
-            </div>
-            <div className="shortcut-list">
-              {shortcutRows.map((row) => (
-                <label key={row.action} className="shortcut-row">
-                  <span>
-                    {row.label}
-                    <small>{row.description}</small>
-                  </span>
-                  <input
-                    value={settings.shortcuts[row.action]}
-                    spellCheck={false}
-                    onChange={(event) => updateShortcut(row.action, event.target.value)}
-                  />
-                </label>
-              ))}
-            </div>
-          </section>
-        </div>
-        <div className="settings-footer">
-          <button className="ghost-button settings-action" onClick={onReset}>
-            Reset
-          </button>
-          <button className="primary-action settings-action" onClick={onClose}>
-            Done
-          </button>
-        </div>
-      </div>
-    </section>
   );
 }
 
@@ -2614,6 +2520,7 @@ function FilePreview({
   });
   const pendingEditorScrollMetricsRef = useRef<EditorScrollMetrics | null>(null);
   const editorScrollFrameRef = useRef<number | null>(null);
+  const activeEditorMatchCorrectionFrameRef = useRef<number | null>(null);
   const [editorFindOpen, setEditorFindOpen] = useState(false);
   const [editorReplaceOpen, setEditorReplaceOpen] = useState(false);
   const [editorFindQuery, setEditorFindQuery] = useState("");
@@ -2716,6 +2623,10 @@ function FilePreview({
         window.cancelAnimationFrame(editorScrollFrameRef.current);
         editorScrollFrameRef.current = null;
       }
+      if (activeEditorMatchCorrectionFrameRef.current !== null) {
+        window.cancelAnimationFrame(activeEditorMatchCorrectionFrameRef.current);
+        activeEditorMatchCorrectionFrameRef.current = null;
+      }
     };
   }, []);
 
@@ -2746,16 +2657,24 @@ function FilePreview({
   }, [content, file, target]);
 
   useLayoutEffect(() => {
-    if (!target || !textareaRef.current) {
+    const textarea = textareaRef.current;
+    if (!target || !textarea) {
       return;
     }
 
-    textareaRef.current.scrollTop = Math.max(
-      0,
-      (target.line - 1) * editorLineHeight - 120,
+    if (textarea.value !== content) {
+      textarea.value = content;
+    }
+    const lineOffset = utf16OffsetForLine(content, target.line);
+    textarea.setSelectionRange(lineOffset, lineOffset);
+    scrollEditorLineIntoView(
+      textarea,
+      target.line,
+      editorLineHeight,
+      editorPaddingTop,
     );
-    syncEditorScrollMetrics(textareaRef.current, true);
-  }, [target]);
+    syncEditorScrollMetrics(textarea, true);
+  }, [content, editorLineHeight, editorPaddingTop, file?.path, target]);
 
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
@@ -2866,6 +2785,14 @@ function FilePreview({
 
     setActiveEditorMatchIndex(Math.max(0, editorMatches.length - 1));
   }, [activeEditorMatchIndex, editorMatches.length]);
+
+  useLayoutEffect(() => {
+    if (!editorFindOpen || !activeEditorMatch) {
+      return;
+    }
+
+    scheduleActiveEditorMatchScrollCorrection();
+  }, [activeEditorMatch, editorFindOpen, editorSearchHighlightSegments]);
 
   useEffect(() => {
     setActiveGitMarkerId(null);
@@ -3000,22 +2927,150 @@ function FilePreview({
       return;
     }
 
-    const lineTop = editorPaddingTop + (match.lineNumber - 1) * editorLineHeight;
-    const visibleTop = textarea.scrollTop;
-    const visibleBottom = visibleTop + textarea.clientHeight;
-    const margin = editorLineHeight * 4;
-
-    if (lineTop < visibleTop + margin || lineTop > visibleBottom - margin) {
-      textarea.scrollTop = Math.max(
-        0,
-        lineTop - textarea.clientHeight / 2 + editorLineHeight,
-      );
-    }
+    textarea.setSelectionRange(match.start, match.end);
     if (focusEditor) {
       textarea.focus({ preventScroll: true });
     }
-    textarea.setSelectionRange(match.start, match.end);
+    scrollEditorMatchIntoView(
+      textarea,
+      content,
+      match,
+      editorLineHeight,
+      editorPaddingTop,
+    );
     syncEditorScrollMetrics(textarea, true);
+    scheduleActiveEditorMatchScrollCorrection();
+  }
+
+  function scrollEditorLineIntoView(
+    textarea: HTMLTextAreaElement,
+    lineNumber: number,
+    lineHeight: number,
+    paddingTop: number,
+  ) {
+    const lineTop = paddingTop + (lineNumber - 1) * lineHeight;
+    const lineBottom = lineTop + lineHeight;
+    const visibleTop = textarea.scrollTop;
+    const visibleBottom = visibleTop + textarea.clientHeight;
+    const verticalMargin = Math.min(lineHeight * 4, textarea.clientHeight / 3);
+
+    if (
+      lineTop < visibleTop + verticalMargin ||
+      lineBottom > visibleBottom - verticalMargin
+    ) {
+      textarea.scrollTop = Math.max(
+        0,
+        lineTop - textarea.clientHeight / 2 + lineHeight,
+      );
+    }
+  }
+
+  function scrollEditorMatchIntoView(
+    textarea: HTMLTextAreaElement,
+    sourceContent: string,
+    match: EditorTextMatch,
+    lineHeight: number,
+    paddingTop: number,
+  ) {
+    scrollEditorLineIntoView(textarea, match.lineNumber, lineHeight, paddingTop);
+
+    const horizontalBounds = editorMatchHorizontalBounds(
+      sourceContent,
+      match,
+      textarea,
+    );
+    if (!horizontalBounds) {
+      return;
+    }
+
+    const visibleLeft = textarea.scrollLeft;
+    const visibleRight = visibleLeft + textarea.clientWidth;
+    const matchLeft = horizontalBounds.left;
+    const matchRight = horizontalBounds.left + horizontalBounds.width;
+    const horizontalMargin = 24;
+
+    if (
+      matchLeft < visibleLeft + horizontalMargin ||
+      matchRight > visibleRight - horizontalMargin
+    ) {
+      textarea.scrollLeft = Math.max(
+        0,
+        matchLeft + horizontalBounds.width / 2 - textarea.clientWidth / 2,
+      );
+    }
+  }
+
+  function correctActiveEditorMatchScroll() {
+    const textarea = textareaRef.current;
+    const stage = stageRef.current;
+    if (!textarea || !stage) {
+      return;
+    }
+
+    const activeMatchElement = stage.querySelector<HTMLElement>(
+      ".editor-search-match.active",
+    );
+    if (!activeMatchElement) {
+      return;
+    }
+
+    const editorRect = textarea.getBoundingClientRect();
+    const matchRect = activeMatchElement.getBoundingClientRect();
+    const horizontalMargin = Math.min(96, Math.max(32, textarea.clientWidth * 0.12));
+    const verticalMargin = Math.min(
+      editorLineHeight * 3,
+      textarea.clientHeight / 3,
+    );
+    let nextScrollLeft = textarea.scrollLeft;
+    let nextScrollTop = textarea.scrollTop;
+
+    if (matchRect.left < editorRect.left + horizontalMargin) {
+      nextScrollLeft -= editorRect.left + horizontalMargin - matchRect.left;
+    } else if (matchRect.right > editorRect.right - horizontalMargin) {
+      nextScrollLeft += matchRect.right - (editorRect.right - horizontalMargin);
+    }
+
+    if (matchRect.top < editorRect.top + verticalMargin) {
+      nextScrollTop -= editorRect.top + verticalMargin - matchRect.top;
+    } else if (matchRect.bottom > editorRect.bottom - verticalMargin) {
+      nextScrollTop += matchRect.bottom - (editorRect.bottom - verticalMargin);
+    }
+
+    const clampedLeft = clamp(
+      nextScrollLeft,
+      0,
+      Math.max(0, textarea.scrollWidth - textarea.clientWidth),
+    );
+    const clampedTop = clamp(
+      nextScrollTop,
+      0,
+      Math.max(0, textarea.scrollHeight - textarea.clientHeight),
+    );
+
+    if (
+      Math.abs(clampedLeft - textarea.scrollLeft) < 1 &&
+      Math.abs(clampedTop - textarea.scrollTop) < 1
+    ) {
+      return;
+    }
+
+    textarea.scrollLeft = clampedLeft;
+    textarea.scrollTop = clampedTop;
+    syncEditorScrollMetrics(textarea, true);
+  }
+
+  function scheduleActiveEditorMatchScrollCorrection() {
+    if (activeEditorMatchCorrectionFrameRef.current !== null) {
+      window.cancelAnimationFrame(activeEditorMatchCorrectionFrameRef.current);
+    }
+
+    activeEditorMatchCorrectionFrameRef.current = window.requestAnimationFrame(() => {
+      correctActiveEditorMatchScroll();
+      activeEditorMatchCorrectionFrameRef.current = window.requestAnimationFrame(() => {
+        activeEditorMatchCorrectionFrameRef.current = null;
+        correctActiveEditorMatchScroll();
+      });
+    });
   }
 
   async function replaceCurrentEditorMatch() {
@@ -3500,9 +3555,7 @@ function FilePreview({
                   key={`${segment.kind}-${index}`}
                   className={
                     segment.kind === "match"
-                      ? segment.active
-                        ? "editor-search-match active"
-                        : "editor-search-match"
+                      ? "editor-search-match active"
                       : "editor-search-plain"
                   }
                 >
@@ -4078,14 +4131,17 @@ function BranchTree({
   branches,
   tags,
   activeRef,
+  onBranchAction,
   onSelect,
 }: {
   branches: BranchInfo[];
   tags: TagInfo[];
   activeRef: string | null;
+  onBranchAction(action: BranchActionKind, branch: BranchInfo): void;
   onSelect(refName: string): void;
 }) {
   const [branchFilter, setBranchFilter] = useState("");
+  const [branchMenu, setBranchMenu] = useState<BranchMenuState | null>(null);
   const localBranches = useMemo(
     () =>
       filterRefs(
@@ -4115,6 +4171,48 @@ function BranchTree({
     ? `${visibleRefCount} / ${refCount}`
     : `${refCount}`;
 
+  useEffect(() => {
+    if (!branchMenu) {
+      return;
+    }
+
+    const closeMenu = () => setBranchMenu(null);
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeMenu();
+      }
+    };
+
+    window.addEventListener("click", closeMenu);
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("click", closeMenu);
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [branchMenu]);
+
+  function openBranchMenu(
+    event: ReactMouseEvent<HTMLButtonElement>,
+    branch: BranchInfo,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    setBranchMenu({
+      branch,
+      left: event.clientX,
+      top: event.clientY,
+    });
+  }
+
+  function executeBranchAction(action: BranchActionKind, branch: BranchInfo) {
+    setBranchMenu(null);
+    onBranchAction(action, branch);
+  }
+
   return (
     <div className="branch-tree">
       <label className="search-field branch-search">
@@ -4136,6 +4234,7 @@ function BranchTree({
                 : "branch-head-row"
             }
             onClick={() => onSelect(currentBranch.refName)}
+            onContextMenu={(event) => openBranchMenu(event, currentBranch)}
           >
             <span>HEAD</span>
             <small>{currentBranch.name}</small>
@@ -4147,6 +4246,7 @@ function BranchTree({
           filtering={branchFilter.trim().length > 0}
           activeRef={activeRef}
           onSelect={onSelect}
+          onBranchContextMenu={openBranchMenu}
         />
         <BranchGroup
           title="Remote"
@@ -4154,9 +4254,18 @@ function BranchTree({
           filtering={branchFilter.trim().length > 0}
           activeRef={activeRef}
           onSelect={onSelect}
+          onBranchContextMenu={openBranchMenu}
         />
         <TagGroup tags={visibleTags} activeRef={activeRef} onSelect={onSelect} />
       </div>
+      {branchMenu ? (
+        <BranchContextMenu
+          branch={branchMenu.branch}
+          left={branchMenu.left}
+          top={branchMenu.top}
+          onAction={executeBranchAction}
+        />
+      ) : null}
     </div>
   );
 }
@@ -4167,12 +4276,17 @@ function BranchGroup({
   filtering,
   activeRef,
   onSelect,
+  onBranchContextMenu,
 }: {
   title: string;
   branches: BranchInfo[];
   filtering: boolean;
   activeRef: string | null;
   onSelect(refName: string): void;
+  onBranchContextMenu(
+    event: ReactMouseEvent<HTMLButtonElement>,
+    branch: BranchInfo,
+  ): void;
 }) {
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(
     () => new Set(),
@@ -4185,6 +4299,7 @@ function BranchGroup({
           name: branch.name,
           refName: branch.refName,
           current: branch.current,
+          branchType: branch.branchType,
           ahead: branch.ahead,
           behind: branch.behind,
           upstream: branch.upstream,
@@ -4234,6 +4349,7 @@ function BranchGroup({
               depth={0}
               filtering={filtering}
               onSelect={onSelect}
+              onBranchContextMenu={onBranchContextMenu}
               collapsedFolders={collapsedFolders}
               onToggleFolder={toggleFolder}
             />
@@ -4254,6 +4370,23 @@ function filterRefs<T extends { name: string; refName: string }>(
   return refs.filter((ref) =>
     `${ref.name} ${ref.refName}`.toLowerCase().includes(normalized),
   );
+}
+
+function defaultNewBranchName(branch: BranchInfo): string {
+  if (branch.branchType === "remote") {
+    const branchPath = branch.name.split("/").slice(1).join("/");
+    return branchPath || "new-branch";
+  }
+
+  return `${branch.name}-copy`;
+}
+
+function shortBranchDisplayName(branch: BranchInfo): string {
+  if (branch.branchType === "remote") {
+    return branch.name;
+  }
+
+  return branch.current ? "HEAD" : branch.name;
 }
 
 function TagGroup({
@@ -4293,11 +4426,18 @@ function TagGroup({
 type RefLeaf = {
   name: string;
   refName: string;
+  branchType: BranchInfo["branchType"];
   current: boolean;
   ahead: number | null;
   behind: number | null;
   upstream: string | null;
   kind: "branch";
+};
+
+type BranchMenuState = {
+  readonly branch: BranchInfo;
+  readonly left: number;
+  readonly top: number;
 };
 
 type RefNode = {
@@ -4313,6 +4453,7 @@ function RefTreeNode({
   depth,
   filtering,
   onSelect,
+  onBranchContextMenu,
   collapsedFolders,
   onToggleFolder,
 }: {
@@ -4321,6 +4462,10 @@ function RefTreeNode({
   depth: number;
   filtering: boolean;
   onSelect(refName: string): void;
+  onBranchContextMenu(
+    event: ReactMouseEvent<HTMLButtonElement>,
+    branch: BranchInfo,
+  ): void;
   collapsedFolders: Set<string>;
   onToggleFolder(key: string): void;
 }) {
@@ -4331,7 +4476,12 @@ function RefTreeNode({
           node.leaf.refName === activeRef ? "branch-row active" : "branch-row"
         }
         style={{ "--branch-depth": depth } as CSSProperties}
-        onClick={() => onSelect(node.leaf!.refName)}
+        onClick={() => node.leaf && onSelect(node.leaf.refName)}
+        onContextMenu={(event) => {
+          if (node.leaf) {
+            onBranchContextMenu(event, node.leaf);
+          }
+        }}
       >
         <GitBranch size={13} />
         <span>{node.name}</span>
@@ -4362,6 +4512,7 @@ function RefTreeNode({
           depth={depth + 1}
           filtering={filtering}
           onSelect={onSelect}
+          onBranchContextMenu={onBranchContextMenu}
           collapsedFolders={collapsedFolders}
           onToggleFolder={onToggleFolder}
         />
@@ -4427,17 +4578,18 @@ function sortRefNodes(nodes: RefNode[]) {
 function BranchTrackingBadge({ branch }: { branch: RefLeaf }) {
   const hasAhead = Boolean(branch.ahead && branch.ahead > 0);
   const hasBehind = Boolean(branch.behind && branch.behind > 0);
+  const otherLabel = branch.branchType === "remote" ? "remote" : "upstream";
 
   if (branch.current || hasAhead || hasBehind) {
     return (
       <small className="branch-badges">
         {hasBehind ? (
-          <span className="branch-behind" title="Remote branch is ahead">
+          <span className="branch-behind" title={`${otherLabel} has commits not in local`}>
             ↙ {branch.behind}
           </span>
         ) : null}
         {hasAhead ? (
-          <span className="branch-ahead" title="Local branch is ahead">
+          <span className="branch-ahead" title={`Local has commits not in ${otherLabel}`}>
             ↗ {branch.ahead}
           </span>
         ) : null}
@@ -4447,6 +4599,62 @@ function BranchTrackingBadge({ branch }: { branch: RefLeaf }) {
   }
 
   return null;
+}
+
+function BranchContextMenu({
+  branch,
+  left,
+  top,
+  onAction,
+}: {
+  branch: BranchInfo;
+  left: number;
+  top: number;
+  onAction(action: BranchActionKind, branch: BranchInfo): void;
+}) {
+  const isLocal = branch.branchType === "local";
+  const menuStyle = {
+    left: clamp(left, 8, window.innerWidth - 216),
+    top: clamp(top, 8, window.innerHeight - 154),
+  } as CSSProperties;
+
+  return (
+    <div
+      className="branch-context-menu"
+      role="menu"
+      style={menuStyle}
+      onClick={(event) => event.stopPropagation()}
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      <button type="button" role="menuitem" onClick={() => onAction("checkout", branch)}>
+        <GitBranch size={13} />
+        <span>{isLocal ? "Checkout" : "Checkout tracking"}</span>
+      </button>
+      <button type="button" role="menuitem" onClick={() => onAction("create", branch)}>
+        <Plus size={13} />
+        <span>New branch from here</span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        disabled={!isLocal}
+        onClick={() => onAction("rename", branch)}
+      >
+        <PenLine size={13} />
+        <span>Rename</span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className="danger"
+        disabled={!isLocal || branch.current}
+        onClick={() => onAction("delete", branch)}
+      >
+        <Trash2 size={13} />
+        <span>Delete</span>
+      </button>
+    </div>
+  );
 }
 
 function CommitInspector({
@@ -4681,6 +4889,7 @@ function VirtualCommitList({
   commits,
   graphWidthCommits,
   activeCommit,
+  branch,
   filter,
   loading,
   onChangeFilter,
@@ -4690,6 +4899,7 @@ function VirtualCommitList({
   commits: CommitInfo[];
   graphWidthCommits: CommitInfo[];
   activeCommit: string | null;
+  branch: BranchInfo | null;
   filter: string;
   loading: boolean;
   onChangeFilter(filter: string): void;
@@ -4731,6 +4941,7 @@ function VirtualCommitList({
       <div className="commit-table" style={tableStyle}>
         <CommitListHeader
           activeCommit={activeCommit}
+          branch={branch}
           filter={filter}
           onChangeFilter={onChangeFilter}
           onSelectWorkingTree={onSelectWorkingTree}
@@ -4747,6 +4958,7 @@ function VirtualCommitList({
       <div className="commit-table" style={tableStyle}>
         <CommitListHeader
           activeCommit={activeCommit}
+          branch={branch}
           filter={filter}
           onChangeFilter={onChangeFilter}
           onSelectWorkingTree={onSelectWorkingTree}
@@ -4762,6 +4974,7 @@ function VirtualCommitList({
     <div className="commit-table" style={tableStyle}>
       <CommitListHeader
         activeCommit={activeCommit}
+        branch={branch}
         filter={filter}
         onChangeFilter={onChangeFilter}
         onSelectWorkingTree={onSelectWorkingTree}
@@ -4799,11 +5012,13 @@ function VirtualCommitList({
 
 function CommitListHeader({
   activeCommit,
+  branch,
   filter,
   onChangeFilter,
   onSelectWorkingTree,
 }: {
   activeCommit: string | null;
+  branch: BranchInfo | null;
   filter: string;
   onChangeFilter(filter: string): void;
   onSelectWorkingTree(): void;
@@ -4827,11 +5042,37 @@ function CommitListHeader({
           onChange={(event) => onChangeFilter(event.target.value)}
           placeholder="Search commits"
         />
+        <BranchRelationSummary branch={branch} />
       </label>
       <span>Author</span>
       <span>Date</span>
       <span>Hash</span>
     </div>
+  );
+}
+
+function BranchRelationSummary({ branch }: { branch: BranchInfo | null }) {
+  if (!branch) {
+    return null;
+  }
+
+  const ahead = branch.ahead ?? 0;
+  const behind = branch.behind ?? 0;
+  const hasDivergence = ahead > 0 || behind > 0;
+  const otherLabel = branch.branchType === "remote" ? "Remote" : "Upstream";
+
+  return (
+    <span className="commit-branch-relation" title={branch.refName}>
+      <span className="commit-branch-name">{shortBranchDisplayName(branch)}</span>
+      {hasDivergence ? (
+        <>
+          {behind > 0 ? <span className="behind">{otherLabel} +{behind}</span> : null}
+          {ahead > 0 ? <span className="ahead">Local +{ahead}</span> : null}
+        </>
+      ) : (
+        <span className="sync">In sync</span>
+      )}
+    </span>
   );
 }
 
@@ -5099,96 +5340,126 @@ function buildEditorSearchHighlightSegments(
     return [];
   }
 
+  const activeMatch = matches[
+    clamp(activeIndex, 0, matches.length - 1)
+  ];
+  if (!activeMatch) {
+    return [];
+  }
+
   const segments: EditorSearchHighlightSegment[] = [];
-  let cursor = 0;
+  const start = clamp(activeMatch.start, 0, content.length);
+  const end = clamp(activeMatch.end, start, content.length);
+  if (end <= start) {
+    return [];
+  }
 
-  matches.forEach((match, index) => {
-    const start = clamp(match.start, 0, content.length);
-    const end = clamp(match.end, start, content.length);
-    if (end <= cursor) {
-      return;
-    }
-
-    if (start > cursor) {
-      segments.push({
-        kind: "plain",
-        text: content.slice(cursor, start),
-      });
-    }
-
-    segments.push({
-      active: index === activeIndex,
-      kind: "match",
-      text: content.slice(start, end),
-    });
-    cursor = end;
-  });
-
-  if (cursor < content.length) {
+  if (start > 0) {
     segments.push({
       kind: "plain",
-      text: content.slice(cursor),
+      text: content.slice(0, start),
+    });
+  }
+
+  segments.push({
+    kind: "match",
+    text: content.slice(start, end),
+  });
+
+  if (end < content.length) {
+    segments.push({
+      kind: "plain",
+      text: content.slice(end),
     });
   }
 
   return segments;
 }
 
-function loadAppSettings(): AppSettings {
-  if (typeof localStorage === "undefined") {
-    return defaultAppSettings;
+let editorTextMeasureCanvas: HTMLCanvasElement | null = null;
+
+function editorMatchHorizontalBounds(
+  content: string,
+  match: EditorTextMatch,
+  textarea: HTMLTextAreaElement,
+): { left: number; width: number } | null {
+  const start = clamp(match.start, 0, content.length);
+  const end = clamp(match.end, start, content.length);
+  if (end <= start) {
+    return null;
   }
 
-  try {
-    const raw = localStorage.getItem(settingsStorageKey);
-    if (!raw) {
-      return defaultAppSettings;
+  const lineStart = start > 0 ? content.lastIndexOf("\n", start - 1) + 1 : 0;
+  const style = window.getComputedStyle(textarea);
+  const paddingLeft = parseCssPixels(style.paddingLeft, 0);
+  const prefixWidth = measureEditorInlineTextWidth(
+    content.slice(lineStart, start),
+    style,
+  );
+  const matchWidth = Math.max(
+    measureEditorInlineTextWidth(content.slice(start, end), style),
+    measureEditorInlineTextWidth(" ", style),
+  );
+
+  return {
+    left: paddingLeft + prefixWidth,
+    width: matchWidth,
+  };
+}
+
+function measureEditorInlineTextWidth(
+  text: string,
+  style: CSSStyleDeclaration,
+): number {
+  const context = getEditorTextMeasureContext();
+  const fontSize = parseCssPixels(style.fontSize, 12);
+  const measuredText = expandTabsForMeasurement(
+    text,
+    normalizeEditorTabSize(style.getPropertyValue("tab-size")),
+  );
+  if (!context) {
+    return measuredText.length * fontSize * 0.6;
+  }
+
+  context.font =
+    style.font ||
+    `${style.fontStyle} ${style.fontVariant} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+  return context.measureText(measuredText).width;
+}
+
+function getEditorTextMeasureContext(): CanvasRenderingContext2D | null {
+  if (!editorTextMeasureCanvas && typeof document !== "undefined") {
+    editorTextMeasureCanvas = document.createElement("canvas");
+  }
+
+  return editorTextMeasureCanvas?.getContext("2d") ?? null;
+}
+
+function normalizeEditorTabSize(value: string): number {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 && parsed <= 16 ? parsed : 2;
+}
+
+function expandTabsForMeasurement(text: string, tabSize: number): string {
+  if (!text.includes("\t")) {
+    return text;
+  }
+
+  let expanded = "";
+  let column = 0;
+  for (const character of text) {
+    if (character === "\t") {
+      const spaces = tabSize - (column % tabSize);
+      expanded += " ".repeat(spaces);
+      column += spaces;
+      continue;
     }
 
-    return normalizeAppSettings(JSON.parse(raw));
-  } catch {
-    return defaultAppSettings;
-  }
-}
-
-function saveAppSettings(settings: AppSettings) {
-  if (typeof localStorage === "undefined") {
-    return;
+    expanded += character;
+    column += 1;
   }
 
-  localStorage.setItem(settingsStorageKey, JSON.stringify(settings));
-}
-
-function normalizeAppSettings(value: unknown): AppSettings {
-  const record = isRecord(value) ? value : {};
-  const shortcuts = isRecord(record.shortcuts) ? record.shortcuts : {};
-  return {
-    fontFamily:
-      typeof record.fontFamily === "string" && record.fontFamily.trim()
-        ? record.fontFamily
-        : defaultAppSettings.fontFamily,
-    fontSize: normalizePanelSize(record.fontSize, defaultAppSettings.fontSize, 10, 22),
-    fontWeight:
-      typeof record.fontWeight === "string" && record.fontWeight.trim()
-        ? record.fontWeight
-        : defaultAppSettings.fontWeight,
-    lineHeight: normalizePanelSize(
-      record.lineHeight,
-      defaultAppSettings.lineHeight,
-      1.2,
-      2,
-    ),
-    shortcuts: shortcutRows.reduce<Record<ShortcutAction, string>>((current, row) => {
-      const shortcut = shortcuts[row.action];
-      const trimmedShortcut = typeof shortcut === "string" ? shortcut.trim() : "";
-      return {
-        ...current,
-        [row.action]: trimmedShortcut
-          ? trimmedShortcut
-          : defaultAppSettings.shortcuts[row.action],
-      };
-    }, { ...defaultAppSettings.shortcuts }),
-  };
+  return expanded;
 }
 
 function matchesShortcut(event: globalThis.KeyboardEvent, shortcut: string): boolean {

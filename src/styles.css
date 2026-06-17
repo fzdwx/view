@@ -1,9 +1,7 @@
 :root {
   color: #d6d6d6;
   background: #000000;
-  font-family:
-    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
-    Arial, sans-serif;
+  font-family: var(--app-font-family);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -32,9 +30,12 @@
   --git-added: #07c480;
   --git-modified: #009fff;
   --git-deleted: #ff2e3f;
+  --app-font-family:
+    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI Variable",
+    "Segoe UI", sans-serif;
   --mono:
-    "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
-    monospace;
+    "SFMono-Regular", "Cascadia Mono", "Cascadia Code", Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
 }
 
 * {
@@ -51,7 +52,7 @@ body {
   margin: 0;
   background: var(--surface-0);
   color: var(--ink);
-  font-family: var(--app-font-family), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--app-font-family);
   overflow: hidden;
 }
 
@@ -156,29 +157,113 @@ button {
 
 .settings-page {
   position: fixed;
-  inset: 0 0 0 56px;
-  z-index: 50;
-  display: grid;
-  place-items: center;
-  background: rgb(0 0 0 / 0.42);
+  inset: 0;
+  display: block;
+  background: var(--surface-0);
+}
+
+.settings-window-shell {
+  min-height: 100%;
+  background: var(--surface-0);
+  color: var(--ink);
+  font-family: var(--app-font-family);
 }
 
 .settings-panel {
   display: grid;
-  width: min(720px, calc(100vw - 96px));
-  max-height: min(720px, calc(100vh - 48px));
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
+  width: 100%;
+  min-height: 100vh;
+  grid-template-columns: 236px minmax(0, 1fr);
+  border: 0;
+  border-radius: 0;
   background: var(--surface-1);
-  box-shadow:
-    0 24px 70px rgb(0 0 0 / 0.54),
-    0 1px 0 rgb(255 255 255 / 0.04) inset;
+  box-shadow: none;
   overflow: hidden;
 }
 
-.settings-head,
-.settings-footer {
+.settings-sidebar {
+  display: grid;
+  min-height: 480px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  border-right: 1px solid var(--line);
+  background: var(--surface-sidebar);
+  padding: 14px 10px;
+  user-select: none;
+}
+
+.settings-title {
+  display: grid;
+  gap: 3px;
+  padding: 0 4px 4px;
+}
+
+.settings-title span {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-title small,
+.settings-head small,
+.settings-field small,
+.shortcut-row small,
+.settings-nav-item small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.settings-nav {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+}
+
+.settings-nav-item {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  padding: 8px;
+  text-align: left;
+}
+
+.settings-nav-item:hover {
+  background: var(--surface-sidebar-hover);
+  color: var(--ink);
+}
+
+.settings-nav-item.active {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.settings-nav-item > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.settings-reset {
+  width: 100%;
+  justify-content: center;
+}
+
+.settings-content {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.settings-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -196,13 +281,6 @@ button {
   color: var(--ink);
   font-size: 13px;
   font-weight: 600;
-}
-
-.settings-head small,
-.shortcut-row small {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 400;
 }
 
 .settings-body {
@@ -251,7 +329,7 @@ button {
 
 .settings-field input,
 .settings-field select,
-.shortcut-row input {
+.shortcut-recorder {
   min-width: 0;
   height: 30px;
   border: 1px solid var(--line);
@@ -259,16 +337,47 @@ button {
   outline: 0;
   background: var(--surface-0);
   color: var(--ink);
-  font-family: var(--mono);
   font-size: 12px;
   padding: 0 8px;
 }
 
+.shortcut-recorder {
+  font-family: var(--mono);
+  text-align: left;
+}
+
 .settings-field input:focus,
 .settings-field select:focus,
-.shortcut-row input:focus {
+.shortcut-recorder:focus-visible,
+.shortcut-recorder.recording {
   border-color: var(--accent-strong);
   background: var(--surface-2);
+}
+
+.shortcut-recorder.recording {
+  color: var(--accent-foreground);
+}
+
+.settings-font-preview {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-0);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 0;
+  overflow: hidden;
+  padding: 10px;
+}
+
+.ui-font-preview {
+  font-family: var(--app-font-family);
+}
+
+.code-font-preview {
+  font-family: var(--mono);
+  white-space: pre;
 }
 
 .shortcut-list {
@@ -288,20 +397,6 @@ button {
 
 .shortcut-row + .shortcut-row {
   border-top: 1px solid var(--line);
-}
-
-.settings-footer {
-  justify-content: flex-end;
-  border-top: 1px solid var(--line);
-  border-bottom: 0;
-}
-
-.settings-action {
-  width: auto;
-  height: 28px;
-  min-height: 28px;
-  padding: 0 10px;
-  font-size: 12px;
 }
 
 .rail-project-button {
@@ -1709,6 +1804,51 @@ body.is-resizing-y * {
   color: var(--muted);
 }
 
+.commit-branch-relation {
+  display: inline-flex;
+  flex: 0 0 auto;
+  max-width: 230px;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.commit-branch-name {
+  max-width: 96px;
+  overflow: hidden;
+  color: var(--faint);
+  text-overflow: ellipsis;
+}
+
+.commit-branch-relation .behind,
+.commit-branch-relation .ahead,
+.commit-branch-relation .sync {
+  display: inline-flex;
+  height: 18px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface-2);
+  padding: 0 6px;
+}
+
+.commit-branch-relation .behind {
+  color: var(--blue);
+}
+
+.commit-branch-relation .ahead {
+  color: var(--success);
+}
+
+.commit-branch-relation .sync {
+  color: var(--muted);
+}
+
 .commit-list {
   position: relative;
   min-height: 0;
@@ -2132,6 +2272,49 @@ body.is-resizing-y * {
 .branch-head-row.active .branch-head-badge,
 .branch-row.active .branch-head-badge {
   color: var(--ink);
+}
+
+.branch-context-menu {
+  position: fixed;
+  z-index: 50;
+  display: grid;
+  width: 208px;
+  gap: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface-2);
+  box-shadow: 0 12px 34px rgb(0 0 0 / 0.46);
+  padding: 4px;
+}
+
+.branch-context-menu button {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  padding: 0 8px;
+  text-align: left;
+}
+
+.branch-context-menu button:hover:not(:disabled),
+.branch-context-menu button:focus-visible {
+  background: color-mix(in oklch, var(--accent) 16%, var(--surface-3));
+  outline: 0;
+}
+
+.branch-context-menu button:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+.branch-context-menu button.danger:not(:disabled) {
+  color: var(--danger);
 }
 
 .commit-changes-panel {
@@ -2690,9 +2873,10 @@ body.is-resizing-y * {
 .editor-line-number-gutter {
   position: absolute;
   inset: 0 auto 0 0;
-  z-index: 1;
+  z-index: 3;
   width: calc(var(--editor-gutter-width) - 12px);
   height: 100%;
+  box-sizing: border-box;
   resize: none;
   border: 0;
   border-right: 1px solid var(--line);

@@ -15,7 +15,7 @@ use fff_search::{
 };
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::env;
 use std::fs;
 use std::io::{ErrorKind, Read, Write};
@@ -206,6 +206,13 @@ struct TerminalSessionInfo {
     ws_url: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SystemFontInfo {
+    family: String,
+    monospace: bool,
+}
+
 enum TerminalWsEvent {
     Frame(String),
     Close(Option<u32>),
@@ -319,6 +326,11 @@ fn default_start_path() -> Result<String, String> {
         .or_else(|_| env::var("HOME").map(PathBuf::from))
         .map(|path| path.to_string_lossy().to_string())
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn list_system_fonts() -> Vec<SystemFontInfo> {
+    system_fonts()
 }
 
 #[tauri::command]
@@ -453,11 +465,75 @@ fn fetch_remotes(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn checkout_branch(path: String, ref_name: String) -> Result<(), String> {
+    let root = repository_root(&path)?;
+    checkout_branch_ref(&root, &ref_name)
+}
+
+#[tauri::command]
+fn create_branch(path: String, name: String, start_point: String) -> Result<(), String> {
+    let root = repository_root(&path)?;
+    validate_branch_name(&root, &name)?;
+    validate_branch_start_point(&start_point)?;
+    git(&root, &["switch", "-c", &name, &start_point])?;
+    Ok(())
+}
+
+#[tauri::command]
+fn rename_branch(path: String, ref_name: String, new_name: String) -> Result<(), String> {
+    let root = repository_root(&path)?;
+    let current = current_branch(&root);
+    let branch = local_branch_name(&ref_name)?;
+    validate_branch_name(&root, &new_name)?;
+    if current.as_deref() == Some(branch.as_str()) {
+        git(&root, &["branch", "-m", &new_name])?;
+    } else {
+        git(&root, &["branch", "-m", &branch, &new_name])?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_branch(path: String, ref_name: String, force: bool) -> Result<(), String> {
+    let root = repository_root(&path)?;
+    let current = current_branch(&root);
+    let branch = local_branch_name(&ref_name)?;
+    if current.as_deref() == Some(branch.as_str()) {
+        return Err("Cannot delete the checked-out branch".to_string());
+    }
+    let flag = if force { "-D" } else { "-d" };
+    git(&root, &["branch", flag, &branch])?;
+    Ok(())
+}
+
+fn system_fonts() -> Vec<SystemFontInfo> {
+    let mut database = fontdb::Database::new();
+    database.load_system_fonts();
+
+    let mut families = BTreeMap::<String, bool>::new();
+    for face in database.faces() {
+        for (family, _) in &face.families {
+            let family = family.trim();
+            if family.is_empty() {
+                continue;
+            }
+            families
+                .entry(family.to_string())
+                .and_modify(|monospace| *monospace |= face.monospaced)
+                .or_insert(face.monospaced);
+        }
+    }
+
+    families
+        .into_iter()
+        .map(|(family, monospace)| SystemFontInfo { family, monospace })
+        .collect()
+}
+
+#[tauri::command]
 fn pull_current_branch(path: String, mode: String) -> Result<(), String> {
     let root = repository_root(&path)?;
-    let branch = git(&root, &["symbolic-ref", "--quiet", "--short", "HEAD"])
-        .map(|value| value.trim().to_string())
-        .unwrap_or_default();
+    let branch = current_branch(&root).unwrap_or_default();
     if branch.is_empty() {
         return Err("Cannot pull while HEAD is detached".to_string());
     }
@@ -658,14 +734,19 @@ fn git_branches(root: &Path) -> Result<Vec<BranchInfo>, String> {
             let tracking_pair = if branch_type == "local" {
                 upstream
                     .as_deref()
-                    .map(|upstream_ref| (parts[0], upstream_ref))
+                    .map(|upstream_ref| (parts[0].to_string(), upstream_ref.to_string()))
             } else {
-                current_ref.as_deref().and_then(|local_ref| {
-                    remote_matches_branch(parts[1], &current).then_some((local_ref, parts[0]))
-                })
+                local_ref_for_remote_branch(root, parts[1])
+                    .map(|local_ref| (local_ref, parts[0].to_string()))
+                    .or_else(|| {
+                        current_ref.as_deref().and_then(|local_ref| {
+                            remote_matches_branch(parts[1], &current)
+                                .then_some((local_ref.to_string(), parts[0].to_string()))
+                        })
+                    })
             };
             let (ahead, behind) = tracking_pair
-                .and_then(|(left, right)| rev_list_ahead_behind(root, left, right).ok())
+                .and_then(|(left, right)| rev_list_ahead_behind(root, &left, &right).ok())
                 .map(|(ahead, behind)| (Some(ahead), Some(behind)))
                 .unwrap_or((None, None));
 
@@ -696,6 +777,83 @@ fn remote_matches_branch(remote_short_name: &str, current: &str) -> bool {
             .split_once('/')
             .map(|(_, branch_path)| branch_path == current)
             .unwrap_or(false)
+}
+
+fn current_branch(root: &Path) -> Option<String> {
+    let branch = git(root, &["symbolic-ref", "--quiet", "--short", "HEAD"])
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    (!branch.is_empty()).then_some(branch)
+}
+
+fn local_ref_for_remote_branch(root: &Path, remote_short_name: &str) -> Option<String> {
+    let (_, branch_path) = remote_short_name.split_once('/')?;
+    let local_ref = format!("refs/heads/{branch_path}");
+    git(root, &["show-ref", "--verify", "--quiet", &local_ref])
+        .is_ok()
+        .then_some(local_ref)
+}
+
+fn local_branch_name(ref_name: &str) -> Result<String, String> {
+    ref_name
+        .strip_prefix("refs/heads/")
+        .filter(|branch| !branch.trim().is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| "This operation requires a local branch".to_string())
+}
+
+fn remote_branch_short_name(ref_name: &str) -> Result<String, String> {
+    ref_name
+        .strip_prefix("refs/remotes/")
+        .filter(|branch| !branch.trim().is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| "This operation requires a remote branch".to_string())
+}
+
+fn validate_branch_start_point(ref_name: &str) -> Result<(), String> {
+    if ref_name.starts_with("refs/heads/")
+        || ref_name.starts_with("refs/remotes/")
+        || ref_name.starts_with("refs/tags/")
+    {
+        Ok(())
+    } else {
+        Err("Branch start point must be a branch or tag ref".to_string())
+    }
+}
+
+fn validate_branch_name(root: &Path, name: &str) -> Result<(), String> {
+    let trimmed = name.trim();
+    if trimmed != name || trimmed.is_empty() {
+        return Err("Branch name cannot be empty or padded with spaces".to_string());
+    }
+    git(root, &["check-ref-format", "--branch", name])?;
+    Ok(())
+}
+
+fn checkout_branch_ref(root: &Path, ref_name: &str) -> Result<(), String> {
+    if ref_name.starts_with("refs/heads/") {
+        let branch = local_branch_name(ref_name)?;
+        git(root, &["switch", &branch])?;
+        return Ok(());
+    }
+
+    if ref_name.starts_with("refs/remotes/") {
+        let remote_short = remote_branch_short_name(ref_name)?;
+        let local_name = remote_short
+            .split_once('/')
+            .map(|(_, branch_path)| branch_path.to_string())
+            .ok_or_else(|| "Remote branch name must include a remote".to_string())?;
+        let local_ref = format!("refs/heads/{local_name}");
+        if git(root, &["show-ref", "--verify", "--quiet", &local_ref]).is_ok() {
+            git(root, &["switch", &local_name])?;
+        } else {
+            git(root, &["switch", "--track", &remote_short])?;
+        }
+        return Ok(());
+    }
+
+    Err("Checkout target must be a local or remote branch".to_string())
 }
 
 fn rev_list_ahead_behind(root: &Path, left: &str, right: &str) -> Result<(usize, usize), String> {
@@ -1455,10 +1613,7 @@ fn terminal_frame_modes(mode: TermMode) -> TerminalFrameModes {
     }
 }
 
-fn terminal_frame(
-    term: &Term<TerminalEventProxy>,
-    title: Option<&str>,
-) -> Result<String, String> {
+fn terminal_frame(term: &Term<TerminalEventProxy>, title: Option<&str>) -> Result<String, String> {
     let grid = term.grid();
     let cols = grid.columns();
     let rows = grid.screen_lines();
@@ -3041,6 +3196,54 @@ mod tests {
         assert!(!remote_matches_branch("origin/feature/foo", "foo"));
     }
 
+    #[test]
+    fn system_fonts_returns_sorted_unique_families() {
+        let fonts = system_fonts();
+        let mut previous_family: Option<String> = None;
+        for font in fonts {
+            assert!(!font.family.trim().is_empty());
+            if let Some(previous) = previous_family.as_deref() {
+                assert!(previous < font.family.as_str());
+            }
+            previous_family = Some(font.family);
+        }
+    }
+
+    #[test]
+    fn remote_branch_tracking_uses_matching_local_branch_when_not_current() {
+        let remote = create_basic_repo();
+        fs::write(remote.join("base.txt"), "base\n").expect("write base");
+        run_git(&remote, &["add", "."]);
+        run_git(&remote, &["commit", "-m", "base"]);
+
+        let clone = unique_temp_repo_path();
+        run_git_global(&[
+            "clone",
+            remote.to_string_lossy().as_ref(),
+            clone.to_string_lossy().as_ref(),
+        ]);
+
+        run_git(&clone, &["checkout", "-b", "feature"]);
+        run_git(&clone, &["checkout", "main"]);
+
+        run_git(&remote, &["checkout", "-b", "feature"]);
+        fs::write(remote.join("feature.txt"), "remote feature\n").expect("write feature");
+        run_git(&remote, &["add", "."]);
+        run_git(&remote, &["commit", "-m", "remote feature"]);
+        run_git(&clone, &["fetch", "--all", "--prune"]);
+
+        let branches = git_branches(&clone).expect("branches");
+        let remote_feature = branches
+            .iter()
+            .find(|branch| branch.ref_name == "refs/remotes/origin/feature")
+            .expect("remote feature");
+        assert_eq!(remote_feature.ahead, Some(0));
+        assert_eq!(remote_feature.behind, Some(1));
+
+        fs::remove_dir_all(remote).ok();
+        fs::remove_dir_all(clone).ok();
+    }
+
     fn create_merge_repo() -> PathBuf {
         let repo = create_basic_repo();
 
@@ -3125,6 +3328,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             default_start_path,
+            list_system_fonts,
             load_repository,
             get_diff,
             get_file_diff,
@@ -3139,11 +3343,16 @@ pub fn run() {
             search_editor_text,
             replace_editor_text,
             fetch_remotes,
+            checkout_branch,
+            create_branch,
+            rename_branch,
+            delete_branch,
             pull_current_branch,
             terminal_spawn,
             terminal_resize,
             terminal_kill
         ])
         .run(tauri::generate_context!())
+        // SAFE-EXPECT: Tauri can only fail here during unrecoverable app bootstrap.
         .expect("error while running tauri application");
 }

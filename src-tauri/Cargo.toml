@@ -19,6 +19,7 @@ tauri-build = { version = "2", features = [] }
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+fontdb = "0.23.0"
 fff-search = "0.9.4"
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
