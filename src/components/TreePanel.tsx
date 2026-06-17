@@ -14,6 +14,7 @@ import { FilePlus2, Pencil, Trash2, X } from "lucide-react";
 import {
   type CSSProperties,
   type DragEvent,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   memo,
   useCallback,
@@ -51,6 +52,11 @@ const fileTreeIcons: FileTreeIcons = {
   set: "complete",
   colored: true,
 };
+
+interface ClickedFilePath {
+  readonly path: string;
+  readonly selected: boolean;
+}
 
 interface TreePanelProps {
   files: TreeFile[];
@@ -109,10 +115,13 @@ export const TreePanel = memo(function TreePanel({
 
   const { paths, preparedInput, selectablePaths, gitStatus } = treeData;
   const selectablePathsRef = useRef(selectablePaths);
+  const lastTreeSelectionPathRef = useRef(selectedPath);
   const onSelectPathRef = useRef(onSelectPath);
+  const selectedPathRef = useRef(selectedPath);
 
   selectablePathsRef.current = selectablePaths;
   onSelectPathRef.current = onSelectPath;
+  selectedPathRef.current = selectedPath;
 
   const { model } = useFileTree({
     preparedInput,
@@ -135,6 +144,7 @@ export const TreePanel = memo(function TreePanel({
     search: true,
     stickyFolders: true,
     onSelectionChange: ([path]) => {
+      lastTreeSelectionPathRef.current = path ?? null;
       if (path && selectablePathsRef.current.has(path)) {
         onSelectPathRef.current(path);
       }
@@ -142,7 +152,11 @@ export const TreePanel = memo(function TreePanel({
   });
 
   const syncSelectedPath = useCallback(() => {
+    const selectedPaths = model.getSelectedPaths();
     if (!selectedPath || !selectablePaths.has(selectedPath)) {
+      for (const selected of selectedPaths) {
+        model.getItem(selected)?.deselect();
+      }
       return;
     }
 
@@ -152,12 +166,47 @@ export const TreePanel = memo(function TreePanel({
         item.expand();
       }
     }
-    for (const selected of model.getSelectedPaths()) {
-      model.getItem(selected)?.deselect();
+
+    const selectedAlready =
+      selectedPaths.length === 1 && selectedPaths[0] === selectedPath;
+    if (!selectedAlready) {
+      for (const selected of selectedPaths) {
+        model.getItem(selected)?.deselect();
+      }
+      model.getItem(selectedPath)?.select();
     }
-    model.getItem(selectedPath)?.select();
     model.scrollToPath(selectedPath);
   }, [model, selectablePaths, selectedPath]);
+
+  const handleTreeClickCapture = useCallback(
+    (event: ReactMouseEvent<HTMLElement>) => {
+      const clickedFile = getClickedFilePath(event);
+      if (!clickedFile || !selectablePathsRef.current.has(clickedFile.path)) {
+        return;
+      }
+      if (
+        !clickedFile.selected ||
+        selectedPathRef.current === clickedFile.path ||
+        lastTreeSelectionPathRef.current === clickedFile.path
+      ) {
+        return;
+      }
+
+      const path = clickedFile.path;
+      window.requestAnimationFrame(() => {
+        if (
+          selectedPathRef.current === path ||
+          lastTreeSelectionPathRef.current === path ||
+          !selectablePathsRef.current.has(path)
+        ) {
+          return;
+        }
+
+        onSelectPathRef.current(path);
+      });
+    },
+    [],
+  );
 
   useEffect(() => {
     model.resetPaths(paths, {
@@ -198,6 +247,7 @@ export const TreePanel = memo(function TreePanel({
       className="file-tree-host"
       model={model}
       style={treeDarkThemeStyles}
+      onClickCapture={handleTreeClickCapture}
       header={
         showHeader ? (
           <div
@@ -273,9 +323,14 @@ function TreeContextMenu({
     item.kind === "directory" ? item.path : parentPathFromTreePath(item.path);
 
   return (
-    <div className="tree-context-menu" data-file-tree-context-menu-root="true">
+    <div
+      className="tree-context-menu"
+      data-file-tree-context-menu-root="true"
+      role="menu"
+    >
       {onCreateFile ? (
         <button
+          role="menuitem"
           type="button"
           onClick={() => {
             context.close();
@@ -288,6 +343,7 @@ function TreeContextMenu({
       ) : null}
       {onStartRename ? (
         <button
+          role="menuitem"
           type="button"
           disabled={item.kind === "directory"}
           onClick={() => onStartRename(item.path)}
@@ -298,6 +354,7 @@ function TreeContextMenu({
       ) : null}
       {onDeleteFile ? (
         <button
+          role="menuitem"
           type="button"
           disabled={item.kind === "directory"}
           onClick={() => {
@@ -309,11 +366,55 @@ function TreeContextMenu({
           Delete
         </button>
       ) : null}
-      <button type="button" onClick={() => context.close()}>
+      <button role="menuitem" type="button" onClick={() => context.close()}>
         <X size={13} />
         Close
       </button>
     </div>
+  );
+}
+
+function getClickedFilePath(
+  event: ReactMouseEvent<HTMLElement>,
+): ClickedFilePath | null {
+  if (
+    event.button !== 0 ||
+    event.altKey ||
+    event.ctrlKey ||
+    event.metaKey ||
+    event.shiftKey ||
+    event.defaultPrevented
+  ) {
+    return null;
+  }
+
+  for (const item of event.nativeEvent.composedPath()) {
+    if (!(item instanceof HTMLElement)) {
+      continue;
+    }
+    if (isTreeMenuOrEditorTarget(item)) {
+      return null;
+    }
+    if (item.dataset.itemType === "file") {
+      const path = item.dataset.itemPath;
+      return path
+        ? {
+            path,
+            selected: item.hasAttribute("data-item-selected"),
+          }
+        : null;
+    }
+  }
+
+  return null;
+}
+
+function isTreeMenuOrEditorTarget(element: HTMLElement): boolean {
+  return (
+    element.dataset.fileTreeContextMenuRoot === "true" ||
+    element.dataset.type === "context-menu-trigger" ||
+    element.hasAttribute("data-item-rename-input") ||
+    element.matches("input, textarea, button, [contenteditable='true']")
   );
 }
 

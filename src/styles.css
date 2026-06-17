@@ -505,13 +505,18 @@ button {
 
 .tree-context-menu {
   display: grid;
-  min-width: 132px;
+  position: relative;
+  z-index: 20;
+  min-width: 152px;
   gap: 2px;
   border: 1px solid var(--line-strong);
   border-radius: 6px;
   background: var(--surface-2);
   box-shadow: 0 14px 28px rgb(0 0 0 / 0.34);
+  box-sizing: border-box;
+  margin-right: 8px;
   padding: 4px;
+  transform: translateX(calc(-100% - 8px));
 }
 
 .tree-context-menu button {
@@ -519,6 +524,7 @@ button {
   height: 26px;
   align-items: center;
   gap: 8px;
+  justify-content: flex-start;
   border: 0;
   border-radius: 4px;
   background: transparent;
@@ -526,6 +532,8 @@ button {
   font-size: 12px;
   padding: 0 8px;
   text-align: left;
+  white-space: nowrap;
+  width: 100%;
 }
 
 .tree-context-menu button:hover:not(:disabled) {
