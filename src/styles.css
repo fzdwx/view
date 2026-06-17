@@ -2634,6 +2634,51 @@ body.is-resizing-y * {
   color: #ffffff;
 }
 
+.editor-search-highlights {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  color: transparent;
+  font-family: var(--mono);
+  font-size: var(--editor-font-size, 12px);
+  font-weight: var(--editor-font-weight, 400);
+  line-height: var(--editor-line-height, 1.56);
+  pointer-events: none;
+  tab-size: 2;
+  user-select: none;
+  white-space: pre;
+}
+
+.editor-search-highlights-content {
+  position: absolute;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  min-width: 100%;
+  margin: 0;
+  color: transparent;
+  font: inherit;
+  padding: 12px 24px 12px var(--editor-gutter-width);
+  white-space: pre;
+}
+
+.editor-search-plain {
+  color: transparent;
+}
+
+.editor-search-match {
+  border-radius: 2px;
+  background: rgb(64 108 255 / 0.28);
+  box-shadow: inset 0 0 0 1px rgb(64 108 255 / 0.48);
+  color: transparent;
+}
+
+.editor-search-match.active {
+  background: rgb(64 108 255 / 0.42);
+  box-shadow: inset 0 0 0 1px rgb(145 170 255 / 0.95);
+}
+
 .editor-line-number-gutter {
   position: absolute;
   inset: 0 auto 0 0;

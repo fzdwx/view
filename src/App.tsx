@@ -1,8 +1,6 @@
 import {
-  type ClipboardEvent,
   type CSSProperties,
   type DragEvent,
-  type InputEvent as ReactInputEvent,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
@@ -276,6 +274,17 @@ interface EditorScrollMetrics {
   readonly height: number;
   readonly width: number;
 }
+
+type EditorSearchHighlightSegment =
+  | {
+      readonly kind: "plain";
+      readonly text: string;
+    }
+  | {
+      readonly active: boolean;
+      readonly kind: "match";
+      readonly text: string;
+    };
 
 export function App() {
   const queryClient = useQueryClient();
@@ -2587,6 +2596,7 @@ function FilePreview({
   const targetLineRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const lineNumberTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const findInputRef = useRef<HTMLInputElement | null>(null);
   const replaceInputRef = useRef<HTMLInputElement | null>(null);
   const pendingEditorSelectionRef = useRef<{ start: number; end: number } | null>(
     null,
@@ -2651,6 +2661,17 @@ function FilePreview({
     editorMatches.length > 0
       ? editorMatches[Math.min(activeEditorMatchIndex, editorMatches.length - 1)]
       : null;
+  const editorSearchHighlightSegments = useMemo(
+    () =>
+      editorFindOpen
+        ? buildEditorSearchHighlightSegments(
+            content,
+            editorMatches,
+            activeEditorMatchIndex,
+          )
+        : [],
+    [activeEditorMatchIndex, content, editorFindOpen, editorMatches],
+  );
   const activeGitMarker =
     visibleGitMarkers.find((marker) => marker.id === activeGitMarkerId) ?? null;
   const gitPopoverWidth = Math.min(430, Math.max(260, editorViewportWidth - 74));
@@ -2767,12 +2788,16 @@ function FilePreview({
   }, [editorFontSize, fallbackEditorLineHeight, file?.path]);
 
   useEffect(() => {
-    if (!editorFindOpen || editorReplaceOpen) {
+    if (!editorFindOpen) {
       return;
     }
 
     const frame = window.requestAnimationFrame(() => {
-      textareaRef.current?.focus({ preventScroll: true });
+      const input = editorReplaceOpen
+        ? replaceInputRef.current
+        : findInputRef.current;
+      input?.focus({ preventScroll: true });
+      input?.select();
     });
 
     return () => window.cancelAnimationFrame(frame);
@@ -2807,7 +2832,7 @@ function FilePreview({
           if (response.matches[0]) {
             window.requestAnimationFrame(() => {
               if (editorSearchRequestRef.current === requestId) {
-                revealEditorMatch(response.matches[0], true);
+                revealEditorMatch(response.matches[0], false);
               }
             });
           }
@@ -2958,7 +2983,7 @@ function FilePreview({
     });
   }
 
-  function selectEditorMatch(index: number) {
+  function selectEditorMatch(index: number, focusEditor = false) {
     if (editorMatches.length === 0 || !textareaRef.current) {
       return;
     }
@@ -2966,7 +2991,7 @@ function FilePreview({
     const nextIndex = wrapIndex(index, editorMatches.length);
     const match = editorMatches[nextIndex];
     setActiveEditorMatchIndex(nextIndex);
-    revealEditorMatch(match, true);
+    revealEditorMatch(match, focusEditor);
   }
 
   function revealEditorMatch(match: EditorTextMatch, focusEditor: boolean) {
@@ -3060,9 +3085,6 @@ function FilePreview({
 
   function handleEditorKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     const key = event.key.toLowerCase();
-    if (editorFindOpen && routeEditorKeyToFind(event)) {
-      return;
-    }
     if ((event.metaKey || event.ctrlKey) && key === "f") {
       event.preventDefault();
       openEditorFind(false);
@@ -3072,81 +3094,6 @@ function FilePreview({
       event.preventDefault();
       openEditorFind(true);
     }
-  }
-
-  function routeEditorKeyToFind(event: KeyboardEvent<HTMLTextAreaElement>): boolean {
-    if (event.metaKey || event.ctrlKey || event.altKey) {
-      return false;
-    }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeEditorFind();
-      return true;
-    }
-    if (event.key === "Enter") {
-      event.preventDefault();
-      selectEditorMatch(event.shiftKey ? activeEditorMatchIndex - 1 : activeEditorMatchIndex + 1);
-      return true;
-    }
-    if (event.key === "Backspace") {
-      event.preventDefault();
-      setEditorFindQuery((current) => current.slice(0, -1));
-      setActiveEditorMatchIndex(0);
-      return true;
-    }
-    if (event.key === "Delete") {
-      event.preventDefault();
-      setEditorFindQuery("");
-      setActiveEditorMatchIndex(0);
-      return true;
-    }
-    if (event.key.length !== 1) {
-      return false;
-    }
-
-    return false;
-  }
-
-  function handleEditorBeforeInput(event: ReactInputEvent<HTMLTextAreaElement>) {
-    if (!editorFindOpen || editorReplaceOpen) {
-      return;
-    }
-
-    const nativeEvent = event.nativeEvent;
-    if (!(nativeEvent instanceof InputEvent)) {
-      return;
-    }
-
-    if (
-      nativeEvent.inputType !== "insertText" &&
-      nativeEvent.inputType !== "insertCompositionText"
-    ) {
-      return;
-    }
-
-    const text = nativeEvent.data ?? "";
-    if (!text) {
-      return;
-    }
-
-    event.preventDefault();
-    setEditorFindQuery((current) => `${current}${text}`);
-    setActiveEditorMatchIndex(0);
-  }
-
-  function handleEditorPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    if (!editorFindOpen || editorReplaceOpen) {
-      return;
-    }
-
-    const text = event.clipboardData.getData("text");
-    if (!text) {
-      return;
-    }
-
-    event.preventDefault();
-    setEditorFindQuery((current) => `${current}${text}`);
-    setActiveEditorMatchIndex(0);
   }
 
   function handleEditorScroll(event: UIEvent<HTMLTextAreaElement>) {
@@ -3425,24 +3372,13 @@ function FilePreview({
         <div className="editor-findbar" onKeyDown={handleEditorFindKeyDown}>
           <Search size={14} />
           <input
+            ref={findInputRef}
             aria-label="Find in file"
             placeholder="Find"
-            readOnly={!editorReplaceOpen}
-            tabIndex={editorReplaceOpen ? 0 : -1}
             value={editorFindQuery}
             onChange={(event) => {
-              if (!editorReplaceOpen) {
-                return;
-              }
               setEditorFindQuery(event.target.value);
               setActiveEditorMatchIndex(0);
-            }}
-            onMouseDown={(event) => {
-              if (editorReplaceOpen) {
-                return;
-              }
-              event.preventDefault();
-              textareaRef.current?.focus({ preventScroll: true });
             }}
           />
           <span className="editor-find-count">
@@ -3549,6 +3485,33 @@ function FilePreview({
           aria-hidden="true"
           spellCheck={false}
         />
+        {editorSearchHighlightSegments.length > 0 ? (
+          <div className="editor-search-highlights" aria-hidden="true">
+            <pre
+              className="editor-search-highlights-content"
+              style={
+                {
+                  transform: `translate(${-editorScrollLeft}px, ${-editorScrollTop}px)`,
+                } as CSSProperties
+              }
+            >
+              {editorSearchHighlightSegments.map((segment, index) => (
+                <span
+                  key={`${segment.kind}-${index}`}
+                  className={
+                    segment.kind === "match"
+                      ? segment.active
+                        ? "editor-search-match active"
+                        : "editor-search-match"
+                      : "editor-search-plain"
+                  }
+                >
+                  {segment.text}
+                </span>
+              ))}
+            </pre>
+          </div>
+        ) : null}
         {visibleGitMarkers.length > 0 ? (
           <>
             <div className="editor-git-gutter" aria-label="File changes">
@@ -3614,9 +3577,7 @@ function FilePreview({
           spellCheck={false}
           wrap="off"
           defaultValue={content}
-          onBeforeInput={handleEditorBeforeInput}
           onKeyDown={handleEditorKeyDown}
-          onPaste={handleEditorPaste}
           onScroll={handleEditorScroll}
           onChange={(event) => onChangeDraft(event.target.value)}
         />
@@ -5127,6 +5088,50 @@ function nextMatchIndexAfter(matches: EditorTextMatch[], offset: number): number
 
   const nextIndex = matches.findIndex((match) => match.start >= offset);
   return nextIndex >= 0 ? nextIndex : 0;
+}
+
+function buildEditorSearchHighlightSegments(
+  content: string,
+  matches: EditorTextMatch[],
+  activeIndex: number,
+): EditorSearchHighlightSegment[] {
+  if (!content || matches.length === 0) {
+    return [];
+  }
+
+  const segments: EditorSearchHighlightSegment[] = [];
+  let cursor = 0;
+
+  matches.forEach((match, index) => {
+    const start = clamp(match.start, 0, content.length);
+    const end = clamp(match.end, start, content.length);
+    if (end <= cursor) {
+      return;
+    }
+
+    if (start > cursor) {
+      segments.push({
+        kind: "plain",
+        text: content.slice(cursor, start),
+      });
+    }
+
+    segments.push({
+      active: index === activeIndex,
+      kind: "match",
+      text: content.slice(start, end),
+    });
+    cursor = end;
+  });
+
+  if (cursor < content.length) {
+    segments.push({
+      kind: "plain",
+      text: content.slice(cursor),
+    });
+  }
+
+  return segments;
 }
 
 function loadAppSettings(): AppSettings {
