@@ -407,10 +407,13 @@ function TerminalSessionView({
   useEffect(() => {
     activeRef.current = active;
     titleChangeRef.current = onTitleChange;
+  }, [active, onTitleChange]);
+
+  useEffect(() => {
     if (active) {
       screenRef.current?.focus({ preventScroll: true });
     }
-  }, [active, onTitleChange]);
+  }, [active]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
