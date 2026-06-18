@@ -280,18 +280,6 @@ export async function deleteProjectFile(
   return invoke<void>("delete_project_file", { path, filePath });
 }
 
-export async function searchFiles(
-  path: string,
-  query: string,
-  limit?: number,
-): Promise<FileSearchResult[]> {
-  return invoke<FileSearchResult[]>("search_files", {
-    path,
-    query,
-    limit: limit ?? null,
-  });
-}
-
 export async function searchFileNames(
   path: string,
   query: string,

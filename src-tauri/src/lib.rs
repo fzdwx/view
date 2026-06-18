@@ -418,16 +418,6 @@ fn delete_project_file(path: String, file_path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn search_files(
-    path: String,
-    query: String,
-    limit: Option<usize>,
-) -> Result<Vec<FileSearchResult>, String> {
-    let root = repository_root(&path)?;
-    search_project_files(&root, &query, limit)
-}
-
-#[tauri::command]
 fn search_file_names(
     path: String,
     query: String,
@@ -2142,6 +2132,7 @@ fn write_terminal_ws_event(
     }
 }
 
+#[allow(dead_code)]
 fn search_project_files(
     root: &Path,
     query: &str,
@@ -3500,7 +3491,6 @@ pub fn run() {
             create_project_file,
             rename_project_file,
             delete_project_file,
-            search_files,
             search_file_names,
             search_file_contents,
             search_editor_text,

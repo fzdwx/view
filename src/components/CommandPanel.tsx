@@ -36,8 +36,15 @@ export function CommandPanel({
   onSelectIndex(index: number): void;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const resultRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const hasQuery = query.trim().length > 0;
   const lowerQuery = useMemo(() => query.trim().toLowerCase(), [query]);
+
+  useEffect(() => {
+    const el = resultRefs.current[activeIndex];
+    if (!el) return;
+    el.scrollIntoView({ block: "nearest" });
+  }, [activeIndex]);
 
   useEffect(() => {
     if (!open) {
@@ -111,7 +118,9 @@ export function CommandPanel({
         </div>
         <div className="command-context">
           <span>
-            {mode === "content" ? "Find in files" : "Find files"} ·{" "}
+            {mode === "content" ? "Find in files" : "Find files"}
+            {hasQuery && results.length > 0 ? ` · ${results.length} results` : ""}
+            {mode === "content" ? " · " : " · "}
             {projectName ?? "No project"}
           </span>
           <kbd>Enter</kbd>
@@ -150,11 +159,16 @@ export function CommandPanel({
               return (
                 <button
                   key={`${result.path}:${result.lineNumber ?? "file"}`}
-                  className={
-                    index === activeIndex
-                      ? "command-result active"
-                      : "command-result"
-                  }
+                  ref={(el) => {
+                    resultRefs.current[index] = el;
+                  }}
+                  className={[
+                    "command-result",
+                    index === activeIndex ? "active" : "",
+                    mode === "content" ? "command-result-content" : "command-result-file",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
                   onMouseEnter={() => onSelectIndex(index)}
                   onClick={() => onOpenResult(result)}
                 >

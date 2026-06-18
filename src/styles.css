@@ -1997,7 +1997,16 @@ body.is-resizing-y * {
 .command-result-icon {
   display: grid;
   place-items: center;
+}
+
+.command-result-file .command-result-icon {
+  margin-top: 0;
+  align-self: center;
+}
+
+.command-result-content .command-result-icon {
   margin-top: 2px;
+  align-self: start;
 }
 
 .command-result-file-icon {
