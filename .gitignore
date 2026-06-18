@@ -25,3 +25,8 @@ src-tauri/target
 *.njsproj
 *.sln
 *.sw?
+
+# Lockfiles: this project uses pnpm (see pnpm-lock.yaml); ignore others
+bun.lock
+yarn.lock
+package-lock.json
