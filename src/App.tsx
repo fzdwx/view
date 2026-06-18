@@ -178,12 +178,16 @@ export function App() {
     previewMode,
     previewTabs,
     previewTarget,
+    activateAdjacentTab,
     activatePreviewTab,
     clearPreviewTabs,
+    closeAllTabs,
+    closeOtherTabs,
     closePreviewTab,
     movePreviewTabPath,
     openPreviewTab,
     removePreviewTabsForPath,
+    reorderPreviewTabs,
     showDiffSelection,
   } = usePreviewTabs({
     activeCommit,
@@ -373,15 +377,20 @@ export function App() {
     canUseProjectCommands: Boolean(activeProject),
     commandOpen,
     hasActiveEditorDraft: Boolean(activeEditorDraft),
+    hasActiveTab: previewTabs.length > 0 && activePreviewTabId !== null,
     pullChoiceOpen,
     previewMode,
     shortcuts: appSettings.shortcuts,
+    onCloseActiveTab: () => {
+      if (activePreviewTabId) closePreviewTab(activePreviewTabId);
+    },
     onCloseCommandPanel: closeCommandPanel,
     onClosePullChoice: closePullChoice,
     onOpenCommandPanel: openCommandPanel,
     onOpenPullChoice: openPullChoice,
     onSaveActiveFile: saveActivePreviewFile,
     onSelectToolPanelView: selectToolPanelView,
+    onSwitchTab: activateAdjacentTab,
     onToggleProjectSwitcher: toggleProjectSwitcher,
   });
 
@@ -582,8 +591,11 @@ export function App() {
                   fileContentQuery.isFetching
                 }
                 onCloseTab={closePreviewTab}
+                onCloseOtherTabs={closeOtherTabs}
+                onCloseAllTabs={closeAllTabs}
                 onDragEnd={clearDockDrag}
                 onDragStart={startEditorPanelDrag}
+                onReorderTabs={reorderPreviewTabs}
                 onSelectTab={activatePreviewTab}
                 previewMode={previewMode}
                 selectedPath={

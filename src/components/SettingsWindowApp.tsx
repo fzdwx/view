@@ -59,7 +59,7 @@ export function SettingsWindowApp() {
 async function closeSettingsWindow(): Promise<void> {
   if (isTauriRuntime()) {
     const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    await getCurrentWindow().close();
+    await getCurrentWindow().hide();
     return;
   }
 

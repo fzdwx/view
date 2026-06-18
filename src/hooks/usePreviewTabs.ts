@@ -26,8 +26,11 @@ export interface PreviewTabsController {
   readonly previewTabs: PreviewTab[];
   readonly previewTarget: PreviewTarget | null;
   readonly activatePreviewTab: (tab: PreviewTab) => void;
-  readonly clearPreviewTabs: (mode?: PreviewMode) => void;
+  readonly activateAdjacentTab: (direction: 1 | -1) => void;
   readonly closePreviewTab: (tabId: string) => void;
+  readonly closeOtherTabs: (keepTabId: string) => void;
+  readonly closeAllTabs: () => void;
+  readonly clearPreviewTabs: (mode?: PreviewMode) => void;
   readonly movePreviewTabPath: (fromPath: string, toPath: string) => void;
   readonly openPreviewTab: (
     mode: PreviewMode,
@@ -35,6 +38,7 @@ export interface PreviewTabsController {
     targetLine?: number | null,
   ) => void;
   readonly removePreviewTabsForPath: (path: string) => void;
+  readonly reorderPreviewTabs: (fromId: string, toId: string) => void;
   readonly showDiffSelection: () => void;
 }
 
@@ -239,18 +243,106 @@ export function usePreviewTabs({
     ],
   );
 
+  const reorderPreviewTabs = useCallback(
+    (fromId: string, toId: string) => {
+      if (fromId === toId) return;
+      setPreviewTabs((tabs) => {
+        const fromIndex = tabs.findIndex((tab) => tab.id === fromId);
+        const toIndex = tabs.findIndex((tab) => tab.id === toId);
+        if (fromIndex < 0 || toIndex < 0) return tabs;
+        const next = [...tabs];
+        const [moved] = next.splice(fromIndex, 1);
+        next.splice(toIndex, 0, moved);
+        return next;
+      });
+    },
+    [],
+  );
+
+  const activateAdjacentTab = useCallback(
+    (direction: 1 | -1) => {
+      if (previewTabs.length === 0 || !activePreviewTabId) return;
+      const currentIndex = previewTabs.findIndex(
+        (tab) => tab.id === activePreviewTabId,
+      );
+      if (currentIndex < 0) return;
+ const count = previewTabs.length;
+      const nextIndex = (currentIndex + direction + count) % count;
+      activatePreviewTab(previewTabs[nextIndex]);
+    },
+    [activePreviewTabId, activatePreviewTab, previewTabs],
+  );
+
+  const closeOtherTabs = useCallback(
+    (keepTabId: string) => {
+      const keepTab = previewTabs.find((tab) => tab.id === keepTabId);
+      if (!keepTab) return;
+
+      for (const tab of previewTabs) {
+        if (tab.id === keepTabId) continue;
+        if (tab.mode === "file" && activeProjectPath) {
+          const key = editorDraftKey(activeProjectPath, tab.path);
+          if (isDraftDirty(editorDrafts[key])) {
+            onDiscardDraft(key);
+          }
+        }
+      }
+
+      setPreviewTabs([keepTab]);
+      if (activePreviewTabId !== keepTabId) {
+        activatePreviewTab(keepTab);
+      }
+    },
+    [
+      activePreviewTabId,
+      activeProjectPath,
+      activatePreviewTab,
+      editorDrafts,
+      onDiscardDraft,
+      previewTabs,
+    ],
+  );
+
+  const closeAllTabs = useCallback(() => {
+    for (const tab of previewTabs) {
+      if (tab.mode === "file" && activeProjectPath) {
+        const key = editorDraftKey(activeProjectPath, tab.path);
+        if (isDraftDirty(editorDrafts[key])) {
+          onDiscardDraft(key);
+        }
+      }
+    }
+    setPreviewTabs([]);
+    setActivePreviewTabId(null);
+    setPreviewTarget(null);
+    setPreviewMode("file");
+    onSelectProjectPath(null);
+    onSelectChangePath(null);
+  }, [
+    activeProjectPath,
+    editorDrafts,
+    onDiscardDraft,
+    onSelectChangePath,
+    onSelectProjectPath,
+    previewTabs,
+  ]);
+
   return {
     activePreviewTabId,
     dirtyPreviewTabIds,
     previewMode,
     previewTabs,
     previewTarget,
+    activateAdjacentTab,
     activatePreviewTab,
     clearPreviewTabs,
+    closeAllTabs,
+    closeOtherTabs,
     closePreviewTab,
     movePreviewTabPath,
     openPreviewTab,
     removePreviewTabsForPath,
+    reorderPreviewTabs,
     showDiffSelection,
   };
 }

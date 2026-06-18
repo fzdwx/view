@@ -54,6 +54,12 @@ const fileTreeIcons: FileTreeIcons = {
 };
 
 const treeContentAlignmentCss = `
+  :host {
+    text-rendering: auto;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: auto;
+  }
+
   [data-type='item'] {
     cursor: default;
     line-height: 1.2;

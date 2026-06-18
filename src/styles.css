@@ -3,7 +3,7 @@
   background: #000000;
   font-family: var(--app-font-family);
   font-synthesis: none;
-  text-rendering: optimizeLegibility;
+  text-rendering: auto;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   color-scheme: dark;
@@ -1746,9 +1746,17 @@ body.is-resizing-y * {
   background: var(--surface-0);
 }
 
+.preview-tab.dragging {
+  opacity: 0.4;
+}
+
+.preview-tab.drag-over {
+  border-left: 2px solid var(--success);
+}
+
 .preview-tab.active {
   background: var(--surface-0);
-  box-shadow: inset 0 2px 0 var(--success);
+  box-shadow: inset 0 -2px 0 var(--success);
 }
 
 .preview-tab:not(.active):hover {
@@ -1776,21 +1784,23 @@ body.is-resizing-y * {
 
 .preview-tab-kind {
   display: grid;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   flex: 0 0 auto;
   place-items: center;
   border-radius: 4px;
-  background: var(--surface-3);
   color: var(--muted);
-  font-family: var(--mono);
-  font-size: 10px;
-  font-weight: 500;
 }
 
 .preview-tab-kind.diff {
   background: color-mix(in oklch, var(--git-modified) 18%, transparent);
   color: var(--git-modified);
+}
+
+.preview-tab-file-icon {
+  display: block;
+  width: 15px;
+  height: 15px;
 }
 
 .preview-tab-name {
@@ -2216,7 +2226,7 @@ body.is-resizing-y * {
   overflow-y: auto;
   background: var(--surface-0);
   text-rendering: auto;
-  -webkit-font-smoothing: auto;
+  -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: auto;
 }
 
@@ -2702,7 +2712,7 @@ body.is-resizing-y * {
   overflow: visible;
   padding: 14px 15px 16px;
   text-rendering: auto;
-  -webkit-font-smoothing: auto;
+  -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: auto;
 }
 
@@ -2827,8 +2837,9 @@ body.is-resizing-y * {
   --trees-font-family-override: var(--app-font-family);
   background: var(--surface-0);
   text-rendering: auto;
-  -webkit-font-smoothing: auto;
-  -moz-osx-font-smoothing: auto;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
 }
 
 .tree-empty-state {
@@ -2910,7 +2921,7 @@ body.is-resizing-y * {
   height: 100%;
   overflow: auto;
   text-rendering: auto;
-  -webkit-font-smoothing: auto;
+  -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: auto;
 }
 
@@ -2919,7 +2930,7 @@ body.is-resizing-y * {
   overflow: auto;
   background: var(--surface-0);
   text-rendering: auto;
-  -webkit-font-smoothing: auto;
+  -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: auto;
 }
 
@@ -3193,7 +3204,7 @@ body.is-resizing-y * {
   font-weight: var(--editor-font-weight, 400);
   line-height: var(--editor-line-height, 19px);
   text-rendering: auto;
-  -webkit-font-smoothing: subpixel-antialiased;
+  -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: auto;
   padding: 12px 24px 12px var(--editor-gutter-width);
   tab-size: 2;
@@ -3216,7 +3227,7 @@ body.is-resizing-y * {
   font-weight: var(--editor-font-weight, 400);
   line-height: var(--editor-line-height, 19px);
   text-rendering: auto;
-  -webkit-font-smoothing: subpixel-antialiased;
+  -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: auto;
   pointer-events: none;
   tab-size: 2;
@@ -3272,7 +3283,7 @@ body.is-resizing-y * {
   font-variant-numeric: tabular-nums;
   line-height: var(--editor-line-height, 19px);
   text-rendering: auto;
-  -webkit-font-smoothing: subpixel-antialiased;
+  -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: auto;
   overflow: hidden;
   padding: 12px 14px 12px 0;
@@ -3698,7 +3709,7 @@ body.is-resizing-y * {
   contain: layout paint;
   overflow: auto;
   text-rendering: auto;
-  -webkit-font-smoothing: auto;
+  -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: auto;
   outline: none;
   color: var(--ink);

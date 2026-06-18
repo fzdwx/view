@@ -99,15 +99,16 @@ editing, search, and an embedded terminal.
   or titles when meaning is not obvious.
 - After UI changes, drive the actual app surface and check scrolling, focus,
   keyboard shortcuts, resize handles, and dark-theme contrast.
-- `:root` sets `text-rendering: optimizeLegibility` and
-  `-webkit-font-smoothing: antialiased` for UI chrome, but these blur
-  small monospace glyphs in code/data surfaces. Override to
-  `text-rendering: auto` and `-webkit-font-smoothing: subpixel-antialiased`
-  on any container that renders dense monospace text (editor, diff view,
-  file preview, terminal, commit list, file tree, settings font preview).
-  Use `auto` for containers that mix UI and mono text where antialiased
-  is acceptable; reserve `subpixel-antialiased` for pure-code surfaces
-  where the `:root` `antialiased` inheritance would otherwise bleed through.
+- `:root` sets `text-rendering: optimizeLegibility` which causes ligature
+  and kerning artifacts on small monospace text. Override to
+  `text-rendering: auto` on containers that render dense monospace
+  (editor, diff view, file preview, terminal, commit list, file tree).
+  Keep `-webkit-font-smoothing: antialiased` (inherited from `:root`) on
+  scrollable containers; do not override those containers to `auto` or
+  `subpixel-antialiased`. Antialiasing is position-independent and stable
+  during scroll, while subpixel rendering depends on integer pixel positions
+  and can blur in one scroll direction. Reserve `subpixel-antialiased` for
+  static text only (e.g., settings font preview).
 
 ## Verification
 

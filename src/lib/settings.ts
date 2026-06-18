@@ -4,7 +4,10 @@ export type ShortcutAction =
   | "pullCurrentBranch"
   | "openGitLog"
   | "openTerminal"
-  | "switchProject";
+  | "switchProject"
+  | "closeTab"
+  | "nextTab"
+  | "prevTab";
 
 export interface AppSettings {
   uiFontFamily: string;
@@ -43,6 +46,9 @@ export const defaultAppSettings: AppSettings = {
     openGitLog: "Mod+G",
     openTerminal: "Mod+`",
     switchProject: "Mod+O",
+    closeTab: "Mod+W",
+    nextTab: "Mod+Shift+]",
+    prevTab: "Mod+Shift+[",
   },
 };
 
@@ -76,6 +82,21 @@ export const shortcutRows: readonly ShortcutRow[] = [
     action: "switchProject",
     label: "Switch project",
     description: "Open the project switcher",
+  },
+  {
+    action: "closeTab",
+    label: "Close tab",
+    description: "Close the active editor tab",
+  },
+  {
+    action: "nextTab",
+    label: "Next tab",
+    description: "Switch to the next editor tab",
+  },
+  {
+    action: "prevTab",
+    label: "Previous tab",
+    description: "Switch to the previous editor tab",
   },
 ];
 

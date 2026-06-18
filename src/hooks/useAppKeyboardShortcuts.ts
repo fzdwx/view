@@ -8,31 +8,36 @@ interface UseAppKeyboardShortcutsOptions {
   readonly canUseProjectCommands: boolean;
   readonly commandOpen: boolean;
   readonly hasActiveEditorDraft: boolean;
+  readonly hasActiveTab: boolean;
   readonly previewMode: PreviewMode;
   readonly pullChoiceOpen: boolean;
   readonly shortcuts: AppSettings["shortcuts"];
+  readonly onCloseActiveTab: () => void;
   readonly onCloseCommandPanel: () => void;
   readonly onClosePullChoice: () => void;
   readonly onOpenCommandPanel: () => void;
   readonly onOpenPullChoice: () => void;
   readonly onSaveActiveFile: () => void;
   readonly onSelectToolPanelView: (view: ToolPanelId) => void;
+  readonly onSwitchTab: (direction: 1 | -1) => void;
   readonly onToggleProjectSwitcher: () => void;
 }
-
 export function useAppKeyboardShortcuts({
   canUseProjectCommands,
   commandOpen,
   hasActiveEditorDraft,
+  hasActiveTab,
   previewMode,
   pullChoiceOpen,
   shortcuts,
+  onCloseActiveTab,
   onCloseCommandPanel,
   onClosePullChoice,
   onOpenCommandPanel,
   onOpenPullChoice,
   onSaveActiveFile,
   onSelectToolPanelView,
+  onSwitchTab,
   onToggleProjectSwitcher,
 }: UseAppKeyboardShortcutsOptions): void {
   useEffect(() => {
@@ -83,6 +88,30 @@ export function useAppKeyboardShortcuts({
         event.preventDefault();
         onToggleProjectSwitcher();
         return;
+
+      if (matchesShortcut(event, shortcuts.closeTab)) {
+        if (hasActiveTab) {
+          event.preventDefault();
+          onCloseActiveTab();
+        }
+        return;
+      }
+
+      if (matchesShortcut(event, shortcuts.nextTab)) {
+        if (hasActiveTab) {
+          event.preventDefault();
+          onSwitchTab(1);
+        }
+        return;
+      }
+
+      if (matchesShortcut(event, shortcuts.prevTab)) {
+        if (hasActiveTab) {
+          event.preventDefault();
+          onSwitchTab(-1);
+        }
+        return;
+      }
       }
 
       if (event.key === "Escape" && pullChoiceOpen) {
@@ -103,15 +132,18 @@ export function useAppKeyboardShortcuts({
     canUseProjectCommands,
     commandOpen,
     hasActiveEditorDraft,
+    hasActiveTab,
     previewMode,
     pullChoiceOpen,
     shortcuts,
+    onCloseActiveTab,
     onCloseCommandPanel,
     onClosePullChoice,
     onOpenCommandPanel,
     onOpenPullChoice,
     onSaveActiveFile,
     onSelectToolPanelView,
+    onSwitchTab,
     onToggleProjectSwitcher,
   ]);
 }

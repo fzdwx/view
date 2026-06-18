@@ -1,7 +1,9 @@
-import { useCallback, useRef, useState } from "react";
-import { Loader2, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { GitCompare, Loader2, X } from "lucide-react";
 import { fileNameFromPath } from "../lib/pathLabels";
+import { useFileIcon } from "../lib/fileIcons";
 import type { PreviewMode, PreviewTab } from "../lib/previewTabs";
+import { TabContextMenu } from "./TabContextMenu";
 
 export function PreviewTabBar({
   activeTabId,
@@ -9,8 +11,11 @@ export function PreviewTabBar({
   dirtyTabIds,
   loading,
   onCloseTab,
+  onCloseOtherTabs,
+  onCloseAllTabs,
   onDragEnd,
   onDragStart,
+  onReorderTabs,
   onSelectTab,
   previewMode,
   selectedPath,
@@ -21,8 +26,11 @@ export function PreviewTabBar({
   dirtyTabIds: Set<string>;
   loading: boolean;
   onCloseTab(tabId: string): void;
+  onCloseOtherTabs(tabId: string): void;
+  onCloseAllTabs(): void;
   onDragEnd(): void;
   onDragStart(): void;
+  onReorderTabs(fromId: string, toId: string): void;
   onSelectTab(tab: PreviewTab): void;
   previewMode: PreviewMode;
   selectedPath: string | null;
@@ -33,6 +41,13 @@ export function PreviewTabBar({
     canScrollLeft: false,
     canScrollRight: false,
   });
+  const [dragTabId, setDragTabId] = useState<string | null>(null);
+  const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    tab: PreviewTab;
+    left: number;
+    top: number;
+  } | null>(null);
 
   const updateScrollState = useCallback(() => {
     const el = scrollRef.current;
@@ -43,6 +58,19 @@ export function PreviewTabBar({
     });
   }, []);
 
+  useEffect(() => {
+    if (!contextMenu) return;
+    function closeMenu() {
+      setContextMenu(null);
+    }
+    window.addEventListener("click", closeMenu);
+    window.addEventListener("blur", closeMenu);
+    return () => {
+      window.removeEventListener("click", closeMenu);
+      window.removeEventListener("blur", closeMenu);
+    };
+  }, [contextMenu]);
+
   const scrollClassName = [
     "preview-tabs",
     scrollState.canScrollLeft ? "scroll-left" : "",
@@ -50,6 +78,54 @@ export function PreviewTabBar({
   ]
     .filter(Boolean)
     .join(" ");
+
+  function handleTabDragStart(event: React.DragEvent, tabId: string) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", tabId);
+    setDragTabId(tabId);
+  }
+
+  function handleTabDragOver(event: React.DragEvent, tabId: string) {
+    if (!dragTabId || dragTabId === tabId) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDragOverTabId(tabId);
+  }
+
+  function handleTabDrop(event: React.DragEvent, tabId: string) {
+    event.preventDefault();
+    if (dragTabId && dragTabId !== tabId) {
+      onReorderTabs(dragTabId, tabId);
+    }
+    setDragTabId(null);
+    setDragOverTabId(null);
+  }
+
+  function handleTabDragEnd() {
+    setDragTabId(null);
+    setDragOverTabId(null);
+  }
+
+  function handleAuxClick(event: React.MouseEvent, tabId: string) {
+    if (event.button === 1) {
+      event.preventDefault();
+      onCloseTab(tabId);
+    }
+  }
+
+  function handleContextMenu(
+    event: React.MouseEvent,
+    tab: PreviewTab,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({ tab, left: event.clientX, top: event.clientY });
+  }
+
+  function handleCopyPath(tab: PreviewTab) {
+    void navigator.clipboard?.writeText(tab.path);
+    setContextMenu(null);
+  }
 
   return (
     <div className="preview-tabbar">
@@ -61,52 +137,76 @@ export function PreviewTabBar({
         onScroll={updateScrollState}
       >
         {tabs.length > 0 ? (
-          tabs.map((tab) => (
-            <div
-              key={tab.id}
-              className={
-                tab.id === activeTabId ? "preview-tab active" : "preview-tab"
-              }
-              title={tab.path}
-            >
-              <button
-                className="preview-tab-select"
-                role="tab"
-                aria-selected={tab.id === activeTabId}
-                onClick={() => onSelectTab(tab)}
+          tabs.map((tab) => {
+            const isActive = tab.id === activeTabId;
+            const isDirty = dirtyTabIds.has(tab.id);
+            const isDragging = dragTabId === tab.id;
+            const isDragOver = dragOverTabId === tab.id && dragTabId !== tab.id;
+            return (
+              <div
+                key={tab.id}
+                className={[
+                  isActive ? "preview-tab active" : "preview-tab",
+                  isDragging ? "dragging" : "",
+                  isDragOver ? "drag-over" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                title={tab.path}
+                draggable
+                onDragStart={(e) => handleTabDragStart(e, tab.id)}
+                onDragOver={(e) => handleTabDragOver(e, tab.id)}
+                onDrop={(e) => handleTabDrop(e, tab.id)}
+                onDragEnd={handleTabDragEnd}
+                onAuxClick={(e) => handleAuxClick(e, tab.id)}
+                onContextMenu={(e) => handleContextMenu(e, tab)}
               >
-                <span
-                  className={
-                    tab.mode === "diff"
-                      ? "preview-tab-kind diff"
-                      : "preview-tab-kind"
-                  }
+                <button
+                  className="preview-tab-select"
+                  role="tab"
+                  aria-selected={isActive}
+                  onClick={() => onSelectTab(tab)}
                 >
-                  {tab.mode === "diff" ? "D" : "F"}
-                </span>
-                <span className="preview-tab-name">
-                  {fileNameFromPath(tab.path)}
-                </span>
-                {dirtyTabIds.has(tab.id) ? (
-                  <span className="preview-tab-dirty" aria-label="Unsaved changes" />
-                ) : null}
-              </button>
-              <button
-                className={
-                  dirtyTabIds.has(tab.id)
-                    ? "preview-tab-close preview-tab-close-dirty"
-                    : "preview-tab-close"
-                }
-                aria-label={`Close ${tab.path}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onCloseTab(tab.id);
-                }}
-              >
-                <X size={12} />
-              </button>
-            </div>
-          ))
+                  <span
+                    className={
+                      tab.mode === "diff"
+                        ? "preview-tab-kind diff"
+                        : "preview-tab-kind"
+                    }
+                  >
+                    {tab.mode === "diff" ? (
+                      <GitCompare size={11} />
+                    ) : (
+                      <TabFileIcon path={tab.path} />
+                    )}
+                  </span>
+                  <span className="preview-tab-name">
+                    {fileNameFromPath(tab.path)}
+                  </span>
+                  {isDirty ? (
+                    <span
+                      className="preview-tab-dirty"
+                      aria-label="Unsaved changes"
+                    />
+                  ) : null}
+                </button>
+                <button
+                  className={
+                    isDirty
+                      ? "preview-tab-close preview-tab-close-dirty"
+                      : "preview-tab-close"
+                  }
+                  aria-label={`Close ${tab.path}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onCloseTab(tab.id);
+                  }}
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            );
+          })
         ) : (
           <div className="preview-tab-placeholder">
             {selectedPath
@@ -139,6 +239,41 @@ export function PreviewTabBar({
         ) : null}
         {loading ? <Loader2 className="spin" size={15} /> : null}
       </div>
+      {contextMenu ? (
+        <TabContextMenu
+          left={contextMenu.left}
+          top={contextMenu.top}
+          onClose={() => {
+            onCloseTab(contextMenu.tab.id);
+            setContextMenu(null);
+          }}
+          onCloseOthers={() => {
+            onCloseOtherTabs(contextMenu.tab.id);
+            setContextMenu(null);
+          }}
+          onCloseAll={() => {
+            onCloseAllTabs();
+            setContextMenu(null);
+          }}
+          onCopyPath={() => handleCopyPath(contextMenu.tab)}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function TabFileIcon({ path }: { path: string }) {
+  const icon = useFileIcon(path);
+  return (
+    <svg
+      width={14}
+      height={14}
+      viewBox={icon.viewBox ?? "0 0 16 16"}
+      className="preview-tab-file-icon"
+      style={{ color: icon.color }}
+      aria-hidden="true"
+    >
+      <use href={`#${icon.name}`} />
+    </svg>
   );
 }

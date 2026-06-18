@@ -12,6 +12,7 @@ import { SettingsWindowApp } from "./components/SettingsWindowApp";
 import { prewarmFontFallbacks } from "./lib/fontFallbackPrewarm";
 import { installNativeWebviewBehavior } from "./lib/nativeWebviewBehavior";
 import { installMainWindowStatePersistence } from "./lib/nativeWindowState";
+import { preloadSettingsWindow } from "./lib/settingsWindow";
 import "./styles.css";
 
 const queryClient = new QueryClient();
@@ -67,4 +68,7 @@ function isSettingsWindowRoute(): boolean {
 installNativeWebviewBehavior();
 installMainWindowStatePersistence();
 prewarmFontFallbacks();
+if (!isSettingsWindowRoute()) {
+  void preloadSettingsWindow();
+}
 createRoot(rootElement()).render(<RootApp />);
