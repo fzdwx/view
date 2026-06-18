@@ -74,6 +74,7 @@ export function UiFontRow({
       <SettingsSelect
         ariaLabel="UI font"
         fallbackLabel="System default"
+        menuSize="large"
         options={fontOptions(fonts, loading, defaultUiFontFamily)}
         searchable={true}
         searchPlaceholder="Search fonts"
@@ -107,6 +108,7 @@ export function EditorFontRows({
         <SettingsSelect
           ariaLabel="Code font"
           fallbackLabel="System default"
+          menuSize="large"
           options={fontOptions(fonts, loading, defaultMonoFontFamily)}
           searchable={true}
           searchPlaceholder="Search fonts"

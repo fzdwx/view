@@ -1,11 +1,17 @@
 import {
   type ChangeEvent as ReactChangeEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+import {
+  buildLargeSelectMenuStyle,
+  type SettingsSelectMenuStyle,
+} from "./SettingsSelectPlacement";
 
 export interface SettingsSelectOption {
   readonly disabled?: boolean;
@@ -16,6 +22,7 @@ export interface SettingsSelectOption {
 interface SettingsSelectProps {
   readonly ariaLabel: string;
   readonly fallbackLabel?: string;
+  readonly menuSize?: "default" | "large";
   readonly options: readonly SettingsSelectOption[];
   readonly searchable?: boolean;
   readonly searchPlaceholder?: string;
@@ -26,6 +33,7 @@ interface SettingsSelectProps {
 export function SettingsSelect({
   ariaLabel,
   fallbackLabel,
+  menuSize = "default",
   options,
   searchable = false,
   searchPlaceholder = "Search",
@@ -33,6 +41,7 @@ export function SettingsSelect({
   onChange,
 }: SettingsSelectProps) {
   const [open, setOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<SettingsSelectMenuStyle>({});
   const [searchQuery, setSearchQuery] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -43,10 +52,19 @@ export function SettingsSelect({
     () => filterOptions(options, searchQuery),
     [options, searchQuery],
   );
+  const updateLargeMenuPlacement = useCallback(() => {
+    if (menuSize !== "large" || !open || triggerRef.current === null) {
+      setMenuStyle({});
+      return;
+    }
+
+    setMenuStyle(buildLargeSelectMenuStyle(triggerRef.current));
+  }, [menuSize, open]);
 
   useEffect(() => {
     if (!open) {
       setSearchQuery("");
+      setMenuStyle({});
       return;
     }
 
@@ -63,6 +81,23 @@ export function SettingsSelect({
     window.addEventListener("pointerdown", closeOnOutsidePointer);
     return () => window.removeEventListener("pointerdown", closeOnOutsidePointer);
   }, [open]);
+
+  useLayoutEffect(() => {
+    updateLargeMenuPlacement();
+  }, [updateLargeMenuPlacement, visibleOptions.length]);
+
+  useEffect(() => {
+    if (!open || menuSize !== "large") {
+      return;
+    }
+
+    window.addEventListener("resize", updateLargeMenuPlacement);
+    window.addEventListener("scroll", updateLargeMenuPlacement, true);
+    return () => {
+      window.removeEventListener("resize", updateLargeMenuPlacement);
+      window.removeEventListener("scroll", updateLargeMenuPlacement, true);
+    };
+  }, [menuSize, open, updateLargeMenuPlacement]);
 
   useEffect(() => {
     if (open && searchable) {
@@ -112,7 +147,14 @@ export function SettingsSelect({
   }
 
   return (
-    <div className="settings-select" ref={rootRef}>
+    <div
+      className={
+        menuSize === "large"
+          ? "settings-select settings-select-large"
+          : "settings-select"
+      }
+      ref={rootRef}
+    >
       <button
         ref={triggerRef}
         type="button"
@@ -127,7 +169,10 @@ export function SettingsSelect({
         <span className="settings-select-chevron" aria-hidden="true" />
       </button>
       {open ? (
-        <div className="settings-select-menu">
+        <div
+          className="settings-select-menu"
+          style={menuSize === "large" ? menuStyle : undefined}
+        >
           {searchable ? (
             <div className="settings-select-search">
               <input
