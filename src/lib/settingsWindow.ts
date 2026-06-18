@@ -1,4 +1,5 @@
 import { isTauriRuntime } from "./api";
+import { applyDisplayScale } from "./windowDpiScaling";
 
 const settingsWindowLabel = "settings";
 const settingsWindowUrl = "/?window=settings";
@@ -9,29 +10,13 @@ const settingsWindowHeight = 620;
 let preloadPromise: Promise<void> | null = null;
 
 export async function installSettingsWindowDpiScaling(): Promise<void> {
-  if (!isTauriRuntime()) {
-    return;
-  }
   try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    const scale = await invoke<number | null>("wsl_display_scale").catch(
-      () => null,
-    );
-    if (!scale || scale <= 1) {
-      return;
-    }
-    const { getCurrentWebviewWindow } = await import(
-      "@tauri-apps/api/webviewWindow"
-    );
-    const { LogicalSize } = await import("@tauri-apps/api/window");
-    const webview = getCurrentWebviewWindow();
-    await webview.setZoom(scale);
-    await webview.setSize(
-      new LogicalSize(
-        settingsWindowWidth * scale,
-        settingsWindowHeight * scale,
-      ),
-    );
+    await applyDisplayScale({
+      logicalSize: {
+        width: settingsWindowWidth,
+        height: settingsWindowHeight,
+      },
+    });
   } catch {
     // ignore zoom failures
   }

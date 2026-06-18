@@ -13,6 +13,7 @@ import { prewarmFontFallbacks } from "./lib/fontFallbackPrewarm";
 import { installNativeWebviewBehavior } from "./lib/nativeWebviewBehavior";
 import { installMainWindowStatePersistence } from "./lib/nativeWindowState";
 import { preloadSettingsWindow, installSettingsWindowDpiScaling } from "./lib/settingsWindow";
+import { applyDisplayScale } from "./lib/windowDpiScaling";
 import "./styles.css";
 
 const queryClient = new QueryClient();
@@ -72,5 +73,6 @@ if (isSettingsWindowRoute()) {
   void installSettingsWindowDpiScaling();
 } else {
   void preloadSettingsWindow();
+  void applyDisplayScale();
 }
 createRoot(rootElement()).render(<RootApp />);

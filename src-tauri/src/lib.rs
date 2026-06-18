@@ -3481,7 +3481,10 @@ pub fn run() {
         .setup(|app| {
             if let Some(scale) = wsl::display_scale_factor() {
                 if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.set_zoom(scale);
+                    // Zoom is applied from the frontend (applyDisplayScale) after
+                    // navigation, because WebKitGTK resets the webview zoom level on
+                    // page load. The window size still scales here since it is
+                    // independent of webview navigation.
                     let _ = window.set_size(LogicalSize::new(
                         1320.0 * scale,
                         840.0 * scale,
