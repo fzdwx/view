@@ -113,6 +113,7 @@ export function WorkbenchRailSlotStack({
             <CommitInspector
               commit={null}
               orientation={isBottomSlot ? "horizontal" : "vertical"}
+              showCommitForm
               branchName={selectedGitRefName(
                 gitPanelData.payload,
                 gitPanelData.selectedBranchRef,

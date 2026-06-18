@@ -16,6 +16,7 @@ export function CommitInspector({
   gitWriteActions,
   orientation = "vertical",
   selectedPath,
+  showCommitForm = false,
   onResizeDetails,
   onSelectPath,
 }: {
@@ -27,6 +28,7 @@ export function CommitInspector({
   gitWriteActions: GitWriteActions;
   orientation?: "vertical" | "horizontal";
   selectedPath: string | null;
+  showCommitForm?: boolean;
   onResizeDetails(delta: number): void;
   onSelectPath(path: string): void;
 }) {
@@ -64,6 +66,7 @@ export function CommitInspector({
         commit={commit}
         files={files}
         gitWriteActions={gitWriteActions}
+        showCommitForm={showCommitForm}
       />
     </aside>
   );
@@ -74,13 +77,19 @@ function CommitDetails({
   branchName,
   files,
   gitWriteActions,
+  showCommitForm,
 }: {
   commit: CommitInfo | null;
   branchName?: string;
   files: RepositoryPayload["files"];
   gitWriteActions: GitWriteActions;
+  showCommitForm: boolean;
 }) {
   if (!commit) {
+    if (!showCommitForm) {
+      return null;
+    }
+
     return (
       <section className="commit-details-section">
         <CommitForm
