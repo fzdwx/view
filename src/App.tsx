@@ -533,7 +533,6 @@ export function App() {
       commitFilter,
       commits,
       commitsLoading: commitsQuery.isLoading,
-      detailHeight: panelSizes.commitInfo,
       filteredCommits,
       gitFileActions: treeGitFileActions,
       gitWriteActions,
@@ -558,7 +557,6 @@ export function App() {
       filteredCommits,
       gitWriteActions,
       openDiffPreviewPath,
-      panelSizes.commitInfo,
       payload,
       performBranchAction,
       resizeCommitInfo,
@@ -707,6 +705,7 @@ export function App() {
                   gitPanelData={gitPanelData}
                   items={railLayout.left.top}
                   branchSize={panelSizes.branch}
+                  commitDetailSize={panelSizes.commitInfo}
                   detailsSize={panelSizes.details}
                   projectTreeContent={projectTreeContent}
                   side="left"
@@ -800,6 +799,7 @@ export function App() {
                   gitPanelData={gitPanelData}
                   items={railLayout.right.top}
                   branchSize={panelSizes.branch}
+                  commitDetailSize={panelSizes.commitInfo}
                   detailsSize={panelSizes.details}
                   projectTreeContent={projectTreeContent}
                   side="right"
@@ -833,6 +833,7 @@ export function App() {
                       gitPanelData={gitPanelData}
                       items={railLayout.left.bottom}
                       branchSize={panelSizes.branch}
+                      commitDetailSize={panelSizes.commitInfo}
                       detailsSize={panelSizes.details}
                       projectTreeContent={projectTreeContent}
                       side="left"
@@ -863,6 +864,7 @@ export function App() {
                       gitPanelData={gitPanelData}
                       items={railLayout.right.bottom}
                       branchSize={panelSizes.branch}
+                      commitDetailSize={panelSizes.commitInfo}
                       detailsSize={panelSizes.details}
                       projectTreeContent={projectTreeContent}
                       side="right"

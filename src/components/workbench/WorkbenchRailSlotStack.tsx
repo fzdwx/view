@@ -19,6 +19,7 @@ export interface WorkbenchRailSlotStackProps {
   readonly activeItem: RailItemId | null;
   readonly activeProjectPath: string | null;
   readonly branchSize: number;
+  readonly commitDetailSize: number;
   readonly detailsSize: number;
   readonly dockedGitPanelOrder: GitPanelId[];
   readonly draggedGitPanel: GitPanelId | null;
@@ -43,6 +44,7 @@ export function WorkbenchRailSlotStack({
   activeItem,
   activeProjectPath,
   branchSize,
+  commitDetailSize,
   detailsSize,
   dockedGitPanelOrder,
   draggedGitPanel,
@@ -88,6 +90,7 @@ export function WorkbenchRailSlotStack({
           >
             <GitPanels
               branchSize={branchSize}
+              commitDetailSize={commitDetailSize}
               data={gitPanelData}
               detailsSize={detailsSize}
               dockedPanelOrder={dockedGitPanelOrder}
@@ -118,7 +121,7 @@ export function WorkbenchRailSlotStack({
                 gitPanelData.payload,
                 gitPanelData.selectedBranchRef,
               )}
-              detailHeight={gitPanelData.detailHeight}
+              detailHeight={commitDetailSize}
               files={gitPanelData.payload?.files ?? []}
               gitFileActions={gitPanelData.gitFileActions}
               gitWriteActions={gitPanelData.gitWriteActions}

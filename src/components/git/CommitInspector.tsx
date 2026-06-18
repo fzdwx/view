@@ -1,11 +1,16 @@
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { GitBranch } from "lucide-react";
 import type { CommitInfo, RepositoryPayload } from "../../lib/api";
 import { formatDate } from "../../lib/dateFormat";
+import { clamp } from "../../lib/numeric";
 import { ResizeHandle } from "../ResizeHandle";
 import { TreePanel } from "../TreePanel";
 import type { TreeGitFileActions } from "../TreeContextMenu";
 import type { GitWriteActions } from "../../hooks/useGitWriteActions";
 import { CommitForm } from "./CommitForm";
+
+const minCommitDetailHeight = 110;
+const maxCommitDetailHeight = 360;
 
 export function CommitInspector({
   commit,
@@ -32,10 +37,43 @@ export function CommitInspector({
   onResizeDetails(delta: number): void;
   onSelectPath(path: string): void;
 }) {
+  const [draftDetailHeight, setDraftDetailHeight] = useState<number | null>(null);
   const isHorizontal = orientation === "horizontal";
-  const panelStyle = isHorizontal
-    ? { gridTemplateColumns: `minmax(0, 1fr) 6px ${detailHeight}px` }
-    : { gridTemplateRows: `minmax(0, 1fr) 6px ${detailHeight}px` };
+  const effectiveDetailHeight = draftDetailHeight ?? detailHeight;
+  const panelStyle = useMemo(
+    () =>
+      isHorizontal
+        ? { gridTemplateColumns: `minmax(0, 1fr) 6px ${effectiveDetailHeight}px` }
+        : { gridTemplateRows: `minmax(0, 1fr) 6px ${effectiveDetailHeight}px` },
+    [effectiveDetailHeight, isHorizontal],
+  );
+  const handleResizePreview = useCallback(
+    (delta: number) => {
+      setDraftDetailHeight((current) =>
+        clamp(
+          (current ?? detailHeight) + delta,
+          minCommitDetailHeight,
+          maxCommitDetailHeight,
+        ),
+      );
+    },
+    [detailHeight],
+  );
+  const handleResizeCommit = useCallback(
+    (totalDelta: number) => {
+      if (totalDelta === 0) {
+        return;
+      }
+
+      onResizeDetails(totalDelta);
+      setDraftDetailHeight(null);
+    },
+    [onResizeDetails],
+  );
+
+  useEffect(() => {
+    setDraftDetailHeight(null);
+  }, [detailHeight]);
 
   return (
     <aside
@@ -59,7 +97,8 @@ export function CommitInspector({
         axis={isHorizontal ? "x" : "y"}
         className="commit-info-splitter"
         label="Resize commit details"
-        onResize={onResizeDetails}
+        onResize={handleResizePreview}
+        onResizeEnd={handleResizeCommit}
       />
       <CommitDetails
         branchName={branchName}
@@ -72,7 +111,7 @@ export function CommitInspector({
   );
 }
 
-function CommitDetails({
+const CommitDetails = memo(function CommitDetails({
   commit,
   branchName,
   files,
@@ -126,4 +165,6 @@ function CommitDetails({
       </div>
     </section>
   );
-}
+});
+
+CommitDetails.displayName = "CommitDetails";

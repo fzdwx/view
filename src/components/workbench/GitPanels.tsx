@@ -27,7 +27,6 @@ export interface GitPanelDataProps {
   readonly commitFilter: string;
   readonly commits: CommitInfo[];
   readonly commitsLoading: boolean;
-  readonly detailHeight: number;
   readonly filteredCommits: CommitInfo[];
   readonly gitFileActions?: TreeGitFileActions;
   readonly gitWriteActions: GitWriteActions;
@@ -50,6 +49,7 @@ export interface GitPanelDataProps {
 
 export interface GitPanelsProps {
   readonly branchSize: number;
+  readonly commitDetailSize: number;
   readonly data: GitPanelDataProps;
   readonly detailsSize: number;
   readonly dockedPanelOrder: GitPanelId[];
@@ -64,6 +64,7 @@ export interface GitPanelsProps {
 
 export const GitPanels = memo(function GitPanels({
   branchSize,
+  commitDetailSize,
   data,
   detailsSize,
   dockedPanelOrder,
@@ -110,7 +111,11 @@ export const GitPanels = memo(function GitPanels({
             onDragEnd={onDragEnd}
             onDragStart={onDragStart}
           >
-            <GitPanelBody panelId={panelId} {...data} />
+            <GitPanelBody
+              commitDetailSize={commitDetailSize}
+              panelId={panelId}
+              {...data}
+            />
           </GitPanelSlot>
         </FragmentWithSplitter>
       ))}
@@ -125,7 +130,6 @@ export const GitPanelBody = memo(function GitPanelBody({
   commitFilter,
   commits,
   commitsLoading,
-  detailHeight,
   filteredCommits,
   gitFileActions,
   gitWriteActions,
@@ -142,7 +146,11 @@ export const GitPanelBody = memo(function GitPanelBody({
   onSelectBranch,
   onSelectCommit,
   onSelectWorkingTree,
-}: GitPanelDataProps & { readonly panelId: GitPanelId }): ReactNode {
+  commitDetailSize,
+}: GitPanelDataProps & {
+  readonly panelId: GitPanelId;
+  readonly commitDetailSize?: number;
+}): ReactNode {
   switch (panelId) {
     case "branches":
       return (
@@ -185,7 +193,7 @@ export const GitPanelBody = memo(function GitPanelBody({
           files={payload?.files ?? []}
           gitFileActions={gitFileActions}
           gitWriteActions={gitWriteActions}
-          detailHeight={detailHeight}
+          detailHeight={commitDetailSize ?? 154}
           selectedPath={selectedChangePath}
           onResizeDetails={onResizeCommitInfo}
           onSelectPath={onOpenDiffPath}

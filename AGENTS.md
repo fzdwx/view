@@ -64,6 +64,11 @@ editing, search, and an embedded terminal.
   hooks, pure helpers, and subcomponents before a file becomes hard to scan.
 - Keep render paths cheap. Use TanStack Virtual for large lists/trees and avoid
   synchronous full-file work on every keystroke.
+- Treat panel size and drag-preview state as layout state, not content state.
+  Resizing must not force heavy trees, commit lists, or diff content to
+  re-render every pointermove; pass layout sizes separately from large data
+  objects and prefer local draft size during drag with commit-on-release when
+  that keeps interactions responsive.
 - Query keys must include every identity that changes the fetched data.
 - When using `placeholderData: keepPreviousData`, validate the returned payload
   against the current project/path/commit/status before rendering it.
@@ -97,6 +102,10 @@ editing, search, and an embedded terminal.
   editor, settings, tree, and diff surfaces should feel like one application.
 - For icon buttons, use the existing icon library and provide accessible labels
   or titles when meaning is not obvious.
+- Resize interactions should feel as direct as the file tree splitter. If a
+  panel drag visibly lags behind the pointer, treat it as a bug and first check
+  whether layout updates are coupled to expensive content renders or
+  persistence.
 - After UI changes, drive the actual app surface and check scrolling, focus,
   keyboard shortcuts, resize handles, and dark-theme contrast.
 - `:root` sets `text-rendering: optimizeLegibility` which causes ligature

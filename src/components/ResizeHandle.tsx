@@ -8,11 +8,13 @@ export function ResizeHandle({
   className,
   label,
   onResize,
+  onResizeEnd,
 }: {
   axis: "x" | "y";
   className: string;
   label: string;
   onResize(delta: number): void;
+  onResizeEnd?(totalDelta: number): void;
 }) {
   function startResize(event: ReactPointerEvent<HTMLDivElement>) {
     event.preventDefault();
@@ -20,6 +22,7 @@ export function ResizeHandle({
     let lastPosition = axis === "x" ? event.clientX : event.clientY;
     let pendingDelta = 0;
     let resizeFrame: number | null = null;
+    let totalDelta = 0;
     document.body.classList.add(
       axis === "x" ? "is-resizing-x" : "is-resizing-y",
     );
@@ -53,6 +56,7 @@ export function ResizeHandle({
         return;
       }
 
+      totalDelta += delta;
       pendingDelta += delta;
       scheduleResizeFlush();
     }
@@ -63,6 +67,9 @@ export function ResizeHandle({
         resizeFrame = null;
       }
       flushPendingDelta();
+      if (totalDelta !== 0) {
+        onResizeEnd?.(totalDelta);
+      }
       document.body.classList.remove("is-resizing-x", "is-resizing-y");
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", stopResize);
@@ -79,15 +86,19 @@ export function ResizeHandle({
     if (axis === "x" && event.key === "ArrowLeft") {
       event.preventDefault();
       onResize(-step);
+      onResizeEnd?.(-step);
     } else if (axis === "x" && event.key === "ArrowRight") {
       event.preventDefault();
       onResize(step);
+      onResizeEnd?.(step);
     } else if (axis === "y" && event.key === "ArrowUp") {
       event.preventDefault();
       onResize(-step);
+      onResizeEnd?.(-step);
     } else if (axis === "y" && event.key === "ArrowDown") {
       event.preventDefault();
       onResize(step);
+      onResizeEnd?.(step);
     }
   }
 

@@ -8,6 +8,7 @@ import { ToolContentFrame } from "./ToolContentFrame";
 export interface WorkbenchToolPanelStackProps {
   readonly activeProjectPath: string | null;
   readonly activityView: ToolPanelId;
+  readonly commitDetailSize: number;
   readonly gitPanelContent: ReactNode;
   readonly gitPanelData: GitPanelDataProps;
   readonly projectTreeContent: ReactNode;
@@ -18,6 +19,7 @@ export interface WorkbenchToolPanelStackProps {
 export function WorkbenchToolPanelStack({
   activeProjectPath,
   activityView,
+  commitDetailSize,
   gitPanelContent,
   gitPanelData,
   projectTreeContent,
@@ -36,7 +38,11 @@ export function WorkbenchToolPanelStack({
               onDragStart={onDragStart}
             >
               <section className="detached-git-panel">
-                <GitPanelBody panelId={activityView} {...gitPanelData} />
+                <GitPanelBody
+                  commitDetailSize={commitDetailSize}
+                  panelId={activityView}
+                  {...gitPanelData}
+                />
               </section>
             </ToolContentFrame>
           )
