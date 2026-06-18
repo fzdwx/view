@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import type { SystemFont } from "../../lib/api";
 import {
   type AppSettings,
@@ -21,46 +20,6 @@ const fontSizeMax = 22;
 const lineHeightMin = 1.2;
 const lineHeightMax = 2;
 const lineHeightStep = 0.05;
-
-export function SettingsGroup({
-  children,
-  description,
-  title,
-}: {
-  readonly children: ReactNode;
-  readonly description?: string;
-  readonly title: string;
-}) {
-  return (
-    <section className="settings-group">
-      <div className="settings-group-heading">
-        <h2>{title}</h2>
-        {description ? <p>{description}</p> : null}
-      </div>
-      <div className="settings-group-body">{children}</div>
-    </section>
-  );
-}
-
-export function SettingRow({
-  children,
-  description,
-  label,
-}: {
-  readonly children: ReactNode;
-  readonly description: string;
-  readonly label: string;
-}) {
-  return (
-    <div className="settings-row">
-      <span>
-        <strong>{label}</strong>
-        <small>{description}</small>
-      </span>
-      {children}
-    </div>
-  );
-}
 
 export function UiFontCard({
   fonts,

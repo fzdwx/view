@@ -1,6 +1,7 @@
 import { type KeyboardEvent as ReactKeyboardEvent, useState } from "react";
 import { Keyboard } from "lucide-react";
 import type { ShortcutAction } from "../../lib/settings";
+import { ShortcutKeys } from "./ShortcutKeys";
 
 interface ShortcutRecorderProps {
   readonly value: string;
@@ -52,7 +53,11 @@ export function ShortcutRecorder({ value, conflict, onChange }: ShortcutRecorder
       onKeyDown={handleKeyDown}
     >
       <Keyboard size={12} />
-      <span>{recording ? "Press keys..." : value}</span>
+      {recording ? (
+        <span className="shortcut-recorder-hint">Press keys...</span>
+      ) : (
+        <ShortcutKeys shortcut={value} />
+      )}
     </button>
   );
 }

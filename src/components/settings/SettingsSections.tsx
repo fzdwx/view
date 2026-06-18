@@ -2,13 +2,13 @@ import { useMemo } from "react";
 import type { SystemFont } from "../../lib/api";
 import {
   type AppSettings,
+  type ShortcutAction,
+  type ShortcutRow,
   shortcutRows,
 } from "../../lib/settings";
 import { ShortcutRecorder, type ShortcutChangeHandler } from "./ShortcutRecorder";
 import {
   CodeFontCard,
-  SettingRow,
-  SettingsGroup,
   UiFontCard,
 } from "./SettingsRows";
 import type { SettingsSectionId } from "./types";
@@ -81,6 +81,13 @@ function FontSettings({
   );
 }
 
+const shortcutGroups: readonly { readonly title: string; readonly actions: readonly ShortcutAction[] }[] = [
+  { title: "Navigation", actions: ["commandPanel", "switchProject"] },
+  { title: "File & editor", actions: ["saveFile", "closeTab", "nextTab", "prevTab", "jumpToDiffFile"] },
+  { title: "Git", actions: ["pullCurrentBranch", "openGitLog", "openTerminal"] },
+  { title: "Search", actions: ["findFiles", "findInFiles"] },
+];
+
 function ShortcutSettings({
   settings,
   onChange,
@@ -88,7 +95,7 @@ function ShortcutSettings({
   readonly settings: AppSettings;
   readonly onChange: ShortcutChangeHandler;
 }) {
-  const conflictMap = useMemo(() => {
+  const { conflictMap, conflictCount } = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const row of shortcutRows) {
       const shortcut = settings.shortcuts[row.action];
@@ -96,28 +103,61 @@ function ShortcutSettings({
       counts[shortcut] = (counts[shortcut] ?? 0) + 1;
     }
     const conflicts: Record<string, boolean> = {};
+    let conflictCount = 0;
     for (const row of shortcutRows) {
       const shortcut = settings.shortcuts[row.action];
-      conflicts[row.action] = Boolean(shortcut) && (counts[shortcut] ?? 0) > 1;
+      const conflicted = Boolean(shortcut) && (counts[shortcut] ?? 0) > 1;
+      conflicts[row.action] = conflicted;
+      if (conflicted) {
+        conflictCount += 1;
+      }
     }
-    return conflicts;
+    return { conflictMap: conflicts, conflictCount };
   }, [settings.shortcuts]);
 
+  const rowsByAction = useMemo(() => {
+    const map: Record<string, ShortcutRow> = {};
+    for (const row of shortcutRows) {
+      map[row.action] = row;
+    }
+    return map;
+  }, []);
+
   return (
-    <SettingsGroup title="Keyboard">
-      {shortcutRows.map((row) => (
-        <SettingRow
-          key={row.action}
-          description={row.description}
-          label={row.label}
-        >
-          <ShortcutRecorder
-            value={settings.shortcuts[row.action]}
-            conflict={conflictMap[row.action] ?? false}
-            onChange={(shortcut) => onChange(row.action, shortcut)}
-          />
-        </SettingRow>
+    <div className="shortcut-groups">
+      {conflictCount > 0 ? (
+        <p className="shortcut-conflict-banner">
+          {conflictCount} shortcut{conflictCount > 1 ? "s" : ""} conflict with another action.
+        </p>
+      ) : null}
+      {shortcutGroups.map((group) => (
+        <section className="font-card shortcut-card" key={group.title}>
+          <header className="font-card-heading">
+            <h3>{group.title}</h3>
+          </header>
+          <div className="shortcut-rows">
+            {group.actions.map((action) => {
+              const row = rowsByAction[action];
+              if (!row) {
+                return null;
+              }
+              return (
+                <div className="shortcut-row" key={action}>
+                  <span className="shortcut-row-label">
+                    <strong>{row.label}</strong>
+                    <small>{row.description}</small>
+                  </span>
+                  <ShortcutRecorder
+                    value={settings.shortcuts[action]}
+                    conflict={conflictMap[action] ?? false}
+                    onChange={(shortcut) => onChange(action, shortcut)}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </section>
       ))}
-    </SettingsGroup>
+    </div>
   );
 }
