@@ -1,37 +1,51 @@
-import { FolderTree } from "lucide-react";
-import type { TreeDock } from "../lib/workbenchTypes";
+import type {
+  RailItemId,
+  RailLayout,
+} from "../lib/workbenchTypes";
+import { RailSlotList } from "./RailSlots";
 
 export interface ProjectSideRailProps {
-  readonly treeDock: TreeDock;
+  readonly draggedRailItem: RailItemId | null;
   readonly hasActiveProject: boolean;
-  readonly treeVisible: boolean;
-  readonly onToggleTreeVisible: () => void;
+  readonly isActiveItem: (item: RailItemId) => boolean;
+  readonly railLayout: RailLayout;
+  readonly onDropRailItem: (item: RailItemId, slot: "top" | "bottom") => void;
+  readonly onSelectRailItem: (item: RailItemId) => void;
+  readonly onStartRailItemDrag: (item: RailItemId) => void;
 }
 
 export function ProjectSideRail({
-  treeDock,
+  draggedRailItem,
   hasActiveProject,
-  treeVisible,
-  onToggleTreeVisible,
+  isActiveItem,
+  railLayout,
+  onDropRailItem,
+  onSelectRailItem,
+  onStartRailItemDrag,
 }: ProjectSideRailProps) {
   return (
-    <aside className="project-rail project-side-rail" aria-label="File tree">
-      {treeDock === "right" ? (
-        <button
-          className={
-            treeVisible
-              ? "activity-button rail-project-button active"
-              : "activity-button rail-project-button"
-          }
-          aria-pressed={treeVisible}
-          aria-label={treeVisible ? "Hide file tree" : "Show file tree"}
-          title={treeVisible ? "Hide file tree" : "Show file tree"}
-          disabled={!hasActiveProject}
-          onClick={onToggleTreeVisible}
-        >
-          <FolderTree size={18} />
-        </button>
-      ) : null}
+    <aside className="project-rail project-side-rail" aria-label="Tools">
+      <RailSlotList
+        draggedRailItem={draggedRailItem}
+        isActiveItem={isActiveItem}
+        items={railLayout.right.top}
+        slot="top"
+        disabled={!hasActiveProject}
+        onSelectRailItem={onSelectRailItem}
+        onStartRailItemDrag={onStartRailItemDrag}
+        onDropRailItem={onDropRailItem}
+      />
+      <div className="rail-spacer" />
+      <RailSlotList
+        draggedRailItem={draggedRailItem}
+        isActiveItem={isActiveItem}
+        items={railLayout.right.bottom}
+        slot="bottom"
+        disabled={!hasActiveProject}
+        onSelectRailItem={onSelectRailItem}
+        onStartRailItemDrag={onStartRailItemDrag}
+        onDropRailItem={onDropRailItem}
+      />
     </aside>
   );
 }

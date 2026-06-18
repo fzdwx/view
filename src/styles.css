@@ -126,6 +126,7 @@ textarea,
 }
 
 .app-shell {
+  position: relative;
   display: grid;
   height: 100%;
   min-height: 0;
@@ -282,6 +283,28 @@ textarea,
 
 .rail-spacer {
   flex: 1 1 auto;
+}
+
+.rail-slot {
+  display: flex;
+  min-width: 0;
+  gap: 8px;
+}
+
+.rail-slot-top {
+  flex-direction: column;
+  align-items: center;
+}
+
+.rail-slot-bottom {
+  flex-direction: column;
+  align-items: center;
+}
+
+.rail-slot.drop-target {
+  border-radius: 6px;
+  outline: 1px dashed color-mix(in oklch, var(--accent-strong) 60%, transparent);
+  outline-offset: 2px;
 }
 
 .project-switcher-anchor {
@@ -4751,4 +4774,49 @@ body.is-resizing-y * {
 .binary-diff-label {
   color: var(--faint);
   font-size: 11px;
+}
+
+.rail-dock-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) 96px;
+  gap: 12px;
+  padding: 12px;
+  background: rgb(0 0 0 / 0.22);
+  pointer-events: none;
+}
+
+.rail-dock-side {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.rail-dock-center {
+  pointer-events: none;
+}
+
+.rail-dock-drop {
+  display: grid;
+  place-items: center;
+  border: 1px dashed color-mix(in oklch, var(--accent-strong) 60%, transparent);
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--surface-2) 60%, transparent);
+  color: var(--accent-strong);
+  font-size: 11px;
+  pointer-events: auto;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.rail-dock-drop:hover,
+.rail-dock-drop.active {
+  border-color: var(--accent-strong);
+  background: color-mix(in oklch, var(--accent) 22%, var(--surface-2));
+}
+
+.rail-dock-drop-label {
+  font-family: var(--mono);
+  opacity: 0.8;
 }

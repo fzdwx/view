@@ -3,9 +3,12 @@ import { isGitPanelId } from "./workbenchGrid";
 import {
   defaultGitPanelOrder,
   defaultPanelSizes,
+  defaultRailLayout,
   defaultWorkbenchLayout,
   type GitPanelId,
   type PanelSizes,
+  type RailItemId,
+  type RailLayout,
   type ToolDock,
   type ToolPanelId,
   type TreeDock,
@@ -67,6 +70,7 @@ function normalizeWorkbenchLayout(value: unknown): WorkbenchLayout {
     projectInToolDock,
     gitPanelOrder: normalizeGitPanelOrder(record.gitPanelOrder),
     detachedGitPanels,
+    railLayout: normalizeRailLayout(record.railLayout),
     panelSizes: normalizePanelSizes(record.panelSizes),
   };
 }
@@ -87,6 +91,57 @@ function normalizeActivityView(
   }
 
   return value;
+}
+
+function normalizeRailLayout(value: unknown): RailLayout {
+  const record = isRecord(value) ? value : {};
+  const left = normalizeRailSide(record.left);
+  const right = normalizeRailSide(record.right);
+  const seen = new Set<RailItemId>();
+  for (const item of [...left.top, ...left.bottom, ...right.top, ...right.bottom]) {
+    seen.add(item);
+  }
+  // Backfill any missing item into the left top slot to keep them reachable.
+  for (const item of defaultRailLayout.left.top) {
+    if (!seen.has(item)) {
+      left.top = [...left.top, item];
+      seen.add(item);
+    }
+  }
+  for (const item of defaultRailLayout.left.bottom) {
+    if (!seen.has(item)) {
+      left.bottom = [...left.bottom, item];
+      seen.add(item);
+    }
+  }
+  return { left, right };
+}
+
+function normalizeRailSide(value: unknown): { top: RailItemId[]; bottom: RailItemId[] } {
+  const record = isRecord(value) ? value : {};
+  return {
+    top: normalizeRailItems(record.top),
+    bottom: normalizeRailItems(record.bottom),
+  };
+}
+
+function normalizeRailItems(value: unknown): RailItemId[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set<RailItemId>();
+  const items: RailItemId[] = [];
+  for (const item of value) {
+    if (isRailItemId(item) && !seen.has(item)) {
+      seen.add(item);
+      items.push(item);
+    }
+  }
+  return items;
+}
+
+function isRailItemId(value: unknown): value is RailItemId {
+  return value === "fileTree" || value === "git" || value === "terminal";
 }
 
 function normalizeGitPanelOrder(value: unknown): GitPanelId[] {

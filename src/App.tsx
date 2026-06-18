@@ -8,6 +8,7 @@ import { CommandPanel } from "./components/CommandPanel";
 import { DiffPanel } from "./components/DiffPanel";
 import { PreviewTabBar } from "./components/PreviewTabBar";
 import { ProjectRail } from "./components/ProjectRail";
+import { RailDockOverlay } from "./components/RailDockOverlay";
 import { ProjectSideRail } from "./components/ProjectSideRail";
 import { ProjectTreeTitle } from "./components/ProjectTreeTitle";
 import { PullChoiceDialog } from "./components/PullChoiceDialog";
@@ -53,6 +54,7 @@ import { projectRootFromPayload } from "./lib/repositoryPayload";
 import {
   buildContentGridStyle,
 } from "./lib/workbenchLayout";
+import type { RailItemId } from "./lib/workbenchTypes";
 
 export function App() {
   const queryClient = useQueryClient();
@@ -78,6 +80,8 @@ export function App() {
     gitPanelOrder,
     panelSizes,
     projectInToolDock,
+    railLayout,
+    draggedRailItem,
     toolDock,
     toolPanelCollapsed,
     treeDock,
@@ -86,12 +90,14 @@ export function App() {
     dockEditorPanel,
     dockProjectPanel,
     dockToolPanel,
+    dropRailItem,
     endToolPanelDrag,
     moveGitPanel,
     reattachGitPanel,
     resizePanel,
     selectToolPanelView,
     startGitPanelDrag,
+    startRailItemDrag,
     startToolPanelDrag,
     startTreePanelDrag,
     toggleLeftRailTree,
@@ -576,7 +582,41 @@ export function App() {
       : []),
     ...gitToolPanels.filter((panel) => detachedGitPanels.includes(panel.id)),
   ];
-  const hasRightRail = treeDock === "right";
+  const hasRightRail =
+    railLayout.right.top.length > 0 || railLayout.right.bottom.length > 0;
+
+  const isRailItemActive = useCallback(
+    (side: "left" | "right") => (item: RailItemId) => {
+      if (item === "git") {
+        return activityView === "git";
+      }
+      if (item === "terminal") {
+        return activityView === "terminal";
+      }
+      return treeDock === side && treeVisible;
+    },
+    [activityView, treeDock, treeVisible],
+  );
+
+  const handleSelectRailItem = useCallback(
+    (side: "left" | "right") => (item: RailItemId) => {
+      if (item === "git") {
+        selectToolPanelView("git");
+        return;
+      }
+      if (item === "terminal") {
+        selectToolPanelView("terminal");
+        return;
+      }
+      if (side === "left") {
+        toggleLeftRailTree();
+        return;
+      }
+      toggleSideRailTree();
+    },
+    [selectToolPanelView, toggleLeftRailTree, toggleSideRailTree],
+  );
+
   const shellStyle = {
     ...appShellStyle,
     gridTemplateColumns: hasRightRail
@@ -614,20 +654,20 @@ export function App() {
       <ProjectRail
         activeProjectId={activeProjectId}
         activeProjectName={activeProject?.name ?? null}
-        activityView={activityView}
+        draggedRailItem={draggedRailItem}
         hasActiveProject={Boolean(activeProject)}
+        isActiveItem={isRailItemActive("left")}
         projectSwitcherOpen={projectSwitcherOpen}
         projects={projects}
-        treeDock={treeDock}
-        treeDocked={projectInToolDock}
-        treeVisible={treeVisible}
+        railLayout={railLayout}
         onChooseRepository={chooseRepository}
         onCloseProjectSwitcher={closeProjectSwitcher}
         onRemoveProject={removeProject}
         onSelectProject={selectProject}
-        onSelectToolPanelView={selectToolPanelView}
+        onDropRailItem={(item, slot) => dropRailItem(item, "left", slot)}
+        onSelectRailItem={handleSelectRailItem("left")}
+        onStartRailItemDrag={startRailItemDrag}
         onToggleProjectSwitcher={toggleProjectSwitcher}
-        onToggleLeftRailTree={toggleLeftRailTree}
       />
 
       {pullChoiceOpen ? (
@@ -821,10 +861,19 @@ export function App() {
       </section>
       {hasRightRail ? (
         <ProjectSideRail
-          treeDock={treeDock}
+          draggedRailItem={draggedRailItem}
           hasActiveProject={Boolean(activeProject)}
-          treeVisible={treeVisible}
-          onToggleTreeVisible={toggleSideRailTree}
+          isActiveItem={isRailItemActive("right")}
+          railLayout={railLayout}
+          onDropRailItem={(item, slot) => dropRailItem(item, "right", slot)}
+          onSelectRailItem={handleSelectRailItem("right")}
+          onStartRailItemDrag={startRailItemDrag}
+        />
+      ) : null}
+      {draggedRailItem ? (
+        <RailDockOverlay
+          draggedRailItem={draggedRailItem}
+          onDropRailItem={dropRailItem}
         />
       ) : null}
       <CommandPanel

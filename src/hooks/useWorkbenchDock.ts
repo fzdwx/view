@@ -10,6 +10,10 @@ import type {
   GitPanelId,
   PanelSizes,
   ProjectDock,
+  RailItemId,
+  RailLayout,
+  RailSide,
+  RailSlot,
   TreeDock,
   ToolDock,
   ToolPanelId,
@@ -37,7 +41,11 @@ export interface WorkbenchDockController {
   readonly moveGitPanel: (panel: GitPanelId, targetPanel: GitPanelId) => void;
   readonly toggleLeftRailTree: () => void;
   readonly toggleTreeVisible: () => void;
+  readonly railLayout: RailLayout;
+  readonly draggedRailItem: RailItemId | null;
   readonly toggleSideRailTree: () => void;
+  readonly startRailItemDrag: (item: RailItemId) => void;
+  readonly dropRailItem: (item: RailItemId, side: RailSide, slot: RailSlot) => void;
   readonly reattachGitPanel: (panel: GitPanelId) => void;
   readonly resizePanel: (
     key: keyof PanelSizes,
@@ -79,12 +87,17 @@ export function useWorkbenchDock(): WorkbenchDockController {
   const [panelSizes, setPanelSizes] = useState<PanelSizes>(
     initialLayout.panelSizes,
   );
+  const [railLayout, setRailLayout] = useState<RailLayout>(
+    initialLayout.railLayout,
+  );
+  const [draggedRailItem, setDraggedRailItem] = useState<RailItemId | null>(null);
 
   const clearDockDrag = useCallback(() => {
     setDraggedToolPanel(null);
     setDraggedGitPanel(null);
     setDraggingTreePanel(false);
     setDraggingEditorPanel(false);
+    setDraggedRailItem(null);
   }, []);
 
   useEffect(() => {
@@ -96,6 +109,7 @@ export function useWorkbenchDock(): WorkbenchDockController {
       projectInToolDock,
       gitPanelOrder,
       detachedGitPanels,
+      railLayout,
       panelSizes,
     });
   }, [
@@ -104,10 +118,10 @@ export function useWorkbenchDock(): WorkbenchDockController {
     gitPanelOrder,
     panelSizes,
     projectInToolDock,
+    railLayout,
     treeVisible,
     toolDock,
     treeDock,
-    treeVisible,
   ]);
 
   useEffect(() => {
@@ -267,6 +281,36 @@ export function useWorkbenchDock(): WorkbenchDockController {
     [activityView, clearDockDrag],
   );
 
+  const startRailItemDrag = useCallback((item: RailItemId) => {
+    // Defer setting drag state until after dragstart completes; rendering the
+    // dock overlay synchronously during dragstart cancels the native drag.
+    window.requestAnimationFrame(() => {
+      setDraggedRailItem(item);
+    });
+  }, []);
+
+  const dropRailItem = useCallback(
+    (item: RailItemId, side: RailSide, slot: RailSlot) => {
+      setRailLayout((current) => {
+        const next: RailLayout = {
+          left: { top: [...current.left.top], bottom: [...current.left.bottom] },
+          right: { top: [...current.right.top], bottom: [...current.right.bottom] },
+        };
+        for (const railSide of ["left", "right"] as const) {
+          for (const railSlot of ["top", "bottom"] as const) {
+            next[railSide][railSlot] = next[railSide][railSlot].filter(
+              (existing) => existing !== item,
+            );
+          }
+        }
+        next[side][slot] = [...next[side][slot], item];
+        return next;
+      });
+      setDraggedRailItem(null);
+    },
+    [],
+  );
+
   const startTreePanelDrag = useCallback(() => {
     setDraggingTreePanel(true);
   }, []);
@@ -289,6 +333,10 @@ export function useWorkbenchDock(): WorkbenchDockController {
     toolDock,
     toolPanelCollapsed,
     treeDock,
+    railLayout,
+    draggedRailItem,
+    startRailItemDrag,
+    dropRailItem,
     clearDockDrag,
     dockEditorPanel,
     dockProjectPanel,

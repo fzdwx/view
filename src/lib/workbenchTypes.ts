@@ -3,6 +3,20 @@ export type TreeDock = "left" | "right";
 export type ProjectDock = TreeDock | "panel";
 export type EditorDock = "left" | "right";
 export type GitPanelId = "branches" | "history" | "details";
+
+export type RailItemId = "fileTree" | "git" | "terminal";
+
+export type RailSide = "left" | "right";
+
+export type RailSlot = "top" | "bottom";
+
+export interface RailPlacement {
+  readonly side: RailSide;
+  readonly slot: RailSlot;
+}
+
+export type RailLayout = Record<RailSide, { top: RailItemId[]; bottom: RailItemId[] }>;
+
 export type ToolPanelId = "project" | "git" | "terminal" | GitPanelId;
 
 export interface PanelSizes {
@@ -23,6 +37,7 @@ export interface WorkbenchLayout {
   projectInToolDock: boolean;
   gitPanelOrder: GitPanelId[];
   detachedGitPanels: GitPanelId[];
+  railLayout: RailLayout;
   panelSizes: PanelSizes;
 }
 
@@ -42,6 +57,11 @@ export const defaultPanelSizes: PanelSizes = {
   sideDock: 420,
 };
 
+export const defaultRailLayout: RailLayout = {
+  left: { top: ["fileTree"], bottom: ["git", "terminal"] },
+  right: { top: [], bottom: [] },
+};
+
 export const defaultWorkbenchLayout: WorkbenchLayout = {
   activityView: "git",
   toolDock: "bottom",
@@ -50,5 +70,6 @@ export const defaultWorkbenchLayout: WorkbenchLayout = {
   projectInToolDock: false,
   gitPanelOrder: defaultGitPanelOrder,
   detachedGitPanels: [],
+  railLayout: defaultRailLayout,
   panelSizes: defaultPanelSizes,
 };
