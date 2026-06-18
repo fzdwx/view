@@ -2071,6 +2071,23 @@ body.is-resizing-y * {
   text-align: right;
 }
 
+.command-result-line-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-result-context-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+  font-size: 10px;
+  text-align: right;
+}
+
 .command-result-context {
   display: flex;
   flex-direction: column;

@@ -186,7 +186,9 @@ export function CommandPanel({
                             <span className="command-result-line-number">
                               {result.lineNumber}
                             </span>
-                            {highlightRanges(result.lineText ?? "", result.matchRanges)}
+                            <span className="command-result-line-text">
+                              {highlightRanges(result.lineText ?? "", result.matchRanges)}
+                            </span>
                           </small>
                           {result.contextAfter.map((line, i) => (
                             <small
