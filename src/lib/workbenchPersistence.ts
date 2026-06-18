@@ -159,6 +159,11 @@ function normalizeRailActiveItem(
   if (isRailItemId(value) && items.includes(value)) {
     return value;
   }
+  // An explicit null means the slot was collapsed; preserve it instead of
+  // auto-selecting the first item and reopening the panel on reload.
+  if (value === null) {
+    return null;
+  }
   if (fallback && items.includes(fallback)) {
     return fallback;
   }
