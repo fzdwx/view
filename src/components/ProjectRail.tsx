@@ -2,7 +2,6 @@ import {
   FolderOpen,
   FolderTree,
   GitBranch,
-  GitPullRequestArrow,
   Settings as SettingsIcon,
   TerminalSquare,
 } from "lucide-react";
@@ -50,12 +49,6 @@ export function ProjectRail({
 }: ProjectRailProps) {
   return (
     <aside className="project-rail" aria-label="Projects">
-      <div className="brand-row">
-        <div className="brand-mark">
-          <GitPullRequestArrow size={18} />
-        </div>
-      </div>
-
       <div className="project-switcher-anchor">
         <button
           className={

@@ -39,6 +39,7 @@ export function ProjectFileTreePanel({
         <TreePanel
           files={files}
           selectedPath={selectedPath}
+          showHeader={false}
           title={title}
           emptyTitle={emptyTitle}
           emptyCopy={emptyCopy}

@@ -127,10 +127,11 @@ textarea,
 
 .app-shell {
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   background: var(--surface-0);
+  grid-template-columns: 48px minmax(0, 1fr);
+  grid-template-rows: 35px minmax(0, 1fr);
 }
 
 .window-controls {
@@ -167,6 +168,7 @@ textarea,
 .project-rail {
   position: relative;
   z-index: 24;
+  grid-row: 2;
   grid-column: 1;
   display: flex;
   min-width: 0;
@@ -175,14 +177,14 @@ textarea,
   gap: 8px;
   border-right: 1px solid var(--line);
   background: var(--surface-sidebar);
-  padding: 12px 7px 10px;
+  padding: 12px 6px 10px;
 }
 
 .project-side-rail {
+  grid-row: 2;
   grid-column: 3;
   border-right: 0;
   border-left: 1px solid var(--line);
-  padding-top: 50px;
 }
 
 .activity-button {
@@ -262,9 +264,20 @@ textarea,
 }
 
 .brand-mark {
-  width: 30px;
-  height: 30px;
-  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.brand-mark-icon {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
 }
 
 .rail-spacer {
@@ -881,7 +894,7 @@ textarea,
 }
 
 .rail-project-button {
-  width: 36px;
+  width: 32px;
   height: 28px;
   color: var(--muted);
 }
@@ -1248,6 +1261,7 @@ textarea,
 }
 
 .workspace {
+  grid-row: 2;
   grid-column: 2;
   display: grid;
   min-width: 0;
@@ -1744,7 +1758,7 @@ kbd {
 .diff-panel {
   grid-area: diff;
   display: grid;
-  grid-template-rows: 35px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   border-right: 0;
   background: var(--surface-workspace);
   overflow: hidden;
@@ -1877,9 +1891,11 @@ body.is-resizing-y * {
 }
 
 .preview-tabbar {
+  grid-row: 1;
+  grid-column: 1 / -1;
   display: grid;
   min-width: 0;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: stretch;
   border-bottom: 1px solid var(--line);
   background: var(--surface-0);
@@ -2067,6 +2083,18 @@ body.is-resizing-y * {
   gap: 8px;
   border-left: 1px solid var(--line);
   padding: 0 10px;
+}
+
+.preview-tabbar-path {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 360px;
+  align-items: center;
+  gap: 7px;
+  border-right: 1px solid var(--line);
+  padding: 0 12px;
+  font-family: var(--mono);
+  font-size: 11px;
 }
 
 .editor-dock-handle {
@@ -4518,7 +4546,7 @@ body.is-resizing-y * {
 
 @media (max-width: 1080px) {
   .app-shell {
-    grid-template-columns: 56px minmax(0, 1fr);
+    grid-template-columns: 48px minmax(0, 1fr);
   }
 
   .content-grid {

@@ -580,12 +580,37 @@ export function App() {
   const shellStyle = {
     ...appShellStyle,
     gridTemplateColumns: hasRightRail
-      ? "56px minmax(0, 1fr) 56px"
-      : "56px minmax(0, 1fr)",
+      ? "48px minmax(0, 1fr) 48px"
+      : "48px minmax(0, 1fr)",
+    gridTemplateRows: "35px minmax(0, 1fr)",
   };
 
   return (
     <main className="app-shell" style={shellStyle}>
+      {activeProject ? (
+        <PreviewTabBar
+          activeTabId={activePreviewTabId}
+          diffStats={diffStats}
+          loading={
+            repositoryQuery.isFetching ||
+            fileDiffQuery.isFetching ||
+            fileWorktreeDiffQuery.isFetching ||
+            fileContentQuery.isFetching
+          }
+          onCloseTab={closePreviewTab}
+          onCloseOtherTabs={closeOtherTabs}
+          onCloseAllTabs={closeAllTabs}
+          onReorderTabs={reorderPreviewTabs}
+          onSelectTab={activatePreviewTab}
+          previewMode={previewMode}
+          projectPath={activeProject.activePath}
+          selectedPath={
+            previewMode === "diff" ? selectedChangePath : selectedProjectPath
+          }
+          tabs={previewTabs}
+          dirtyTabIds={dirtyPreviewTabIds}
+        />
+      ) : null}
       <ProjectRail
         activeProjectId={activeProjectId}
         activeProjectName={activeProject?.name ?? null}
@@ -670,27 +695,6 @@ export function App() {
             ) : null}
 
             <section className="diff-panel">
-              <PreviewTabBar
-                activeTabId={activePreviewTabId}
-                diffStats={diffStats}
-                loading={
-                  repositoryQuery.isFetching ||
-                  fileDiffQuery.isFetching ||
-                  fileWorktreeDiffQuery.isFetching ||
-                  fileContentQuery.isFetching
-                }
-                onCloseTab={closePreviewTab}
-                onCloseOtherTabs={closeOtherTabs}
-                onCloseAllTabs={closeAllTabs}
-                onReorderTabs={reorderPreviewTabs}
-                onSelectTab={activatePreviewTab}
-                previewMode={previewMode}
-                selectedPath={
-                  previewMode === "diff" ? selectedChangePath : selectedProjectPath
-                }
-                tabs={previewTabs}
-                dirtyTabIds={dirtyPreviewTabIds}
-              />
               {previewMode === "file" ? (
                 <FilePreview
                   draft={activeEditorDraft}

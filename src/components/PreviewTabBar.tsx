@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GitCompare, Loader2, X } from "lucide-react";
+import appIcon from "../assets/icon.svg";
 import { fileNameFromPath } from "../lib/pathLabels";
 import { useFileIcon } from "../lib/fileIcons";
 import type { PreviewMode, PreviewTab } from "../lib/previewTabs";
+import { ProjectTreeTitle } from "./ProjectTreeTitle";
 import { TabContextMenu } from "./TabContextMenu";
 import { WindowControls } from "./WindowControls";
 
@@ -17,6 +19,7 @@ export function PreviewTabBar({
   onReorderTabs,
   onSelectTab,
   previewMode,
+  projectPath,
   selectedPath,
   tabs,
 }: {
@@ -30,6 +33,7 @@ export function PreviewTabBar({
   onReorderTabs(fromId: string, toId: string): void;
   onSelectTab(tab: PreviewTab): void;
   previewMode: PreviewMode;
+  projectPath: string | null;
   selectedPath: string | null;
   tabs: PreviewTab[];
 }) {
@@ -126,6 +130,14 @@ export function PreviewTabBar({
 
   return (
     <div className="preview-tabbar" data-tauri-drag-region>
+      {projectPath ? (
+        <div className="preview-tabbar-path" data-tauri-drag-region>
+          <span className="brand-mark">
+            <img className="brand-mark-icon" src={appIcon} alt="" draggable={false} />
+          </span>
+          <ProjectTreeTitle path={projectPath} />
+        </div>
+      ) : null}
       <div
         ref={scrollRef}
         className={scrollClassName}

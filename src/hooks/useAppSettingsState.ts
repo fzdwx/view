@@ -38,7 +38,7 @@ export function useAppSettingsState(): AppSettingsState {
 
   const appShellStyle = useMemo<AppShellStyle>(
     () => ({
-      gridTemplateColumns: "56px minmax(0, 1fr)",
+      gridTemplateColumns: "48px minmax(0, 1fr)",
       "--app-font-family": appFontCss(appSettings),
       "--mono": monoFontCss(appSettings),
       "--editor-font-size": `${appSettings.fontSize}px`,
