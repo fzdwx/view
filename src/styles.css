@@ -2154,6 +2154,9 @@ body.is-resizing-y * {
   overflow-x: hidden;
   overflow-y: auto;
   background: var(--surface-0);
+  text-rendering: auto;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
 }
 
 .commit-list-spacer {
@@ -2637,6 +2640,9 @@ body.is-resizing-y * {
   min-width: 0;
   overflow: visible;
   padding: 14px 15px 16px;
+  text-rendering: auto;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
 }
 
 .commit-detail-heading {
@@ -2759,6 +2765,9 @@ body.is-resizing-y * {
   height: 100%;
   --trees-font-family-override: var(--app-font-family);
   background: var(--surface-0);
+  text-rendering: auto;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
 }
 
 .tree-empty-state {
@@ -2839,13 +2848,20 @@ body.is-resizing-y * {
 .diff-shell {
   height: 100%;
   overflow: auto;
+  text-rendering: auto;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
 }
 
 .file-preview-frame {
   height: 100%;
   overflow: auto;
   background: var(--surface-0);
+  text-rendering: auto;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
 }
+
 
 .file-editor-shell {
   display: grid;
@@ -3620,6 +3636,9 @@ body.is-resizing-y * {
   min-height: 0;
   contain: layout paint;
   overflow: auto;
+  text-rendering: auto;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
   outline: none;
   color: var(--ink);
   font-family: var(--mono);
