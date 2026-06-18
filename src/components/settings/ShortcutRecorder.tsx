@@ -4,10 +4,11 @@ import type { ShortcutAction } from "../../lib/settings";
 
 interface ShortcutRecorderProps {
   readonly value: string;
+  readonly conflict: boolean;
   readonly onChange: (shortcut: string) => void;
 }
 
-export function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
+export function ShortcutRecorder({ value, conflict, onChange }: ShortcutRecorderProps) {
   const [recording, setRecording] = useState(false);
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
@@ -32,11 +33,20 @@ export function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
     }
   }
 
+  const className = [
+    "shortcut-recorder",
+    recording ? "recording" : "",
+    conflict ? "conflict" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     <button
       type="button"
-      className={recording ? "shortcut-recorder recording" : "shortcut-recorder"}
+      className={className}
       aria-label={recording ? "Recording shortcut" : `Record shortcut ${value}`}
+      title={conflict ? "This shortcut conflicts with another action" : undefined}
       onBlur={() => setRecording(false)}
       onClick={() => setRecording((current) => !current)}
       onKeyDown={handleKeyDown}

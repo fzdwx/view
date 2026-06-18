@@ -156,7 +156,22 @@ export function EditorFontRows({
         </SettingRow>
       </div>
       <pre className="settings-font-preview">
-        git diff -- src/App.tsx{"\n"}const branch = "origin/main";
+        {`🚀 feat: add image diff preview
+
+// Typescript
+const render = (props: EditorProps) => {
+  return <FileDiff mode="diff" />;
+};
+
+# Rust
+fn main() -> Result<(), String> {
+    println!("Hello, 世界! 🌍");
+    Ok(())
+}
+
+$ git commit -m "fix: 修復 emoji 🎉"
+diff --git a/src/App.tsx b/src/App.tsx
++import { useState } from "react";`}
       </pre>
     </SettingsFieldset>
   );

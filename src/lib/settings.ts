@@ -7,7 +7,8 @@ export type ShortcutAction =
   | "switchProject"
   | "closeTab"
   | "nextTab"
-  | "prevTab";
+  | "prevTab"
+  | "jumpToDiffFile";
 
 export interface AppSettings {
   uiFontFamily: string;
@@ -28,10 +29,10 @@ export const settingsStorageKey = "view.settings.v1";
 export const settingsChangedEvent = "view://settings-changed";
 
 export const defaultUiFontFamily =
-  'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", sans-serif';
+  'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
 
 export const defaultMonoFontFamily =
-  '"SFMono-Regular", "Cascadia Mono", "Cascadia Code", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+  '"SFMono-Regular", "Cascadia Mono", "Cascadia Code", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", monospace';
 
 export const defaultAppSettings: AppSettings = {
   uiFontFamily: defaultUiFontFamily,
@@ -49,6 +50,7 @@ export const defaultAppSettings: AppSettings = {
     closeTab: "Mod+W",
     nextTab: "Mod+Shift+]",
     prevTab: "Mod+Shift+[",
+    jumpToDiffFile: "F4",
   },
 };
 
@@ -97,6 +99,11 @@ export const shortcutRows: readonly ShortcutRow[] = [
     action: "prevTab",
     label: "Previous tab",
     description: "Switch to the previous editor tab",
+  },
+  {
+    action: "jumpToDiffFile",
+    label: "Jump to file",
+    description: "Open the file from a diff view",
   },
 ];
 

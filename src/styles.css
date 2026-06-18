@@ -649,6 +649,11 @@ textarea,
   color: var(--accent-foreground);
 }
 
+.shortcut-recorder.conflict {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
 .settings-font-preview {
   max-width: 680px;
   margin: -2px 0 0;

@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { SystemFont } from "../../lib/api";
 import {
   type AppSettings,
@@ -90,6 +91,21 @@ function ShortcutSettings({
   readonly settings: AppSettings;
   readonly onChange: ShortcutChangeHandler;
 }) {
+  const conflictMap = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const row of shortcutRows) {
+      const shortcut = settings.shortcuts[row.action];
+      if (!shortcut) continue;
+      counts[shortcut] = (counts[shortcut] ?? 0) + 1;
+    }
+    const conflicts: Record<string, boolean> = {};
+    for (const row of shortcutRows) {
+      const shortcut = settings.shortcuts[row.action];
+      conflicts[row.action] = Boolean(shortcut) && (counts[shortcut] ?? 0) > 1;
+    }
+    return conflicts;
+  }, [settings.shortcuts]);
+
   return (
     <SettingsGroup title="Keyboard">
       {shortcutRows.map((row) => (
@@ -100,6 +116,7 @@ function ShortcutSettings({
         >
           <ShortcutRecorder
             value={settings.shortcuts[row.action]}
+            conflict={conflictMap[row.action] ?? false}
             onChange={(shortcut) => onChange(row.action, shortcut)}
           />
         </SettingRow>
