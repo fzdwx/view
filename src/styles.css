@@ -3132,7 +3132,7 @@ body.is-resizing-y * {
   font-weight: var(--editor-font-weight, 400);
   line-height: var(--editor-line-height, 19px);
   text-rendering: auto;
-  -webkit-font-smoothing: auto;
+  -webkit-font-smoothing: subpixel-antialiased;
   -moz-osx-font-smoothing: auto;
   padding: 12px 24px 12px var(--editor-gutter-width);
   tab-size: 2;
@@ -3155,7 +3155,7 @@ body.is-resizing-y * {
   font-weight: var(--editor-font-weight, 400);
   line-height: var(--editor-line-height, 19px);
   text-rendering: auto;
-  -webkit-font-smoothing: auto;
+  -webkit-font-smoothing: subpixel-antialiased;
   -moz-osx-font-smoothing: auto;
   pointer-events: none;
   tab-size: 2;
@@ -3211,7 +3211,7 @@ body.is-resizing-y * {
   font-variant-numeric: tabular-nums;
   line-height: var(--editor-line-height, 19px);
   text-rendering: auto;
-  -webkit-font-smoothing: auto;
+  -webkit-font-smoothing: subpixel-antialiased;
   -moz-osx-font-smoothing: auto;
   overflow: hidden;
   padding: 12px 14px 12px 0;
@@ -3837,8 +3837,9 @@ body.is-resizing-y * {
 .diff-view {
   min-width: 860px;
   font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: var(--editor-font-size, 12px);
+  font-weight: var(--editor-font-weight, 400);
+  line-height: var(--editor-line-height, 1.55);
 }
 
 .empty-state,
