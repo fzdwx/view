@@ -3521,7 +3521,8 @@ pub fn run() {
             git_restore::restore_files,
             terminal_spawn,
             terminal_resize,
-            terminal_kill
+            terminal_kill,
+            wsl::wsl_display_scale
         ])
         .run(tauri::generate_context!())
         // SAFE-EXPECT: Tauri can only fail here during unrecoverable app bootstrap.

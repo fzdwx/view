@@ -3,8 +3,39 @@ import { isTauriRuntime } from "./api";
 const settingsWindowLabel = "settings";
 const settingsWindowUrl = "/?window=settings";
 const windowBackgroundColor = "#000000";
+const settingsWindowWidth = 860;
+const settingsWindowHeight = 620;
 
 let preloadPromise: Promise<void> | null = null;
+
+export async function installSettingsWindowDpiScaling(): Promise<void> {
+  if (!isTauriRuntime()) {
+    return;
+  }
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const scale = await invoke<number | null>("wsl_display_scale").catch(
+      () => null,
+    );
+    if (!scale || scale <= 1) {
+      return;
+    }
+    const { getCurrentWebviewWindow } = await import(
+      "@tauri-apps/api/webviewWindow"
+    );
+    const { LogicalSize } = await import("@tauri-apps/api/window");
+    const webview = getCurrentWebviewWindow();
+    await webview.setZoom(scale);
+    await webview.setSize(
+      new LogicalSize(
+        settingsWindowWidth * scale,
+        settingsWindowHeight * scale,
+      ),
+    );
+  } catch {
+    // ignore zoom failures
+  }
+}
 
 export async function preloadSettingsWindow(): Promise<void> {
   if (!isTauriRuntime() || preloadPromise) {
@@ -30,8 +61,8 @@ async function createHiddenSettingsWindow(): Promise<void> {
     const settingsWindow = new WebviewWindow(settingsWindowLabel, {
       url: settingsWindowUrl,
       title: "",
-      width: 860,
-      height: 620,
+      width: settingsWindowWidth,
+      height: settingsWindowHeight,
       minWidth: 720,
       minHeight: 480,
       center: true,
@@ -97,8 +128,8 @@ export async function openSettingsWindow(): Promise<void> {
     const settingsWindow = new WebviewWindow(settingsWindowLabel, {
       url: settingsWindowUrl,
       title: "",
-      width: 860,
-      height: 620,
+      width: settingsWindowWidth,
+      height: settingsWindowHeight,
       minWidth: 720,
       minHeight: 480,
       center: true,

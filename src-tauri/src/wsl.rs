@@ -54,6 +54,13 @@ pub fn display_scale_factor() -> Option<f64> {
     (scale > 1.0).then_some(scale)
 }
 
+/// Tauri command wrapper for frontend access to the WSL DPI scale.
+/// Returns `null` when not running under WSL or when the scale is 1.0.
+#[tauri::command]
+pub fn wsl_display_scale() -> Option<f64> {
+    display_scale_factor()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
