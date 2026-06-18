@@ -28,7 +28,7 @@ use std::sync::{
 };
 use std::thread;
 use std::time::Duration;
-use tauri::State;
+use tauri::{LogicalSize, Manager, State};
 use tungstenite::{accept, Error as WsError, Message, WebSocket};
 
 mod git_pathspec;
@@ -36,6 +36,7 @@ mod git_commit_push;
 mod git_restore;
 mod git_status;
 mod git_write;
+mod wsl;
 
 use git_status::{
     count_statuses, normalize_git_path, parse_name_status_entries, parse_porcelain_v1_z_status,
@@ -3477,6 +3478,18 @@ pub fn run() {
     tauri::Builder::default()
         .manage(TerminalState::default())
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            if let Some(scale) = wsl::display_scale_factor() {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_zoom(scale);
+                    let _ = window.set_size(LogicalSize::new(
+                        1320.0 * scale,
+                        840.0 * scale,
+                    ));
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             default_start_path,
             list_system_fonts,
