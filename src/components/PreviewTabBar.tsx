@@ -1,3 +1,4 @@
+import { useCallback, useRef, useState } from "react";
 import { Loader2, X } from "lucide-react";
 import { fileNameFromPath } from "../lib/pathLabels";
 import type { PreviewMode, PreviewTab } from "../lib/previewTabs";
@@ -27,9 +28,38 @@ export function PreviewTabBar({
   selectedPath: string | null;
   tabs: PreviewTab[];
 }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollState, setScrollState] = useState({
+    canScrollLeft: false,
+    canScrollRight: false,
+  });
+
+  const updateScrollState = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setScrollState({
+      canScrollLeft: el.scrollLeft > 2,
+      canScrollRight: el.scrollLeft + el.clientWidth < el.scrollWidth - 2,
+    });
+  }, []);
+
+  const scrollClassName = [
+    "preview-tabs",
+    scrollState.canScrollLeft ? "scroll-left" : "",
+    scrollState.canScrollRight ? "scroll-right" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     <div className="preview-tabbar">
-      <div className="preview-tabs" role="tablist" aria-label="Open files">
+      <div
+        ref={scrollRef}
+        className={scrollClassName}
+        role="tablist"
+        aria-label="Open files"
+        onScroll={updateScrollState}
+      >
         {tabs.length > 0 ? (
           tabs.map((tab) => (
             <div
@@ -45,7 +75,13 @@ export function PreviewTabBar({
                 aria-selected={tab.id === activeTabId}
                 onClick={() => onSelectTab(tab)}
               >
-                <span className="preview-tab-kind">
+                <span
+                  className={
+                    tab.mode === "diff"
+                      ? "preview-tab-kind diff"
+                      : "preview-tab-kind"
+                  }
+                >
                   {tab.mode === "diff" ? "D" : "F"}
                 </span>
                 <span className="preview-tab-name">
