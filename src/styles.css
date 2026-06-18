@@ -178,6 +178,13 @@ textarea,
   padding: 12px 7px 10px;
 }
 
+.project-side-rail {
+  grid-column: 3;
+  border-right: 0;
+  border-left: 1px solid var(--line);
+  padding-top: 50px;
+}
+
 .activity-button {
   position: relative;
   display: inline-flex;
@@ -224,6 +231,11 @@ textarea,
 .activity-button:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+.project-side-rail .activity-button.active::before {
+  left: auto;
+  right: -7px;
 }
 
 .brand-row,

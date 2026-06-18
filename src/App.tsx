@@ -8,6 +8,7 @@ import { CommandPanel } from "./components/CommandPanel";
 import { DiffPanel } from "./components/DiffPanel";
 import { PreviewTabBar } from "./components/PreviewTabBar";
 import { ProjectRail } from "./components/ProjectRail";
+import { ProjectSideRail } from "./components/ProjectSideRail";
 import { ProjectTreeTitle } from "./components/ProjectTreeTitle";
 import { PullChoiceDialog } from "./components/PullChoiceDialog";
 import { ResizeHandle } from "./components/ResizeHandle";
@@ -93,7 +94,8 @@ export function App() {
     startGitPanelDrag,
     startToolPanelDrag,
     startTreePanelDrag,
-    toggleTreeVisible,
+    toggleLeftRailTree,
+    toggleSideRailTree,
   } = useWorkbenchDock();
 
   const activeProject = projects.find(
@@ -574,9 +576,16 @@ export function App() {
       : []),
     ...gitToolPanels.filter((panel) => detachedGitPanels.includes(panel.id)),
   ];
+  const hasRightRail = treeDock === "right";
+  const shellStyle = {
+    ...appShellStyle,
+    gridTemplateColumns: hasRightRail
+      ? "56px minmax(0, 1fr) 56px"
+      : "56px minmax(0, 1fr)",
+  };
 
   return (
-    <main className="app-shell" style={appShellStyle}>
+    <main className="app-shell" style={shellStyle}>
       <ProjectRail
         activeProjectId={activeProjectId}
         activeProjectName={activeProject?.name ?? null}
@@ -584,6 +593,7 @@ export function App() {
         hasActiveProject={Boolean(activeProject)}
         projectSwitcherOpen={projectSwitcherOpen}
         projects={projects}
+        treeDock={treeDock}
         treeDocked={projectInToolDock}
         treeVisible={treeVisible}
         onChooseRepository={chooseRepository}
@@ -592,7 +602,7 @@ export function App() {
         onSelectProject={selectProject}
         onSelectToolPanelView={selectToolPanelView}
         onToggleProjectSwitcher={toggleProjectSwitcher}
-        onToggleTreeVisible={toggleTreeVisible}
+        onToggleLeftRailTree={toggleLeftRailTree}
       />
 
       {pullChoiceOpen ? (
@@ -805,6 +815,14 @@ export function App() {
           </div>
         )}
       </section>
+      {hasRightRail ? (
+        <ProjectSideRail
+          treeDock={treeDock}
+          hasActiveProject={Boolean(activeProject)}
+          treeVisible={treeVisible}
+          onToggleTreeVisible={toggleSideRailTree}
+        />
+      ) : null}
       <CommandPanel
         activeIndex={commandSelectionIndex}
         error={

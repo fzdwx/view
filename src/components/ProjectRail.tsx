@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import type { SavedProject } from "../lib/projects";
 import { openSettingsWindow } from "../lib/settingsWindow";
-import type { ToolPanelId } from "../lib/workbenchTypes";
+import type { ToolPanelId, TreeDock } from "../lib/workbenchTypes";
 import { ProjectSwitcherPopover } from "./ProjectSwitcherPopover";
 
 export interface ProjectRailProps {
@@ -18,6 +18,7 @@ export interface ProjectRailProps {
   readonly hasActiveProject: boolean;
   readonly projectSwitcherOpen: boolean;
   readonly projects: SavedProject[];
+  readonly treeDock: TreeDock;
   readonly treeDocked: boolean;
   readonly treeVisible: boolean;
   readonly onChooseRepository: () => void;
@@ -26,7 +27,7 @@ export interface ProjectRailProps {
   readonly onSelectProject: (project: SavedProject) => void;
   readonly onSelectToolPanelView: (view: ToolPanelId) => void;
   readonly onToggleProjectSwitcher: () => void;
-  readonly onToggleTreeVisible: () => void;
+  readonly onToggleLeftRailTree: () => void;
 }
 
 export function ProjectRail({
@@ -36,6 +37,7 @@ export function ProjectRail({
   hasActiveProject,
   projectSwitcherOpen,
   projects,
+  treeDock,
   treeDocked,
   treeVisible,
   onChooseRepository,
@@ -44,7 +46,7 @@ export function ProjectRail({
   onSelectProject,
   onSelectToolPanelView,
   onToggleProjectSwitcher,
-  onToggleTreeVisible,
+  onToggleLeftRailTree,
 }: ProjectRailProps) {
   return (
     <aside className="project-rail" aria-label="Projects">
@@ -81,26 +83,22 @@ export function ProjectRail({
         ) : null}
       </div>
 
-      <button
-        className={
-          treeVisible
-            ? "activity-button rail-project-button active"
-            : "activity-button rail-project-button"
-        }
-        aria-label={treeDocked ? "File tree" : "Toggle file tree"}
-        aria-pressed={treeVisible}
-        title={
-          treeDocked
-            ? "File tree docked in panel"
-            : treeVisible
-              ? "Hide file tree"
-              : "Show file tree"
-        }
-        disabled={!hasActiveProject || treeDocked}
-        onClick={onToggleTreeVisible}
-      >
-        <FolderTree size={18} />
-      </button>
+      {treeDock === "left" ? (
+        <button
+          className={
+            treeVisible
+              ? "activity-button rail-project-button active"
+              : "activity-button rail-project-button"
+          }
+          aria-label="Toggle file tree"
+          aria-pressed={treeVisible}
+          title={treeVisible ? "Hide file tree" : "Show file tree"}
+          disabled={!hasActiveProject || treeDocked}
+          onClick={onToggleLeftRailTree}
+        >
+          <FolderTree size={18} />
+        </button>
+      ) : null}
       <div className="rail-spacer" />
       <button
         className={
