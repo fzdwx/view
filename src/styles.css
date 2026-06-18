@@ -1438,9 +1438,22 @@ kbd {
 .rail-slot-panel .tool-panel-layer > .git-log-panel,
 .rail-slot-panel .tool-panel-layer > .tree-panel,
 .rail-slot-panel .tool-panel-layer > .bottom-terminal-panel,
-.rail-slot-panel .tool-panel-layer > .bottom-terminal-panel > .terminal-panel {
+.rail-slot-panel .tool-panel-layer > .bottom-terminal-panel > .terminal-panel,
+.rail-slot-panel .tool-panel-layer.rail-commit-panel > .commit-detail-panel {
   width: 100%;
   height: 100%;
+}
+
+.rail-slot-panel .tool-panel-layer.rail-commit-panel > .commit-detail-panel {
+  grid-area: auto;
+}
+
+.rail-slot-panel .tool-panel-layer.rail-commit-panel .commit-details-section {
+  display: grid;
+  min-height: 0;
+  overflow: hidden;
+  border-top: 0;
+  background: transparent;
 }
 
 .rail-slot-panel .tool-panel-layer > .tree-panel {
@@ -1876,6 +1889,22 @@ kbd {
   grid-area: details;
   display: grid;
   overflow: hidden;
+}
+
+.commit-detail-panel-horizontal {
+  grid-template-rows: none;
+}
+
+.commit-detail-panel-horizontal .commit-changes-panel,
+.commit-detail-panel-horizontal .commit-details-section {
+  min-height: 0;
+  height: 100%;
+}
+
+.commit-detail-panel-horizontal .commit-info-splitter {
+  min-height: 0;
+  min-width: 6px;
+  height: 100%;
 }
 
 .commit-info-splitter {
@@ -3272,34 +3301,63 @@ body.is-resizing-y * {
 
 .commit-form {
   display: grid;
-  align-content: start;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   min-width: 0;
-  gap: 9px;
-  padding: 12px 14px 14px;
+  min-height: 0;
+  height: 100%;
+  gap: 8px;
+  padding: 10px 12px 12px;
   text-rendering: auto;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: auto;
 }
 
-.commit-form-counts {
+.commit-form-header {
   display: flex;
   min-width: 0;
-  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.commit-form-branch {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.commit-form-branch strong {
+  color: var(--ink);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commit-form-counts {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
 }
 
 .commit-count-pill {
   display: inline-flex;
-  height: 22px;
+  height: 20px;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   border: 1px solid var(--line);
-  border-radius: 5px;
+  border-radius: 4px;
   background: var(--surface-2);
   color: var(--muted);
   font-size: 11px;
-  padding: 0 7px;
+  padding: 0 6px;
   white-space: nowrap;
 }
 
@@ -3323,37 +3381,24 @@ body.is-resizing-y * {
   color: var(--danger);
 }
 
-.commit-form-scope {
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.4;
-}
-
 .commit-message-field {
   display: grid;
   min-width: 0;
-  gap: 5px;
-}
-
-.commit-message-field > span {
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  min-height: 0;
 }
 
 .commit-message-field textarea {
   width: 100%;
-  min-height: 72px;
+  height: 100%;
+  min-height: 96px;
   border: 1px solid var(--line-strong);
   border-radius: 6px;
   outline: 0;
   background: var(--surface-1);
   color: var(--ink);
-  line-height: 1.45;
-  padding: 7px 8px;
-  resize: vertical;
+  line-height: 1.5;
+  padding: 8px 9px;
+  resize: none;
   text-rendering: auto;
 }
 
@@ -3386,7 +3431,7 @@ body.is-resizing-y * {
   color: var(--ink);
   font-size: 12px;
   font-weight: 500;
-  padding: 0 10px;
+  padding: 0 12px;
 }
 
 .commit-submit-button:hover:not(:disabled) {
@@ -3400,23 +3445,22 @@ body.is-resizing-y * {
   color: var(--faint);
 }
 
-.commit-form-warning {
+.commit-form-warning,
+.commit-form-error {
   min-width: 0;
   overflow: hidden;
-  color: var(--warning);
   font-size: 11px;
+  line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.commit-form-warning {
+  color: var(--warning);
+}
+
 .commit-form-error {
-  border: 1px solid color-mix(in oklch, var(--danger) 40%, var(--line));
-  border-radius: 6px;
-  background: color-mix(in oklch, var(--danger) 10%, var(--surface-1));
   color: var(--danger);
-  font-size: 11px;
-  line-height: 1.4;
-  padding: 7px 8px;
 }
 
 .compact-detail-pill,

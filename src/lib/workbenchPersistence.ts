@@ -202,7 +202,7 @@ function normalizeRailItems(value: unknown): RailItemId[] {
 }
 
 function isRailItemId(value: unknown): value is RailItemId {
-  return value === "fileTree" || value === "git" || value === "terminal";
+  return value === "fileTree" || value === "git" || value === "commit" || value === "terminal";
 }
 
 function normalizeGitPanelOrder(value: unknown): GitPanelId[] {

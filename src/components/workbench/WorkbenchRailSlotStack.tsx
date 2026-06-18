@@ -1,6 +1,11 @@
 import type { ReactNode } from "react";
+import { CommitInspector } from "../git/CommitInspector";
 import { TerminalPanel } from "../TerminalPanel";
-import { GitPanels, type GitPanelDataProps } from "./GitPanels";
+import {
+  GitPanels,
+  selectedGitRefName,
+  type GitPanelDataProps,
+} from "./GitPanels";
 import type {
   GitPanelId,
   PanelSizes,
@@ -93,6 +98,32 @@ export function WorkbenchRailSlotStack({
               onDropPanel={onDropPanel}
               onReattachPanel={onReattachPanel}
               resizePanel={resizePanel}
+            />
+          </div>
+        ) : null}
+        {items.includes("commit") ? (
+          <div
+            className={
+              activeItem === "commit"
+                ? "tool-panel-layer rail-commit-panel"
+                : "tool-panel-layer tool-panel-layer-hidden"
+            }
+            aria-hidden={activeItem !== "commit"}
+          >
+            <CommitInspector
+              commit={null}
+              orientation={isBottomSlot ? "horizontal" : "vertical"}
+              branchName={selectedGitRefName(
+                gitPanelData.payload,
+                gitPanelData.selectedBranchRef,
+              )}
+              detailHeight={gitPanelData.detailHeight}
+              files={gitPanelData.payload?.files ?? []}
+              gitFileActions={gitPanelData.gitFileActions}
+              gitWriteActions={gitPanelData.gitWriteActions}
+              selectedPath={gitPanelData.selectedChangePath}
+              onResizeDetails={gitPanelData.onResizeCommitInfo}
+              onSelectPath={gitPanelData.onOpenDiffPath}
             />
           </div>
         ) : null}

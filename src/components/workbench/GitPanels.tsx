@@ -234,7 +234,7 @@ function EmptyGitPanelDropTarget({
   );
 }
 
-function selectedGitRefName(
+export function selectedGitRefName(
   payload: RepositoryPayload | undefined,
   selectedBranchRef: string | null,
 ): string | undefined {

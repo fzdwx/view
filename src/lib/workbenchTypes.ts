@@ -4,7 +4,7 @@ export type ProjectDock = TreeDock | "panel";
 export type EditorDock = "left" | "right";
 export type GitPanelId = "branches" | "history" | "details";
 
-export type RailItemId = "fileTree" | "git" | "terminal";
+export type RailItemId = "fileTree" | "git" | "commit" | "terminal";
 
 export type RailSide = "left" | "right";
 
@@ -72,12 +72,12 @@ export const defaultPanelSizes: PanelSizes = {
 };
 
 export const defaultRailLayout: RailLayout = {
-  left: { top: ["fileTree"], bottom: ["git", "terminal"] },
+  left: { top: ["commit", "fileTree"], bottom: ["git", "terminal"] },
   right: { top: [], bottom: [] },
 };
 
 export const defaultRailActiveItems: RailActiveItems = {
-  left: { top: "fileTree", bottom: "git" },
+  left: { top: "commit", bottom: "git" },
   right: { top: null, bottom: null },
 };
 

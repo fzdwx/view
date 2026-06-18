@@ -1,6 +1,7 @@
 import {
   FolderTree,
   GitBranch,
+  GitCommitHorizontal,
   TerminalSquare,
   type LucideIcon,
 } from "lucide-react";
@@ -15,5 +16,6 @@ export interface RailItemDefinition {
 export const railItemDefinitions: Record<RailItemId, RailItemDefinition> = {
   fileTree: { id: "fileTree", label: "File tree", icon: FolderTree },
   git: { id: "git", label: "Git", icon: GitBranch },
+  commit: { id: "commit", label: "Commit", icon: GitCommitHorizontal },
   terminal: { id: "terminal", label: "Terminal", icon: TerminalSquare },
 };

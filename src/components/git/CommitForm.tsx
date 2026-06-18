@@ -38,47 +38,37 @@ export function CommitForm({
         commitStagedChanges();
       }}
     >
-      <div className="commit-detail-heading">
-        <span className="commit-detail-subject">Commit staged changes</span>
-        <span className="commit-detail-hash">working tree</span>
-      </div>
-      <div className="commit-detail-line">
-        <GitBranch size={13} />
-        <span>
-          On branch: <strong>{branchName ?? "current"}</strong>
-        </span>
-      </div>
-      <div className="commit-form-counts" aria-label="Working tree change counts">
-        <span className="commit-count-pill staged">
-          <strong>{gitWriteActions.stagedCount}</strong>
-          staged
-        </span>
-        <span className="commit-count-pill unstaged">
-          <strong>{unstagedCount}</strong>
-          unstaged
-        </span>
-        {gitWriteActions.conflictCount > 0 ? (
-          <span className="commit-count-pill conflict">
-            <strong>{gitWriteActions.conflictCount}</strong>
-            conflicted
+      <header className="commit-form-header">
+        <div className="commit-form-branch">
+          <GitBranch size={13} />
+          <strong>{branchName ?? "current"}</strong>
+        </div>
+        <div className="commit-form-counts" aria-label="Working tree change counts">
+          <span className="commit-count-pill staged">
+            <strong>{gitWriteActions.stagedCount}</strong>
+            staged
           </span>
-        ) : null}
-      </div>
-      <div className="commit-form-scope">
-        Commit scope: staged changes only. Unstaged and untracked files stay in
-        the working tree.
-      </div>
+          <span className="commit-count-pill unstaged">
+            <strong>{unstagedCount}</strong>
+            unstaged
+          </span>
+          {gitWriteActions.conflictCount > 0 ? (
+            <span className="commit-count-pill conflict">
+              <strong>{gitWriteActions.conflictCount}</strong>
+              conflicted
+            </span>
+          ) : null}
+        </div>
+      </header>
       <label className="commit-message-field">
-        <span>Message</span>
         <textarea
           value={gitWriteActions.commitMessage}
           disabled={gitWriteActions.commitPending}
-          placeholder="Summary, then optional details"
-          rows={4}
+          placeholder="Commit message"
           onChange={handleMessageChange}
         />
       </label>
-      <div className="commit-form-footer">
+      <footer className="commit-form-footer">
         <button
           className="commit-submit-button"
           type="submit"
@@ -97,12 +87,12 @@ export function CommitForm({
             {gitWriteActions.commitWarning}
           </span>
         ) : null}
-      </div>
-      {gitWriteActions.commitError ? (
-        <div className="commit-form-error" role="alert">
-          {gitWriteActions.commitError}
-        </div>
-      ) : null}
+        {gitWriteActions.commitError ? (
+          <span className="commit-form-error" role="alert">
+            {gitWriteActions.commitError}
+          </span>
+        ) : null}
+      </footer>
     </form>
   );
 }

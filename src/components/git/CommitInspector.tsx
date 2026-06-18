@@ -14,6 +14,7 @@ export function CommitInspector({
   files,
   gitFileActions,
   gitWriteActions,
+  orientation = "vertical",
   selectedPath,
   onResizeDetails,
   onSelectPath,
@@ -24,16 +25,20 @@ export function CommitInspector({
   files: RepositoryPayload["files"];
   gitFileActions?: TreeGitFileActions;
   gitWriteActions: GitWriteActions;
+  orientation?: "vertical" | "horizontal";
   selectedPath: string | null;
   onResizeDetails(delta: number): void;
   onSelectPath(path: string): void;
 }) {
+  const isHorizontal = orientation === "horizontal";
+  const panelStyle = isHorizontal
+    ? { gridTemplateColumns: `minmax(0, 1fr) 6px ${detailHeight}px` }
+    : { gridTemplateRows: `minmax(0, 1fr) 6px ${detailHeight}px` };
+
   return (
     <aside
-      className="commit-detail-panel"
-      style={{
-        gridTemplateRows: `minmax(0, 1fr) 6px ${detailHeight}px`,
-      }}
+      className={`commit-detail-panel${isHorizontal ? " commit-detail-panel-horizontal" : ""}`}
+      style={panelStyle}
     >
       <div className="commit-changes-panel">
         <TreePanel
@@ -49,7 +54,7 @@ export function CommitInspector({
         />
       </div>
       <ResizeHandle
-        axis="y"
+        axis={isHorizontal ? "x" : "y"}
         className="commit-info-splitter"
         label="Resize commit details"
         onResize={onResizeDetails}
