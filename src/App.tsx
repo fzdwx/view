@@ -559,7 +559,7 @@ export function App() {
     "--mono": monoFontCss(appSettings),
     "--editor-font-size": `${appSettings.fontSize}px`,
     "--editor-font-weight": appSettings.fontWeight,
-    "--editor-line-height": String(appSettings.lineHeight),
+    "--editor-line-height": `${Math.round(appSettings.fontSize * appSettings.lineHeight)}px`,
   } as CSSProperties;
   const contentGridStyle: CSSProperties = buildContentGridStyle(
     treeDock,

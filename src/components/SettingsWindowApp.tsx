@@ -27,7 +27,7 @@ export function SettingsWindowApp() {
       "--mono": monoFontCss(settings),
       "--editor-font-size": `${settings.fontSize}px`,
       "--editor-font-weight": settings.fontWeight,
-      "--editor-line-height": String(settings.lineHeight),
+      "--editor-line-height": `${Math.round(settings.fontSize * settings.lineHeight)}px`,
     }),
     [settings],
   );

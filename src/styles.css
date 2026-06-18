@@ -580,6 +580,9 @@ button {
   line-height: var(--editor-line-height);
   overflow: hidden;
   font-family: var(--mono);
+  text-rendering: auto;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
   padding: 8px 10px;
   white-space: pre;
 }
@@ -3027,7 +3030,10 @@ body.is-resizing-y * {
   font-family: var(--mono);
   font-size: var(--editor-font-size, 12px);
   font-weight: var(--editor-font-weight, 400);
-  line-height: var(--editor-line-height, 1.56);
+  line-height: var(--editor-line-height, 19px);
+  text-rendering: auto;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
   padding: 12px 24px 12px var(--editor-gutter-width);
   tab-size: 2;
   white-space: pre;
@@ -3047,7 +3053,10 @@ body.is-resizing-y * {
   font-family: var(--mono);
   font-size: var(--editor-font-size, 12px);
   font-weight: var(--editor-font-weight, 400);
-  line-height: var(--editor-line-height, 1.56);
+  line-height: var(--editor-line-height, 19px);
+  text-rendering: auto;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
   pointer-events: none;
   tab-size: 2;
   user-select: none;
@@ -3100,7 +3109,10 @@ body.is-resizing-y * {
   font-size: var(--editor-font-size, 12px);
   font-weight: var(--editor-font-weight, 400);
   font-variant-numeric: tabular-nums;
-  line-height: var(--editor-line-height);
+  line-height: var(--editor-line-height, 19px);
+  text-rendering: auto;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
   overflow: hidden;
   padding: 12px 14px 12px 0;
   pointer-events: none;
