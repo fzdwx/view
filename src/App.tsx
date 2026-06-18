@@ -11,6 +11,7 @@ import { ProjectRail } from "./components/ProjectRail";
 import { ProjectTreeTitle } from "./components/ProjectTreeTitle";
 import { PullChoiceDialog } from "./components/PullChoiceDialog";
 import { ResizeHandle } from "./components/ResizeHandle";
+import { WindowControls } from "./components/WindowControls";
 import type { TreeGitFileActions } from "./components/TreeContextMenu";
 import { FilePreview } from "./components/editor/FilePreview";
 import {
@@ -72,7 +73,6 @@ export function App() {
     detachedGitPanels,
     draggedGitPanel,
     draggedToolPanel,
-    draggingEditorPanel,
     draggingTreePanel,
     gitPanelOrder,
     panelSizes,
@@ -89,7 +89,6 @@ export function App() {
     reattachGitPanel,
     resizePanel,
     selectToolPanelView,
-    startEditorPanelDrag,
     startGitPanelDrag,
     startToolPanelDrag,
     startTreePanelDrag,
@@ -603,31 +602,38 @@ export function App() {
       <section className="workspace">
         {!activeProject ? (
           <div className="welcome-surface">
+            <div className="welcome-drag-strip" data-tauri-drag-region />
             <div className="welcome-icon">
               <FolderOpen size={26} />
             </div>
             <h1>Open a Git repository</h1>
             <p>
               View keeps multiple repositories in the rail and lets each project
-              switch between its Git worktrees.
+              switch between its worktrees.
             </p>
             <button className="primary-action compact" onClick={chooseRepository}>
               <FolderOpen size={16} />
               Choose folder
             </button>
+            <div className="welcome-controls">
+              <WindowControls />
+            </div>
           </div>
         ) : repositoryQuery.isError ? (
           <div className="error-surface">
+            <div className="welcome-drag-strip" data-tauri-drag-region />
             <div className="error-title">Repository could not be loaded</div>
             <pre>{String(repositoryQuery.error.message)}</pre>
+            <div className="welcome-controls">
+              <WindowControls />
+            </div>
           </div>
         ) : (
           <div
             className={`content-grid dock-${toolDock} tree-dock-${treeDock}${
               draggedToolPanel ||
               draggedGitPanel ||
-              draggingTreePanel ||
-              draggingEditorPanel
+              draggingTreePanel
                 ? " is-docking"
                 : ""
             }`}
@@ -660,8 +666,6 @@ export function App() {
                 onCloseTab={closePreviewTab}
                 onCloseOtherTabs={closeOtherTabs}
                 onCloseAllTabs={closeAllTabs}
-                onDragEnd={clearDockDrag}
-                onDragStart={startEditorPanelDrag}
                 onReorderTabs={reorderPreviewTabs}
                 onSelectTab={activatePreviewTab}
                 previewMode={previewMode}
@@ -778,15 +782,14 @@ export function App() {
             )}
             {draggedToolPanel ||
             draggedGitPanel ||
-            draggingTreePanel ||
-            draggingEditorPanel ? (
+            draggingTreePanel ? (
               <WorkbenchDockOverlay
                 activeEditorDock={editorDock}
                 activeProjectDock={projectInToolDock ? "panel" : treeDock}
                 activeToolDock={toolDock}
                 draggedGitPanel={draggedGitPanel}
                 draggedToolPanel={draggedToolPanel}
-                draggingEditorPanel={draggingEditorPanel}
+                draggingEditorPanel={false}
                 draggingTreePanel={draggingTreePanel}
                 onDockEditor={dockEditorPanel}
                 onDockProject={dockProjectPanel}

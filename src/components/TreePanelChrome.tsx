@@ -73,7 +73,6 @@ export function TreePanelHeader({
             <FilePlus2 size={13} />
           </button>
         ) : null}
-        <span>{fileCount}</span>
       </span>
     </div>
   );

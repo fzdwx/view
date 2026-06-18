@@ -4,6 +4,7 @@ import { fileNameFromPath } from "../lib/pathLabels";
 import { useFileIcon } from "../lib/fileIcons";
 import type { PreviewMode, PreviewTab } from "../lib/previewTabs";
 import { TabContextMenu } from "./TabContextMenu";
+import { WindowControls } from "./WindowControls";
 
 export function PreviewTabBar({
   activeTabId,
@@ -13,8 +14,6 @@ export function PreviewTabBar({
   onCloseTab,
   onCloseOtherTabs,
   onCloseAllTabs,
-  onDragEnd,
-  onDragStart,
   onReorderTabs,
   onSelectTab,
   previewMode,
@@ -28,8 +27,6 @@ export function PreviewTabBar({
   onCloseTab(tabId: string): void;
   onCloseOtherTabs(tabId: string): void;
   onCloseAllTabs(): void;
-  onDragEnd(): void;
-  onDragStart(): void;
   onReorderTabs(fromId: string, toId: string): void;
   onSelectTab(tab: PreviewTab): void;
   previewMode: PreviewMode;
@@ -128,7 +125,7 @@ export function PreviewTabBar({
   }
 
   return (
-    <div className="preview-tabbar">
+    <div className="preview-tabbar" data-tauri-drag-region>
       <div
         ref={scrollRef}
         className={scrollClassName}
@@ -207,30 +204,15 @@ export function PreviewTabBar({
               </div>
             );
           })
-        ) : (
+        ) : selectedPath ? (
           <div className="preview-tab-placeholder">
-            {selectedPath
-              ? `${previewMode === "diff" ? "Diff" : "File"}: ${fileNameFromPath(
-                  selectedPath,
-                )}`
-              : "No file open"}
+            {`${previewMode === "diff" ? "Diff" : "File"}: ${fileNameFromPath(
+              selectedPath,
+            )}`}
           </div>
-        )}
+        ) : null}
       </div>
       <div className="preview-tabbar-meta">
-        <div
-          className="editor-dock-handle"
-          draggable
-          title="Drag editor group"
-          onDragEnd={onDragEnd}
-          onDragStart={(event) => {
-            event.dataTransfer.effectAllowed = "move";
-            event.dataTransfer.setData("application/x-view-panel", "editor");
-            onDragStart();
-          }}
-        >
-          Editor
-        </div>
         {previewMode === "diff" && diffStats.files > 0 ? (
           <div className="diff-stat-strip" aria-label="Diff line counts">
             <span className="addition">+{diffStats.additions}</span>
@@ -238,6 +220,7 @@ export function PreviewTabBar({
           </div>
         ) : null}
         {loading ? <Loader2 className="spin" size={15} /> : null}
+        <WindowControls />
       </div>
       {contextMenu ? (
         <TabContextMenu

@@ -133,6 +133,37 @@ textarea,
   background: var(--surface-0);
 }
 
+.window-controls {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+}
+
+.window-control-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 100%;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+
+.window-control-button:hover {
+  background: var(--surface-sidebar-hover);
+  color: var(--ink);
+}
+
+.window-control-close:hover {
+  background: var(--danger);
+  color: #ffffff;
+}
+
 .project-rail {
   position: relative;
   z-index: 24;
@@ -1698,6 +1729,8 @@ body.is-resizing-y * {
   align-items: stretch;
   border-bottom: 1px solid var(--line);
   background: var(--surface-0);
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .preview-tabs {
@@ -4228,6 +4261,23 @@ body.is-resizing-y * {
   min-height: 0;
   height: 100%;
   text-align: center;
+  position: relative;
+}
+
+.welcome-drag-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 32px;
+}
+
+.welcome-controls {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 32px;
+  z-index: 1;
 }
 
 .empty-title,
