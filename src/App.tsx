@@ -392,6 +392,12 @@ export function App() {
     onSelectToolPanelView: selectToolPanelView,
     onSwitchTab: activateAdjacentTab,
     onToggleProjectSwitcher: toggleProjectSwitcher,
+    onJumpToDiffFile: () => {
+      const activeTab = previewTabs.find((tab) => tab.id === activePreviewTabId);
+      if (activeTab?.mode === "diff") {
+        openPreviewTab("file", activeTab.path);
+      }
+    },
   });
 
   useSelectedPathGuard({

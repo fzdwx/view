@@ -21,6 +21,7 @@ interface UseAppKeyboardShortcutsOptions {
   readonly onSelectToolPanelView: (view: ToolPanelId) => void;
   readonly onSwitchTab: (direction: 1 | -1) => void;
   readonly onToggleProjectSwitcher: () => void;
+  readonly onJumpToDiffFile: () => void;
 }
 export function useAppKeyboardShortcuts({
   canUseProjectCommands,
@@ -39,6 +40,7 @@ export function useAppKeyboardShortcuts({
   onSelectToolPanelView,
   onSwitchTab,
   onToggleProjectSwitcher,
+  onJumpToDiffFile,
 }: UseAppKeyboardShortcutsOptions): void {
   useEffect(() => {
     function handleKeyDown(event: globalThis.KeyboardEvent) {
@@ -88,6 +90,13 @@ export function useAppKeyboardShortcuts({
         event.preventDefault();
         onToggleProjectSwitcher();
         return;
+      }
+
+      if (event.key === "F4" && previewMode === "diff") {
+        event.preventDefault();
+        onJumpToDiffFile();
+        return;
+      }
 
       if (matchesShortcut(event, shortcuts.closeTab)) {
         if (hasActiveTab) {
@@ -111,7 +120,6 @@ export function useAppKeyboardShortcuts({
           onSwitchTab(-1);
         }
         return;
-      }
       }
 
       if (event.key === "Escape" && pullChoiceOpen) {
@@ -145,6 +153,7 @@ export function useAppKeyboardShortcuts({
     onSelectToolPanelView,
     onSwitchTab,
     onToggleProjectSwitcher,
+    onJumpToDiffFile,
   ]);
 }
 
