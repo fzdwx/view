@@ -249,6 +249,7 @@ export function FilePreview({
       textarea.value = content;
     }
     const lineOffset = utf16OffsetForLine(content, target.line);
+    textarea.focus({ preventScroll: true });
     textarea.setSelectionRange(lineOffset, lineOffset);
     scrollEditorLineIntoView(
       textarea,
