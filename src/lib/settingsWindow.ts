@@ -28,13 +28,13 @@ export async function openSettingsWindow(): Promise<void> {
 
     const settingsWindow = new WebviewWindow(settingsWindowLabel, {
       url: settingsWindowUrl,
-      title: "Settings",
+      title: "",
       width: 860,
       height: 620,
       minWidth: 720,
       minHeight: 480,
       center: true,
-      decorations: true,
+      decorations: false,
       focus: true,
       resizable: true,
       visible: true,

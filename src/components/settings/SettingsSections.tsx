@@ -33,28 +33,12 @@ export function SettingsSections({
 }: SettingsSectionsProps) {
   return (
     <div className="settings-body">
-      {activeSection === "common" ? (
-        <CommonSettings
+      {activeSection === "fonts" ? (
+        <FontSettings
           fontsLoading={fontsLoading}
           monoFonts={monoFonts}
           settings={settings}
           uiFonts={uiFonts}
-          onChange={onChange}
-        />
-      ) : null}
-      {activeSection === "appearance" ? (
-        <AppearanceSettings
-          fontsLoading={fontsLoading}
-          settings={settings}
-          uiFonts={uiFonts}
-          onChange={onChange}
-        />
-      ) : null}
-      {activeSection === "editor" ? (
-        <EditorSettings
-          fontsLoading={fontsLoading}
-          monoFonts={monoFonts}
-          settings={settings}
           onChange={onChange}
         />
       ) : null}
@@ -65,7 +49,7 @@ export function SettingsSections({
   );
 }
 
-function CommonSettings({
+function FontSettings({
   fontsLoading,
   monoFonts,
   settings,
@@ -79,59 +63,16 @@ function CommonSettings({
   readonly onChange: (settings: AppSettings) => void;
 }) {
   return (
-    <SettingsGroup title="Font">
+    <SettingsGroup
+      description="UI font controls app chrome. Code font controls editor, diff and terminal text."
+      title="Application and code text"
+    >
       <UiFontRow
         fonts={uiFonts}
         loading={fontsLoading}
         settings={settings}
         onChange={onChange}
       />
-      <EditorFontRows
-        fonts={monoFonts}
-        loading={fontsLoading}
-        settings={settings}
-        onChange={onChange}
-      />
-    </SettingsGroup>
-  );
-}
-
-function AppearanceSettings({
-  fontsLoading,
-  settings,
-  uiFonts,
-  onChange,
-}: {
-  readonly fontsLoading: boolean;
-  readonly settings: AppSettings;
-  readonly uiFonts: readonly SystemFont[];
-  readonly onChange: (settings: AppSettings) => void;
-}) {
-  return (
-    <SettingsGroup title="Application Chrome">
-      <UiFontRow
-        fonts={uiFonts}
-        loading={fontsLoading}
-        settings={settings}
-        onChange={onChange}
-      />
-    </SettingsGroup>
-  );
-}
-
-function EditorSettings({
-  fontsLoading,
-  monoFonts,
-  settings,
-  onChange,
-}: {
-  readonly fontsLoading: boolean;
-  readonly monoFonts: readonly SystemFont[];
-  readonly settings: AppSettings;
-  readonly onChange: (settings: AppSettings) => void;
-}) {
-  return (
-    <SettingsGroup title="Editor and Terminal">
       <EditorFontRows
         fonts={monoFonts}
         loading={fontsLoading}

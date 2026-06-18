@@ -22,21 +22,13 @@ const settingsTree: ReadonlyArray<
       }>;
     }
 > = [
-  { kind: "item", id: "common", label: "Commonly Used" },
-  {
-    kind: "group",
-    label: "Text Editor",
-    children: [{ id: "editor", label: "Font" }],
-  },
-  {
-    kind: "group",
-    label: "Workbench",
-    children: [{ id: "appearance", label: "Appearance" }],
-  },
   {
     kind: "group",
     label: "Application",
-    children: [{ id: "shortcuts", label: "Keyboard" }],
+    children: [
+      { id: "fonts", label: "Fonts" },
+      { id: "shortcuts", label: "Keyboard" },
+    ],
   },
 ];
 

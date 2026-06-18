@@ -13,7 +13,6 @@ import { SettingsSections } from "./settings/SettingsSections";
 import { SettingsSidebar } from "./settings/SettingsSidebar";
 import {
   type SettingsSectionId,
-  settingsSectionDescription,
   settingsSectionTitle,
 } from "./settings/types";
 
@@ -36,7 +35,7 @@ export function SettingsPage({
   onReset,
 }: SettingsPageProps) {
   const [activeSection, setActiveSection] =
-    useState<SettingsSectionId>("common");
+    useState<SettingsSectionId>("fonts");
   const fontsQuery = useQuery({
     queryKey: ["system-fonts"],
     queryFn: listSystemFonts,
@@ -80,7 +79,6 @@ export function SettingsPage({
           <header className="settings-head">
             <div>
               <h1>{settingsSectionTitle(activeSection)}</h1>
-              <p>{settingsSectionDescription(activeSection)}</p>
             </div>
             <button
               type="button"

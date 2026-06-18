@@ -3552,7 +3552,6 @@ function FilePreview({
           {
             "--editor-scroll-top": `${editorScrollTop}px`,
             "--editor-scroll-left": `${editorScrollLeft}px`,
-            "--editor-line-height": `${editorLineHeight}px`,
             "--editor-padding-top": `${editorPaddingTop}px`,
           } as CSSProperties
         }
