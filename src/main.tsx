@@ -9,6 +9,9 @@ import {
 } from "@tanstack/react-router";
 import { App } from "./App";
 import { SettingsWindowApp } from "./components/SettingsWindowApp";
+import { prewarmFontFallbacks } from "./lib/fontFallbackPrewarm";
+import { installNativeWebviewBehavior } from "./lib/nativeWebviewBehavior";
+import { installMainWindowStatePersistence } from "./lib/nativeWindowState";
 import "./styles.css";
 
 const queryClient = new QueryClient();
@@ -61,4 +64,7 @@ function isSettingsWindowRoute(): boolean {
   );
 }
 
+installNativeWebviewBehavior();
+installMainWindowStatePersistence();
+prewarmFontFallbacks();
 createRoot(rootElement()).render(<RootApp />);

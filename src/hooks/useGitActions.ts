@@ -19,6 +19,7 @@ import {
   type BranchActionKind,
   defaultNewBranchName,
 } from "../lib/branchModels";
+import { confirmNativeDialog, showNativeMessage } from "../lib/nativeDialogs";
 import type { SavedProject } from "../lib/projects";
 
 type RefetchQuery = () => Promise<unknown>;
@@ -175,7 +176,9 @@ export function useGitActions({
           }
           case "rename": {
             if (branch.branchType !== "local") {
-              window.alert("Only local branches can be renamed.");
+              await showNativeMessage("Only local branches can be renamed.", {
+                kind: "warning",
+              });
               return;
             }
             const nextName = window.prompt(`Rename ${branchLabel}`, branch.name);
@@ -189,17 +192,34 @@ export function useGitActions({
           }
           case "delete": {
             if (branch.branchType !== "local") {
-              window.alert("Only local branches can be deleted here.");
+              await showNativeMessage("Only local branches can be deleted here.", {
+                kind: "warning",
+              });
               return;
             }
-            if (!window.confirm(`Delete local branch ${branchLabel}?`)) {
+            if (
+              !(await confirmNativeDialog(`Delete local branch ${branchLabel}?`, {
+                cancelLabel: "Cancel",
+                kind: "warning",
+                okLabel: "Delete",
+              }))
+            ) {
               return;
             }
             try {
               await deleteBranch(activeProject.activePath, branch.refName, false);
             } catch (error) {
               const message = error instanceof Error ? error.message : String(error);
-              if (!window.confirm(`${message}\n\nForce delete ${branchLabel}?`)) {
+              if (
+                !(await confirmNativeDialog(
+                  `${message}\n\nForce delete ${branchLabel}?`,
+                  {
+                    cancelLabel: "Cancel",
+                    kind: "warning",
+                    okLabel: "Force Delete",
+                  },
+                ))
+              ) {
                 return;
               }
               await deleteBranch(activeProject.activePath, branch.refName, true);
@@ -216,7 +236,10 @@ export function useGitActions({
           }
         }
       } catch (error) {
-        window.alert(error instanceof Error ? error.message : String(error));
+        await showNativeMessage(
+          error instanceof Error ? error.message : String(error),
+          { kind: "error" },
+        );
         await refreshProjectFileState(activeProject.activePath);
       }
     },

@@ -2,6 +2,7 @@ import { isTauriRuntime } from "./api";
 
 const settingsWindowLabel = "settings";
 const settingsWindowUrl = "/?window=settings";
+const windowBackgroundColor = "#000000";
 
 export async function openSettingsWindow(): Promise<void> {
   if (!isTauriRuntime()) {
@@ -35,12 +36,15 @@ export async function openSettingsWindow(): Promise<void> {
       minHeight: 480,
       center: true,
       decorations: false,
+      backgroundColor: windowBackgroundColor,
+      allowLinkPreview: false,
       focus: true,
       resizable: true,
       visible: true,
     });
 
     void settingsWindow.once("tauri://created", () => {
+      void settingsWindow.setBackgroundColor(windowBackgroundColor);
       void settingsWindow.setFocus();
     });
     void settingsWindow.once<unknown>("tauri://error", (event) => {

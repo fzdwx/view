@@ -14,6 +14,10 @@
       {
         "title": "View",
         "decorations": false,
+        "backgroundColor": "#000000",
+        "backgroundThrottling": "disabled",
+        "allowLinkPreview": false,
+        "scrollBarStyle": "fluentOverlay",
         "width": 1320,
         "height": 840,
         "minWidth": 980,

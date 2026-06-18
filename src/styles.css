@@ -46,6 +46,8 @@ html,
 body,
 #root {
   height: 100%;
+  -webkit-touch-callout: none;
+  overscroll-behavior: none;
 }
 
 body {
@@ -54,15 +56,73 @@ body {
   color: var(--ink);
   font-family: var(--app-font-family);
   overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 
-button {
+button,
+[role="button"] {
   cursor: default;
+}
+
+input,
+textarea,
+[contenteditable="true"],
+.file-editor,
+.file-preview-code,
+.diff-shell,
+.diff-shell-content,
+.diff-view,
+.terminal-screen,
+.terminal-output {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.font-fallback-prewarm {
+  position: fixed;
+  top: 0;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  color: transparent;
+  font-family:
+    var(--app-font-family), var(--mono), "Apple Color Emoji", "Segoe UI Emoji",
+    "Noto Color Emoji", sans-serif;
+  opacity: 0;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+
+.settings-body,
+.settings-select-options,
+.project-list,
+.command-results,
+.commit-list,
+.branch-scroll,
+.commit-detail-body,
+.commit-details-section,
+.diff-shell,
+.file-preview-frame,
+.media-preview-stage,
+.editor-git-popover-diff,
+.merge-diff-frame,
+.terminal-screen,
+.error-surface pre {
+  overscroll-behavior: contain;
 }
 
 .app-shell {
@@ -2740,7 +2800,8 @@ body.is-resizing-y * {
   display: inline-flex;
   min-width: 0;
   max-width: 100%;
-  align-items: baseline;
+  align-items: center;
+  line-height: 1;
   overflow: hidden;
   white-space: nowrap;
 }
@@ -2750,6 +2811,7 @@ body.is-resizing-y * {
   overflow: hidden;
   color: var(--faint);
   font-weight: 400;
+  line-height: 1;
   text-overflow: ellipsis;
 }
 
@@ -2757,6 +2819,7 @@ body.is-resizing-y * {
   flex: 0 0 auto;
   color: var(--ink);
   font-weight: 500;
+  line-height: 1;
 }
 
 .diff-shell-frame,
@@ -3177,7 +3240,6 @@ body.is-resizing-y * {
   min-height: 7px;
   border: 0;
   border-radius: 0 4px 4px 0;
-  cursor: pointer;
   padding: 0;
 }
 
@@ -3826,36 +3888,14 @@ body.is-resizing-y * {
 }
 
 .loading-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.loading-row {
-  height: 46px;
-  border-radius: 7px;
-  background:
-    linear-gradient(
-      90deg,
-      var(--surface-1),
-      var(--surface-2),
-      var(--surface-1)
-    );
-  background-size: 240% 100%;
-  animation: shimmer 1.2s linear infinite;
+  display: grid;
+  min-height: 112px;
+  place-items: center;
+  color: var(--muted);
 }
 
 .spin {
   animation: spin 800ms linear infinite;
-}
-
-@keyframes shimmer {
-  from {
-    background-position: 100% 0;
-  }
-  to {
-    background-position: -100% 0;
-  }
 }
 
 @keyframes spin {
@@ -3868,8 +3908,10 @@ body.is-resizing-y * {
   *,
   *::before,
   *::after {
-    animation-duration: 1ms !important;
-    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
   }
 }
 

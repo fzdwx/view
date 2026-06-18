@@ -2277,6 +2277,8 @@ fn git_untracked_file_diff(root: &Path, file_path: &str) -> Result<String, Strin
 
 fn git(root: &Path, args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
+        .arg("-c")
+        .arg("core.quotepath=false")
         .arg("-C")
         .arg(root)
         .args(args)
@@ -2292,6 +2294,8 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
 
 fn git_allow_exit(root: &Path, args: &[&str], allowed_codes: &[i32]) -> Result<String, String> {
     let output = Command::new("git")
+        .arg("-c")
+        .arg("core.quotepath=false")
         .arg("-C")
         .arg(root)
         .args(args)
@@ -2771,6 +2775,8 @@ mod tests {
         run_git(&repo, &["add", "."]);
         run_git(&repo, &["commit", "-m", "tracked"]);
         fs::write(repo.join("draft.txt"), "draft\n").expect("write untracked");
+        fs::create_dir_all(repo.join("附件")).expect("create unicode directory");
+        fs::write(repo.join("附件").join("截图.png"), "image\n").expect("write unicode path");
 
         let files = git_files(&repo).expect("project files");
         assert!(
@@ -2783,6 +2789,13 @@ mod tests {
             files.iter().any(|file| file.path == "draft.txt"
                 && file.status.as_deref() == Some("untracked")),
             "untracked files should appear in the project tree"
+        );
+        assert!(
+            files
+                .iter()
+                .any(|file| file.path == "附件/截图.png"
+                    && file.status.as_deref() == Some("untracked")),
+            "unicode paths should not be returned as git quote escapes"
         );
 
         fs::remove_dir_all(repo).ok();

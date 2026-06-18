@@ -5,6 +5,7 @@ import {
   deleteProjectFile,
   renameProjectFile,
 } from "../lib/api";
+import { confirmNativeDialog, showNativeMessage } from "../lib/nativeDialogs";
 import { buildRequestedFilePath } from "../lib/pathLabels";
 import type { PreviewMode } from "../lib/previewTabs";
 import type { SavedProject } from "../lib/projects";
@@ -95,7 +96,10 @@ export function useProjectFileActions({
         await refreshProjectFileState(activeProject.activePath);
         openPreviewTab("file", createdPath);
       } catch (error) {
-        window.alert(error instanceof Error ? error.message : String(error));
+        await showNativeMessage(
+          error instanceof Error ? error.message : String(error),
+          { kind: "error" },
+        );
       }
     },
     [activeProject, openPreviewTab, refreshProjectFileState],
@@ -108,8 +112,13 @@ export function useProjectFileActions({
       }
 
       if (isFileDraftDirty(activeProject.activePath, fromPath)) {
-        const confirmed = window.confirm(
+        const confirmed = await confirmNativeDialog(
           `Rename ${fromPath} and discard unsaved editor changes?`,
+          {
+            cancelLabel: "Cancel",
+            kind: "warning",
+            okLabel: "Rename",
+          },
         );
         if (!confirmed) {
           return;
@@ -130,7 +139,10 @@ export function useProjectFileActions({
         }
         await refreshProjectFileState(activeProject.activePath);
       } catch (error) {
-        window.alert(error instanceof Error ? error.message : String(error));
+        await showNativeMessage(
+          error instanceof Error ? error.message : String(error),
+          { kind: "error" },
+        );
         await refreshProjectFileState(activeProject.activePath);
       }
     },
@@ -152,14 +164,23 @@ export function useProjectFileActions({
         return;
       }
 
-      const confirmed = window.confirm(`Delete ${path}?`);
+      const confirmed = await confirmNativeDialog(`Delete ${path}?`, {
+        cancelLabel: "Cancel",
+        kind: "warning",
+        okLabel: "Delete",
+      });
       if (!confirmed) {
         return;
       }
 
       if (isFileDraftDirty(activeProject.activePath, path)) {
-        const discardConfirmed = window.confirm(
+        const discardConfirmed = await confirmNativeDialog(
           `${path} has unsaved editor changes. Delete it and discard those changes?`,
+          {
+            cancelLabel: "Cancel",
+            kind: "warning",
+            okLabel: "Delete",
+          },
         );
         if (!discardConfirmed) {
           return;
@@ -172,7 +193,10 @@ export function useProjectFileActions({
         removePreviewTabsForPath(path);
         await refreshProjectFileState(activeProject.activePath);
       } catch (error) {
-        window.alert(error instanceof Error ? error.message : String(error));
+        await showNativeMessage(
+          error instanceof Error ? error.message : String(error),
+          { kind: "error" },
+        );
       }
     },
     [
