@@ -18,18 +18,51 @@ export function ResizeHandle({
     event.preventDefault();
 
     let lastPosition = axis === "x" ? event.clientX : event.clientY;
+    let pendingDelta = 0;
+    let resizeFrame: number | null = null;
     document.body.classList.add(
       axis === "x" ? "is-resizing-x" : "is-resizing-y",
     );
 
+    function flushPendingDelta() {
+      if (pendingDelta === 0) {
+        return;
+      }
+
+      onResize(pendingDelta);
+      pendingDelta = 0;
+    }
+
+    function scheduleResizeFlush() {
+      if (resizeFrame !== null) {
+        return;
+      }
+
+      resizeFrame = window.requestAnimationFrame(() => {
+        resizeFrame = null;
+        flushPendingDelta();
+      });
+    }
+
     function handleMove(moveEvent: PointerEvent) {
       const nextPosition =
         axis === "x" ? moveEvent.clientX : moveEvent.clientY;
-      onResize(nextPosition - lastPosition);
+      const delta = nextPosition - lastPosition;
       lastPosition = nextPosition;
+      if (delta === 0) {
+        return;
+      }
+
+      pendingDelta += delta;
+      scheduleResizeFlush();
     }
 
     function stopResize() {
+      if (resizeFrame !== null) {
+        window.cancelAnimationFrame(resizeFrame);
+        resizeFrame = null;
+      }
+      flushPendingDelta();
       document.body.classList.remove("is-resizing-x", "is-resizing-y");
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", stopResize);

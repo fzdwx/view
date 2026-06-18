@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import { memo, type CSSProperties, type ReactNode } from "react";
 import type { BranchInfo, CommitInfo, RepositoryPayload } from "../../lib/api";
 import type { BranchActionKind } from "../../lib/branchModels";
 import type { GitWriteActions } from "../../hooks/useGitWriteActions";
@@ -49,10 +49,11 @@ export interface GitPanelDataProps {
 }
 
 export interface GitPanelsProps {
+  readonly branchSize: number;
   readonly data: GitPanelDataProps;
+  readonly detailsSize: number;
   readonly dockedPanelOrder: GitPanelId[];
   readonly draggedGitPanel: GitPanelId | null;
-  readonly panelSizes: Pick<PanelSizes, "branch" | "details">;
   readonly toolDock: ToolDock;
   readonly onDragEnd: () => void;
   readonly onDragStart: (panel: GitPanelId) => void;
@@ -61,11 +62,12 @@ export interface GitPanelsProps {
   readonly resizePanel: ResizePanel;
 }
 
-export function GitPanels({
+export const GitPanels = memo(function GitPanels({
+  branchSize,
   data,
+  detailsSize,
   dockedPanelOrder,
   draggedGitPanel,
-  panelSizes,
   toolDock,
   onDragEnd,
   onDragStart,
@@ -76,8 +78,8 @@ export function GitPanels({
   const gitLogStyle: CSSProperties = buildGitPanelGridStyle(
     toolDock,
     dockedPanelOrder,
-    panelSizes.branch,
-    panelSizes.details,
+    branchSize,
+    detailsSize,
   );
 
   return (
@@ -114,9 +116,11 @@ export function GitPanels({
       ))}
     </section>
   );
-}
+});
 
-export function GitPanelBody({
+GitPanels.displayName = "GitPanels";
+
+export const GitPanelBody = memo(function GitPanelBody({
   activeCommit,
   commitFilter,
   commits,
@@ -192,7 +196,9 @@ export function GitPanelBody({
       return exhaustivePanelId;
     }
   }
-}
+});
+
+GitPanelBody.displayName = "GitPanelBody";
 
 function EmptyGitPanelDropTarget({
   draggedGitPanel,

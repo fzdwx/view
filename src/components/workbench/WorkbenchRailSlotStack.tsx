@@ -13,11 +13,12 @@ import type {
 export interface WorkbenchRailSlotStackProps {
   readonly activeItem: RailItemId | null;
   readonly activeProjectPath: string | null;
+  readonly branchSize: number;
+  readonly detailsSize: number;
   readonly dockedGitPanelOrder: GitPanelId[];
   readonly draggedGitPanel: GitPanelId | null;
   readonly gitPanelData: GitPanelDataProps;
   readonly items: readonly RailItemId[];
-  readonly panelSizes: Pick<PanelSizes, "branch" | "details">;
   readonly projectTreeContent: ReactNode;
   readonly side: RailSide;
   readonly slot: RailSlot;
@@ -36,11 +37,12 @@ export interface WorkbenchRailSlotStackProps {
 export function WorkbenchRailSlotStack({
   activeItem,
   activeProjectPath,
+  branchSize,
+  detailsSize,
   dockedGitPanelOrder,
   draggedGitPanel,
   gitPanelData,
   items,
-  panelSizes,
   projectTreeContent,
   side,
   slot,
@@ -80,10 +82,11 @@ export function WorkbenchRailSlotStack({
             aria-hidden={activeItem !== "git"}
           >
             <GitPanels
+              branchSize={branchSize}
               data={gitPanelData}
+              detailsSize={detailsSize}
               dockedPanelOrder={dockedGitPanelOrder}
               draggedGitPanel={draggedGitPanel}
-              panelSizes={panelSizes}
               toolDock={dockMode}
               onDragEnd={onDragEnd}
               onDragStart={onDragStart}

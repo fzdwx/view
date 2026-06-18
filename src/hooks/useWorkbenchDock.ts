@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { clamp } from "../lib/numeric";
 import {
   loadWorkbenchLayout,
@@ -44,6 +44,7 @@ export interface WorkbenchDockController {
 
 const railSides: readonly RailSide[] = ["left", "right"];
 const railSlots: readonly RailSlot[] = ["top", "bottom"];
+const layoutSaveDelayMs = 160;
 
 export function useWorkbenchDock(): WorkbenchDockController {
   const [initialLayout] = useState(loadWorkbenchLayout);
@@ -64,6 +65,15 @@ export function useWorkbenchDock(): WorkbenchDockController {
     initialLayout.railActiveItems,
   );
   const [draggedRailItem, setDraggedRailItem] = useState<RailItemId | null>(null);
+  const layoutSaveTimerRef = useRef<number | null>(null);
+  const latestLayoutRef = useRef({
+    ...defaultWorkbenchLayout,
+    gitPanelOrder: initialLayout.gitPanelOrder,
+    detachedGitPanels: initialLayout.detachedGitPanels,
+    railLayout: initialLayout.railLayout,
+    railActiveItems: initialLayout.railActiveItems,
+    panelSizes: initialLayout.panelSizes,
+  });
 
   const clearDockDrag = useCallback(() => {
     setDraggedGitPanel(null);
@@ -71,14 +81,32 @@ export function useWorkbenchDock(): WorkbenchDockController {
   }, []);
 
   useEffect(() => {
-    saveWorkbenchLayout({
+    const nextLayout = {
       ...defaultWorkbenchLayout,
       gitPanelOrder,
       detachedGitPanels,
       railLayout,
       railActiveItems,
       panelSizes,
-    });
+    };
+    latestLayoutRef.current = nextLayout;
+
+    if (layoutSaveTimerRef.current !== null) {
+      window.clearTimeout(layoutSaveTimerRef.current);
+      layoutSaveTimerRef.current = null;
+    }
+
+    layoutSaveTimerRef.current = window.setTimeout(() => {
+      layoutSaveTimerRef.current = null;
+      saveWorkbenchLayout(nextLayout);
+    }, layoutSaveDelayMs);
+
+    return () => {
+      if (layoutSaveTimerRef.current !== null) {
+        window.clearTimeout(layoutSaveTimerRef.current);
+        layoutSaveTimerRef.current = null;
+      }
+    };
   }, [
     detachedGitPanels,
     gitPanelOrder,
@@ -86,6 +114,22 @@ export function useWorkbenchDock(): WorkbenchDockController {
     railActiveItems,
     railLayout,
   ]);
+
+  useEffect(() => {
+    function flushWorkbenchLayout() {
+      if (layoutSaveTimerRef.current !== null) {
+        window.clearTimeout(layoutSaveTimerRef.current);
+        layoutSaveTimerRef.current = null;
+      }
+      saveWorkbenchLayout(latestLayoutRef.current);
+    }
+
+    window.addEventListener("pagehide", flushWorkbenchLayout);
+    return () => {
+      window.removeEventListener("pagehide", flushWorkbenchLayout);
+      flushWorkbenchLayout();
+    };
+  }, []);
 
   useEffect(() => {
     window.addEventListener("dragend", clearDockDrag);
@@ -98,10 +142,17 @@ export function useWorkbenchDock(): WorkbenchDockController {
 
   const resizePanel = useCallback(
     (key: keyof PanelSizes, delta: number, min: number, max: number) => {
-      setPanelSizes((current: PanelSizes) => ({
-        ...current,
-        [key]: clamp(current[key] + delta, min, max),
-      }));
+      setPanelSizes((current: PanelSizes) => {
+        const nextSize = clamp(current[key] + delta, min, max);
+        if (nextSize === current[key]) {
+          return current;
+        }
+
+        return {
+          ...current,
+          [key]: nextSize,
+        };
+      });
     },
     [],
   );

@@ -488,6 +488,18 @@ export function App() {
     setSelectedChangePath(null);
     showDiffSelection();
   }, [showDiffSelection]);
+  const openDiffPreviewPath = useCallback(
+    (path: string) => {
+      openPreviewTab("diff", path);
+    },
+    [openPreviewTab],
+  );
+  const resizeCommitInfo = useCallback(
+    (delta: number) => {
+      resizePanel("commitInfo", -delta, 110, 360);
+    },
+    [resizePanel],
+  );
   const treeGitFileActions = useMemo<TreeGitFileActions>(
     () => ({
       canRun: canRunGitFileAction,
@@ -515,29 +527,51 @@ export function App() {
     ],
   );
 
-  const gitPanelData: GitPanelDataProps = {
-    activeCommit,
-    commitFilter,
-    commits,
-    commitsLoading: commitsQuery.isLoading,
-    detailHeight: panelSizes.commitInfo,
-    filteredCommits,
-    gitFileActions: treeGitFileActions,
-    gitWriteActions,
-    payload,
-    selectedBranch,
-    selectedBranchRef,
-    selectedChangePath,
-    selectedCommit,
-    onBranchAction: performBranchAction,
-    onChangeCommitFilter: setCommitFilter,
-    onOpenDiffPath: (path) => openPreviewTab("diff", path),
-    onResizeCommitInfo: (delta) =>
-      resizePanel("commitInfo", -delta, 110, 360),
-    onSelectBranch: selectBranchRef,
-    onSelectCommit: selectCommit,
-    onSelectWorkingTree: selectWorkingTree,
-  };
+  const gitPanelData = useMemo<GitPanelDataProps>(
+    () => ({
+      activeCommit,
+      commitFilter,
+      commits,
+      commitsLoading: commitsQuery.isLoading,
+      detailHeight: panelSizes.commitInfo,
+      filteredCommits,
+      gitFileActions: treeGitFileActions,
+      gitWriteActions,
+      payload,
+      selectedBranch,
+      selectedBranchRef,
+      selectedChangePath,
+      selectedCommit,
+      onBranchAction: performBranchAction,
+      onChangeCommitFilter: setCommitFilter,
+      onOpenDiffPath: openDiffPreviewPath,
+      onResizeCommitInfo: resizeCommitInfo,
+      onSelectBranch: selectBranchRef,
+      onSelectCommit: selectCommit,
+      onSelectWorkingTree: selectWorkingTree,
+    }),
+    [
+      activeCommit,
+      commitFilter,
+      commits,
+      commitsQuery.isLoading,
+      filteredCommits,
+      gitWriteActions,
+      openDiffPreviewPath,
+      panelSizes.commitInfo,
+      payload,
+      performBranchAction,
+      resizeCommitInfo,
+      selectBranchRef,
+      selectCommit,
+      selectWorkingTree,
+      selectedBranch,
+      selectedBranchRef,
+      selectedChangePath,
+      selectedCommit,
+      treeGitFileActions,
+    ],
+  );
 
   const projectTreeContent = (
     <ProjectFileTreePanel
@@ -672,7 +706,8 @@ export function App() {
                   draggedGitPanel={draggedGitPanel}
                   gitPanelData={gitPanelData}
                   items={railLayout.left.top}
-                  panelSizes={panelSizes}
+                  branchSize={panelSizes.branch}
+                  detailsSize={panelSizes.details}
                   projectTreeContent={projectTreeContent}
                   side="left"
                   slot="top"
@@ -764,7 +799,8 @@ export function App() {
                   draggedGitPanel={draggedGitPanel}
                   gitPanelData={gitPanelData}
                   items={railLayout.right.top}
-                  panelSizes={panelSizes}
+                  branchSize={panelSizes.branch}
+                  detailsSize={panelSizes.details}
                   projectTreeContent={projectTreeContent}
                   side="right"
                   slot="top"
@@ -796,7 +832,8 @@ export function App() {
                       draggedGitPanel={draggedGitPanel}
                       gitPanelData={gitPanelData}
                       items={railLayout.left.bottom}
-                      panelSizes={panelSizes}
+                      branchSize={panelSizes.branch}
+                      detailsSize={panelSizes.details}
                       projectTreeContent={projectTreeContent}
                       side="left"
                       slot="bottom"
@@ -825,7 +862,8 @@ export function App() {
                       draggedGitPanel={draggedGitPanel}
                       gitPanelData={gitPanelData}
                       items={railLayout.right.bottom}
-                      panelSizes={panelSizes}
+                      branchSize={panelSizes.branch}
+                      detailsSize={panelSizes.details}
                       projectTreeContent={projectTreeContent}
                       side="right"
                       slot="bottom"
