@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-router";
 import { App } from "./App";
 import { SettingsWindowApp } from "./components/SettingsWindowApp";
+import { DiffRenderingProvider } from "./components/workbench/DiffRenderingProvider";
 import { prewarmFontFallbacks } from "./lib/fontFallbackPrewarm";
 import { installNativeWebviewBehavior } from "./lib/nativeWebviewBehavior";
 import { installMainWindowStatePersistence } from "./lib/nativeWindowState";
@@ -44,7 +45,9 @@ function RootApp() {
       {isSettingsWindowRoute() ? (
         <SettingsWindowApp />
       ) : (
-        <RouterProvider router={router} />
+        <DiffRenderingProvider>
+          <RouterProvider router={router} />
+        </DiffRenderingProvider>
       )}
     </QueryClientProvider>
   );
