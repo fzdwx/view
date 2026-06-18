@@ -129,6 +129,7 @@ export function PreviewTabBar({
       <div
         ref={scrollRef}
         className={scrollClassName}
+        data-tauri-drag-region
         role="tablist"
         aria-label="Open files"
         onScroll={updateScrollState}
@@ -205,14 +206,14 @@ export function PreviewTabBar({
             );
           })
         ) : selectedPath ? (
-          <div className="preview-tab-placeholder">
+          <div className="preview-tab-placeholder" data-tauri-drag-region>
             {`${previewMode === "diff" ? "Diff" : "File"}: ${fileNameFromPath(
               selectedPath,
             )}`}
           </div>
         ) : null}
       </div>
-      <div className="preview-tabbar-meta">
+      <div className="preview-tabbar-meta" data-tauri-drag-region>
         {previewMode === "diff" && diffStats.files > 0 ? (
           <div className="diff-stat-strip" aria-label="Diff line counts">
             <span className="addition">+{diffStats.additions}</span>
