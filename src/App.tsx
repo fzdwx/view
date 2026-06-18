@@ -640,6 +640,8 @@ export function App() {
                   }
                   files={visibleDiffFiles}
                   title={selectedChangePath ?? "Repository diff"}
+                  projectPath={activeProject?.activePath ?? null}
+                  commit={activeCommit}
                 />
               ) : (
                 <div className="diff-loading">

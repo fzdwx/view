@@ -1258,6 +1258,78 @@ fn read_file_content(root: &Path, file_path: &str) -> Result<FileContent, String
     })
 }
 
+fn git_show_bytes(root: &Path, ref_spec: &str, file_path: &str) -> Result<Vec<u8>, String> {
+    let spec = format!("{ref_spec}:{file_path}");
+    let output = Command::new("git")
+        .arg("-c")
+        .arg("core.quotepath=false")
+        .arg("-C")
+        .arg(root)
+        .args(["show", &spec])
+        .output()
+        .map_err(|error| format!("Failed to run git: {error}"))?;
+
+    if output.status.success() {
+        Ok(output.stdout)
+    } else {
+        Err(stderr_or_status("git command failed", output.stderr))
+    }
+}
+
+fn read_file_content_at_ref(
+    root: &Path,
+    file_path: &str,
+    ref_name: &str,
+) -> Result<FileContent, String> {
+    let media_type = media_type_for_path(Path::new(file_path)).map(str::to_string);
+    let max_bytes = if media_type.is_some() {
+        MAX_MEDIA_FILE_BYTES
+    } else {
+        MAX_TEXT_FILE_BYTES
+    };
+
+    let bytes = git_show_bytes(root, ref_name, file_path)?;
+
+    if bytes.len() as u64 > max_bytes {
+        return Ok(FileContent {
+            path: file_path.to_string(),
+            content: String::new(),
+            binary: media_type.is_some(),
+            too_large: true,
+            media_type,
+            media_data_url: None,
+        });
+    }
+
+    let media_data_url = media_type
+        .as_deref()
+        .map(|mime_type| media_data_url(mime_type, &bytes));
+
+    Ok(FileContent {
+        path: file_path.to_string(),
+        content: String::new(),
+        binary: true,
+        too_large: false,
+        media_type,
+        media_data_url,
+    })
+}
+
+#[tauri::command]
+fn get_file_blob(
+    path: String,
+    file_path: String,
+    ref_name: Option<String>,
+) -> Result<FileContent, String> {
+    let root = repository_root(&path)?;
+    match ref_name.as_deref() {
+        Some(ref_spec) if !ref_spec.trim().is_empty() => {
+            read_file_content_at_ref(&root, &file_path, ref_spec.trim())
+        }
+        _ => read_file_content(&root, &file_path),
+    }
+}
+
 fn write_file_content(
     root: &Path,
     file_path: &str,
@@ -3347,6 +3419,7 @@ pub fn run() {
             get_file_diff,
             get_commits,
             get_project_files,
+            get_file_blob,
             get_file_content,
             save_file_content,
             create_project_file,

@@ -184,6 +184,14 @@ export async function getFileContent(
   return invoke<FileContent>("get_file_content", { path, filePath });
 }
 
+export async function getFileBlob(
+  path: string,
+  filePath: string,
+  ref: string | null,
+): Promise<FileContent> {
+  return invoke<FileContent>("get_file_blob", { path, filePath, refName: ref });
+}
+
 export async function saveFileContent(
   path: string,
   filePath: string,
