@@ -20,6 +20,7 @@ import { hasGitConflictMarkers } from "../../lib/editorDrafts";
 import {
   filterVisibleEditorGitMarkers,
   revertEditorGitMarker,
+  byteOffsetToUtf16,
   utf16OffsetForLine,
 } from "../../lib/editorGitMarkers";
 import {
@@ -248,9 +249,14 @@ export function FilePreview({
     if (textarea.value !== content) {
       textarea.value = content;
     }
-    const lineOffset = utf16OffsetForLine(content, target.line);
+    const lineStart = utf16OffsetForLine(content, target.line);
+    // Convert byte offset within the matched line to UTF-16 offset
+    const lines = content.split(/\r?\n/);
+    const matchedLine = lines[target.line - 1] ?? "";
+    const byteToUtf16 = byteOffsetToUtf16(matchedLine, target.column);
+    const cursorOffset = lineStart + byteToUtf16;
     textarea.focus({ preventScroll: true });
-    textarea.setSelectionRange(lineOffset, lineOffset);
+    textarea.setSelectionRange(cursorOffset, cursorOffset);
     scrollEditorLineIntoView(
       textarea,
       target.line,

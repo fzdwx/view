@@ -36,6 +36,7 @@ export interface PreviewTabsController {
     mode: PreviewMode,
     path: string,
     targetLine?: number | null,
+    targetColumn?: number | null,
   ) => void;
   readonly removePreviewTabsForPath: (path: string) => void;
   readonly reorderPreviewTabs: (fromId: string, toId: string) => void;
@@ -109,7 +110,12 @@ export function usePreviewTabs({
   }, []);
 
   const openPreviewTab = useCallback(
-    (mode: PreviewMode, path: string, targetLine: number | null = null) => {
+    (
+      mode: PreviewMode,
+      path: string,
+      targetLine: number | null = null,
+      targetColumn: number | null = null,
+    ) => {
       const commit = mode === "diff" ? activeCommit : null;
       const id = previewTabId(mode, path, commit);
       const nextTab: PreviewTab = { id, mode, path, commit };
@@ -121,11 +127,23 @@ export function usePreviewTabs({
         return [...tabs, nextTab];
       });
       activatePreviewTab(nextTab);
-      setPreviewTarget(
-        mode === "file" && targetLine
-          ? { line: targetLine, requestId: ++previewRequestIdRef.current }
-          : null,
-      );
+
+      if (mode === "file" && targetLine) {
+        const requestId = ++previewRequestIdRef.current;
+        const line = targetLine;
+        const column = targetColumn ?? 0;
+        // Defer setting previewTarget so it survives the activatePreviewTab
+        // state batch — activatePreviewTab sets previewTarget(null), and we
+        // need our new target to be applied after that, not overwritten by it.
+        window.requestAnimationFrame(() => {
+          if (previewRequestIdRef.current !== requestId) {
+            return;
+          }
+          setPreviewTarget({ line, column, requestId });
+        });
+      } else {
+        setPreviewTarget(null);
+      }
     },
     [activatePreviewTab, activeCommit],
   );

@@ -55,6 +55,31 @@ export function utf16OffsetForLine(content: string, lineNumber: number): number 
   return content.length;
 }
 
+/**
+ * Convert a byte offset within a line to a UTF-16 code unit offset.
+ * Rust returns byte offsets; JS strings use UTF-16.
+ */
+export function byteOffsetToUtf16(line: string, byteOffset: number): number {
+  if (byteOffset <= 0) return 0;
+  let bytes = 0;
+  for (let i = 0; i < line.length; i++) {
+    const code = line.charCodeAt(i);
+    const charBytes = utf8ByteLength(code, i, line);
+    if (bytes >= byteOffset) return i;
+    bytes += charBytes;
+  }
+  return line.length;
+}
+
+function utf8ByteLength(code: number, index: number, line: string): number {
+  if (code <= 0x7f) return 1;
+  if (code <= 0x7ff) return 2;
+  // Surrogate pair (4 bytes UTF-8, 2 UTF-16 code units)
+  if (code >= 0xd800 && code <= 0xdbff) return 4;
+  if (code >= 0xdc00 && code <= 0xdfff) return 0; // low surrogate, already counted
+  return 3;
+}
+
 export function gitMarkerLabel(kind: EditorGitMarker["kind"]): string {
   switch (kind) {
     case "added":

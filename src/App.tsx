@@ -418,7 +418,8 @@ export function App() {
   });
 
   function openFileSearchResult(result: FileSearchResult) {
-    openPreviewTab("file", result.path, result.lineNumber);
+    const matchColumn = result.matchRanges.length > 0 ? result.matchRanges[0][0] : 0;
+    openPreviewTab("file", result.path, result.lineNumber, matchColumn);
     closeCommandPanel();
   }
 

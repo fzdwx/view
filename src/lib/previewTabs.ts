@@ -9,6 +9,7 @@ export interface PreviewTab {
 
 export interface PreviewTarget {
   line: number;
+  column: number;
   requestId: number;
 }
 
