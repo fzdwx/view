@@ -1,0 +1,277 @@
+use super::{stage_files, unstage_files, GitPathsRequest};
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+#[path = "git_test_evidence.rs"]
+mod test_evidence;
+
+#[test]
+fn stage_files_stages_modified_file() {
+    let repo = create_repo_with_tracked_file();
+    fs::write(repo.join("tracked.txt"), "changed\n").expect("modify tracked");
+    let before = git_status(&repo);
+
+    let response = stage_files(request(&repo, ["tracked.txt"])).expect("stage modified file");
+
+    let after = git_status(&repo);
+    write_evidence("stage modified", &before, &after);
+    assert!(after.starts_with("M  tracked.txt"));
+    assert!(response
+        .files
+        .iter()
+        .any(|file| file.path == "tracked.txt" && file.staged && !file.unstaged));
+    fs::remove_dir_all(repo).ok();
+}
+
+#[test]
+fn stage_files_stages_untracked_file() {
+    let repo = create_repo_with_tracked_file();
+    fs::write(repo.join("new.txt"), "new\n").expect("write untracked");
+    let before = git_status(&repo);
+
+    let response = stage_files(request(&repo, ["new.txt"])).expect("stage untracked file");
+
+    let after = git_status(&repo);
+    write_evidence("stage untracked", &before, &after);
+    assert!(after.starts_with("A  new.txt"));
+    assert!(response
+        .files
+        .iter()
+        .any(|file| file.path == "new.txt" && file.staged && !file.untracked));
+    fs::remove_dir_all(repo).ok();
+}
+
+#[test]
+fn stage_files_stages_deleted_file() {
+    let repo = create_repo_with_tracked_file();
+    fs::remove_file(repo.join("tracked.txt")).expect("delete tracked");
+    let before = git_status(&repo);
+
+    let response = stage_files(request(&repo, ["tracked.txt"])).expect("stage deletion");
+
+    let after = git_status(&repo);
+    write_evidence("stage deletion", &before, &after);
+    assert!(after.starts_with("D  tracked.txt"));
+    assert!(response
+        .files
+        .iter()
+        .any(|file| file.path == "tracked.txt" && file.deleted && file.staged));
+    fs::remove_dir_all(repo).ok();
+}
+
+#[test]
+fn stage_files_stages_simple_renamed_file_when_new_path_requested() {
+    let repo = create_repo_with_tracked_file();
+    fs::rename(repo.join("tracked.txt"), repo.join("renamed.txt")).expect("rename tracked file");
+    let before = git_status(&repo);
+
+    let response = stage_files(request(&repo, ["renamed.txt"])).expect("stage renamed file");
+
+    let after = git_status(&repo);
+    write_evidence("stage renamed", &before, &after);
+    assert!(
+        !after.contains(" D tracked.txt"),
+        "after status should not leave an unstaged deletion:\n{after}"
+    );
+    assert!(
+        !after.contains("?? renamed.txt"),
+        "after status should not leave an untracked rename target:\n{after}"
+    );
+    assert!(
+        after.starts_with("R  ")
+            || (after.contains("D  tracked.txt") && after.contains("A  renamed.txt")),
+        "after status should stage both sides of the rename:\n{after}"
+    );
+    assert!(response
+        .files
+        .iter()
+        .any(|file| file.path == "renamed.txt" && file.staged && !file.unstaged));
+    assert!(!response
+        .files
+        .iter()
+        .any(|file| file.path == "tracked.txt" && file.unstaged));
+    fs::remove_dir_all(repo).ok();
+}
+
+#[test]
+fn unstage_files_unstages_staged_file() {
+    let repo = create_repo_with_tracked_file();
+    fs::write(repo.join("tracked.txt"), "changed\n").expect("modify tracked");
+    run_git(&repo, &["add", "tracked.txt"]);
+    let before = git_status(&repo);
+
+    let response = unstage_files(request(&repo, ["tracked.txt"])).expect("unstage file");
+
+    let after = git_status(&repo);
+    write_evidence("unstage staged", &before, &after);
+    assert!(after.starts_with(" M tracked.txt"));
+    assert!(response
+        .files
+        .iter()
+        .any(|file| file.path == "tracked.txt" && !file.staged && file.unstaged));
+    fs::remove_dir_all(repo).ok();
+}
+
+#[test]
+fn stage_files_rejects_path_escaping_repo() {
+    let repo = create_repo_with_tracked_file();
+
+    let error = match stage_files(request(&repo, ["../escape"])) {
+        Ok(_) => panic!("escape path should be rejected"),
+        Err(error) => error,
+    };
+
+    assert!(error.contains("..") || error.contains("outside"));
+    fs::remove_dir_all(repo).ok();
+}
+
+#[test]
+fn stage_files_rejects_empty_path_list() {
+    let repo = create_repo_with_tracked_file();
+
+    let error = match stage_files(GitPathsRequest {
+        path: repo.to_string_lossy().to_string(),
+        paths: Vec::new(),
+    }) {
+        Ok(_) => panic!("empty path list should be rejected"),
+        Err(error) => error,
+    };
+
+    assert!(error.contains("At least one"));
+    fs::remove_dir_all(repo).ok();
+}
+
+#[test]
+fn stage_files_rejects_conflict_path() {
+    let repo = create_conflict_repo();
+
+    let error = match stage_files(request(&repo, ["tracked.txt"])) {
+        Ok(_) => panic!("conflict path should be rejected"),
+        Err(error) => error,
+    };
+
+    assert!(error.contains("conflict"));
+    fs::remove_dir_all(repo).ok();
+}
+
+#[test]
+fn unstage_files_rejects_empty_path_list() {
+    let repo = create_repo_with_tracked_file();
+
+    let error = match unstage_files(GitPathsRequest {
+        path: repo.to_string_lossy().to_string(),
+        paths: Vec::new(),
+    }) {
+        Ok(_) => panic!("empty path list should be rejected"),
+        Err(error) => error,
+    };
+
+    assert!(error.contains("At least one"));
+    fs::remove_dir_all(repo).ok();
+}
+
+#[test]
+fn evidence_writes_require_explicit_env_flag() {
+    assert!(!test_evidence::write_test_evidence_enabled_with(|_| None));
+    assert!(!test_evidence::write_test_evidence_enabled_with(|_| {
+        Some("0".to_string())
+    }));
+    assert!(!test_evidence::write_test_evidence_enabled_with(|_| {
+        Some("true".to_string())
+    }));
+    assert!(test_evidence::write_test_evidence_enabled_with(|_| {
+        Some("1".to_string())
+    }));
+}
+
+fn request<const N: usize>(repo: &Path, paths: [&str; N]) -> GitPathsRequest {
+    GitPathsRequest {
+        path: repo.to_string_lossy().to_string(),
+        paths: paths.into_iter().map(str::to_string).collect(),
+    }
+}
+
+fn create_repo_with_tracked_file() -> PathBuf {
+    let repo = unique_temp_repo_path();
+    fs::create_dir_all(&repo).expect("create temp repo");
+    run_git(&repo, &["init", "--initial-branch=main"]);
+    run_git(&repo, &["config", "user.email", "view@example.test"]);
+    run_git(&repo, &["config", "user.name", "View Test"]);
+    fs::write(repo.join("tracked.txt"), "base\n").expect("write tracked");
+    run_git(&repo, &["add", "tracked.txt"]);
+    run_git(&repo, &["commit", "-m", "base"]);
+    repo
+}
+
+fn create_conflict_repo() -> PathBuf {
+    let repo = create_repo_with_tracked_file();
+    run_git(&repo, &["checkout", "-b", "other"]);
+    fs::write(repo.join("tracked.txt"), "other\n").expect("write other");
+    run_git(&repo, &["commit", "-am", "other"]);
+    run_git(&repo, &["checkout", "main"]);
+    fs::write(repo.join("tracked.txt"), "main\n").expect("write main");
+    run_git(&repo, &["commit", "-am", "main"]);
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&repo)
+        .arg("merge")
+        .arg("other")
+        .output()
+        .expect("run conflicting merge");
+    assert!(!output.status.success());
+    repo
+}
+
+fn unique_temp_repo_path() -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time")
+        .as_nanos();
+    env::temp_dir().join(format!(
+        "view-git-write-test-{}-{nanos}",
+        std::process::id()
+    ))
+}
+
+fn run_git(repo: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .unwrap_or_else(|error| panic!("failed to run git {args:?}: {error}"));
+    if !output.status.success() {
+        panic!(
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+fn git_status(repo: &Path) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["status", "--porcelain=v1", "-uall", "--renames"])
+        .output()
+        .expect("run git status");
+    if !output.status.success() {
+        panic!(
+            "git status failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    String::from_utf8_lossy(&output.stdout).to_string()
+}
+
+fn write_evidence(case_name: &str, before: &str, after: &str) {
+    let record = format!("case: {case_name}\nbefore:\n{before}\nafter:\n{after}\n\n");
+    test_evidence::write_test_evidence(
+        ".omo/evidence/task-4-git-write-actions.txt",
+        record.as_bytes(),
+    );
+}

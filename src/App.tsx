@@ -11,6 +11,7 @@ import { ProjectRail } from "./components/ProjectRail";
 import { ProjectTreeTitle } from "./components/ProjectTreeTitle";
 import { PullChoiceDialog } from "./components/PullChoiceDialog";
 import { ResizeHandle } from "./components/ResizeHandle";
+import type { TreeGitFileActions } from "./components/TreeContextMenu";
 import { FilePreview } from "./components/editor/FilePreview";
 import {
   GitPanels,
@@ -26,6 +27,9 @@ import { useAppSettingsState } from "./hooks/useAppSettingsState";
 import { useCommandPanel } from "./hooks/useCommandPanel";
 import { useEditorDrafts } from "./hooks/useEditorDrafts";
 import { useGitActions } from "./hooks/useGitActions";
+import { useGitFileActions } from "./hooks/useGitFileActions";
+import { useGitWriteGuard } from "./hooks/useGitWriteGuard";
+import { useGitWriteActions } from "./hooks/useGitWriteActions";
 import { usePreviewTabs } from "./hooks/usePreviewTabs";
 import { useProjectFileActions } from "./hooks/useProjectFileActions";
 import { useProjectSelectionActions } from "./hooks/useProjectSelectionActions";
@@ -200,6 +204,29 @@ export function App() {
     onSelectChangePath: setSelectedChangePath,
     onSelectCommit: setActiveCommit,
     onSelectProjectPath: setSelectedProjectPath,
+  });
+  const gitWriteGuard = useGitWriteGuard();
+  const {
+    canRunGitFileAction,
+    gitFileActionPending,
+    gitFileActionPendingTitle,
+    restoreFile,
+    stageFile,
+    unstageFile,
+  } = useGitFileActions({
+    activeProject,
+    discardDraftForPath,
+    editorDrafts,
+    gitWriteGuard,
+    removePreviewTabsForPath,
+    selectedProjectPath,
+    setSelectedProjectPath,
+  });
+  const gitWriteActions = useGitWriteActions({
+    activeProject,
+    editorDrafts,
+    gitWriteGuard,
+    repositoryPayload: payload,
   });
   const {
     currentFileDiff,
@@ -447,6 +474,32 @@ export function App() {
     setSelectedChangePath(null);
     showDiffSelection();
   }, [showDiffSelection]);
+  const treeGitFileActions = useMemo<TreeGitFileActions>(
+    () => ({
+      canRun: canRunGitFileAction,
+      pendingKind: gitFileActionPending?.kind ?? null,
+      pendingPath: gitFileActionPending?.path ?? null,
+      pendingTitle: gitFileActionPendingTitle,
+      onRestoreFile: (path) => {
+        void restoreFile(path);
+      },
+      onStageFile: (path) => {
+        void stageFile(path);
+      },
+      onUnstageFile: (path) => {
+        void unstageFile(path);
+      },
+    }),
+    [
+      canRunGitFileAction,
+      gitFileActionPending?.kind,
+      gitFileActionPending?.path,
+      gitFileActionPendingTitle,
+      restoreFile,
+      stageFile,
+      unstageFile,
+    ],
+  );
 
   const gitPanelData: GitPanelDataProps = {
     activeCommit,
@@ -455,6 +508,8 @@ export function App() {
     commitsLoading: commitsQuery.isLoading,
     detailHeight: panelSizes.commitInfo,
     filteredCommits,
+    gitFileActions: treeGitFileActions,
+    gitWriteActions,
     payload,
     selectedBranch,
     selectedBranchRef,
@@ -475,6 +530,7 @@ export function App() {
       files={projectFilesQuery.data}
       selectedPath={selectedProjectPath}
       title={projectTreeTitle}
+      gitFileActions={treeGitFileActions}
       onDragEnd={handleTreeDragEnd}
       onDragStart={handleTreeDragStart}
       onCreateFile={handleProjectTreeCreateFile}

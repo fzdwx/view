@@ -1,5 +1,4 @@
 import { useCallback, type Dispatch, type SetStateAction } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import {
   createProjectFile,
   deleteProjectFile,
@@ -9,6 +8,7 @@ import { confirmNativeDialog, showNativeMessage } from "../lib/nativeDialogs";
 import { buildRequestedFilePath } from "../lib/pathLabels";
 import type { PreviewMode } from "../lib/previewTabs";
 import type { SavedProject } from "../lib/projects";
+import { useProjectFileStateRefresh } from "./useProjectFileStateRefresh";
 
 export interface UseProjectFileActionsOptions {
   readonly activeProject: SavedProject | undefined;
@@ -51,23 +51,7 @@ export function useProjectFileActions({
   selectedProjectPath,
   setSelectedProjectPath,
 }: UseProjectFileActionsOptions): ProjectFileActions {
-  const queryClient = useQueryClient();
-
-  const refreshProjectFileState = useCallback(
-    async (projectPath: string) => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["commits", projectPath] }),
-        queryClient.invalidateQueries({ queryKey: ["project-files", projectPath] }),
-        queryClient.invalidateQueries({ queryKey: ["repository", projectPath] }),
-        queryClient.invalidateQueries({ queryKey: ["file-content", projectPath] }),
-        queryClient.invalidateQueries({
-          queryKey: ["file-worktree-diff", projectPath],
-        }),
-        queryClient.invalidateQueries({ queryKey: ["file-diff", projectPath] }),
-      ]);
-    },
-    [queryClient],
-  );
+  const refreshProjectFileState = useProjectFileStateRefresh();
 
   const createFileFromTree = useCallback(
     async (parentPath: string | null) => {

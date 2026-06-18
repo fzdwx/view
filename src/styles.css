@@ -2094,9 +2094,6 @@ body.is-resizing-y * {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-  font-size: 10px;
-  text-align: right;
-}
 
 .command-result-context {
   display: flex;
@@ -2204,7 +2201,7 @@ body.is-resizing-y * {
   text-transform: uppercase;
 }
 
-.commit-list-header span {
+.commit-list-header > span {
   min-width: 0;
   padding: 0 10px;
   overflow: hidden;
@@ -2252,11 +2249,23 @@ body.is-resizing-y * {
   min-width: 0;
   height: 100%;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   color: var(--faint);
-  padding: 0 10px;
+  padding: 0 8px;
   text-transform: none;
   letter-spacing: 0;
+}
+
+.commit-header-search-field {
+  display: flex;
+  min-width: 72px;
+  flex: 1 1 140px;
+  align-items: center;
+  gap: 7px;
+}
+
+.commit-header-search-field svg {
+  flex: 0 0 auto;
 }
 
 .commit-header-search input {
@@ -2276,8 +2285,9 @@ body.is-resizing-y * {
 
 .commit-branch-relation {
   display: inline-flex;
-  flex: 0 0 auto;
-  max-width: 230px;
+  flex: 0 1 auto;
+  max-width: 220px;
+  min-width: 0;
   align-items: center;
   gap: 5px;
   overflow: hidden;
@@ -2290,9 +2300,11 @@ body.is-resizing-y * {
 
 .commit-branch-name {
   max-width: 96px;
+  min-width: 0;
   overflow: hidden;
   color: var(--faint);
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .commit-branch-relation .behind,
@@ -2317,6 +2329,50 @@ body.is-resizing-y * {
 
 .commit-branch-relation .sync {
   color: var(--muted);
+}
+
+.commit-push-control {
+  display: inline-flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 5px;
+}
+
+.commit-push-button {
+  display: inline-flex;
+  height: 20px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--success);
+  font-size: 10px;
+  font-weight: 500;
+  padding: 0 7px;
+}
+
+.commit-push-button:hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--success) 46%, var(--line));
+  background: color-mix(in oklch, var(--success) 14%, var(--surface-2));
+  color: var(--ink);
+}
+
+.commit-push-button:disabled {
+  color: var(--faint);
+}
+
+.commit-push-error {
+  min-width: 0;
+  max-width: 150px;
+  overflow: hidden;
+  color: var(--danger);
+  font-size: 10px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .commit-list {
@@ -2889,6 +2945,155 @@ body.is-resizing-y * {
 .commit-detail-line strong {
   color: var(--ink);
   font-weight: 500;
+}
+
+.commit-form {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  gap: 9px;
+  padding: 12px 14px 14px;
+  text-rendering: auto;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: auto;
+}
+
+.commit-form-counts {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.commit-count-pill {
+  display: inline-flex;
+  height: 22px;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 11px;
+  padding: 0 7px;
+  white-space: nowrap;
+}
+
+.commit-count-pill strong {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.commit-count-pill.staged {
+  color: var(--success);
+}
+
+.commit-count-pill.unstaged {
+  color: var(--muted);
+}
+
+.commit-count-pill.conflict {
+  border-color: color-mix(in oklch, var(--danger) 42%, var(--line));
+  color: var(--danger);
+}
+
+.commit-form-scope {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.commit-message-field {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.commit-message-field > span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.commit-message-field textarea {
+  width: 100%;
+  min-height: 72px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  outline: 0;
+  background: var(--surface-1);
+  color: var(--ink);
+  line-height: 1.45;
+  padding: 7px 8px;
+  resize: vertical;
+  text-rendering: auto;
+}
+
+.commit-message-field textarea:focus {
+  border-color: color-mix(in oklch, var(--success) 42%, var(--line-strong));
+  background: var(--surface-2);
+}
+
+.commit-message-field textarea:disabled {
+  color: var(--muted);
+}
+
+.commit-form-footer {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.commit-submit-button {
+  display: inline-flex;
+  height: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid color-mix(in oklch, var(--success) 36%, var(--line));
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--success) 16%, var(--surface-2));
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 0 10px;
+}
+
+.commit-submit-button:hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--success) 58%, var(--line));
+  background: color-mix(in oklch, var(--success) 24%, var(--surface-2));
+}
+
+.commit-submit-button:disabled {
+  border-color: var(--line);
+  background: var(--surface-2);
+  color: var(--faint);
+}
+
+.commit-form-warning {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--warning);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commit-form-error {
+  border: 1px solid color-mix(in oklch, var(--danger) 40%, var(--line));
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--danger) 10%, var(--surface-1));
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 7px 8px;
 }
 
 .compact-detail-pill,
@@ -4135,8 +4340,12 @@ body.is-resizing-y * {
     grid-template-columns: var(--commit-graph-width, 34px) minmax(140px, 1fr) 86px 86px;
   }
 
-  .commit-list-header span:last-child,
+  .commit-list-header > span:last-child,
   .commit-hash {
+    display: none;
+  }
+
+  .commit-push-error {
     display: none;
   }
 }

@@ -2,11 +2,13 @@ import type { DragEvent, ReactNode } from "react";
 import type { TreeFile } from "../../lib/api";
 import { LoadingRows } from "../LoadingRows";
 import { TreePanel } from "../TreePanel";
+import type { TreeGitFileActions } from "../TreeContextMenu";
 
 export interface ProjectFileTreePanelProps {
   readonly emptyCopy?: string;
   readonly emptyTitle?: string;
   readonly files: TreeFile[] | undefined;
+  readonly gitFileActions?: TreeGitFileActions;
   readonly selectedPath: string | null;
   readonly title: ReactNode;
   readonly onCreateFile: (parentPath: string | null) => void;
@@ -21,6 +23,7 @@ export function ProjectFileTreePanel({
   emptyCopy = "Tracked and untracked files will appear here.",
   emptyTitle = "No project files",
   files,
+  gitFileActions,
   selectedPath,
   title,
   onCreateFile,
@@ -39,6 +42,7 @@ export function ProjectFileTreePanel({
           title={title}
           emptyTitle={emptyTitle}
           emptyCopy={emptyCopy}
+          gitFileActions={gitFileActions}
           onDragEnd={onDragEnd}
           onDragStart={onDragStart}
           onCreateFile={onCreateFile}

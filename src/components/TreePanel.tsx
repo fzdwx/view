@@ -1,18 +1,10 @@
-import { prepareFileTreeInput, themeToTreeStyles } from "@pierre/trees";
 import { FileTree, useFileTree } from "@pierre/trees/react";
-import pierreDarkTheme from "@pierre/theme/pierre-dark";
 import type {
-  ContextMenuItem,
-  ContextMenuOpenContext,
   FileTreeDirectoryHandle,
-  FileTreeIcons,
   FileTreeInitialExpansion,
   FileTreeItemHandle,
-  GitStatusEntry,
 } from "@pierre/trees";
-import { FilePlus2, Pencil, Trash2, X } from "lucide-react";
 import {
-  type CSSProperties,
   type DragEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -23,92 +15,23 @@ import {
   useRef,
 } from "react";
 import type { TreeFile } from "../lib/api";
-
-const treeDarkThemeStyles = themeToTreeStyles({
-  ...pierreDarkTheme,
-  bg: "#000000",
-  fg: "#d6d6d6",
-  colors: {
-    ...pierreDarkTheme.colors,
-    "editor.background": "#000000",
-    "editor.selectionBackground": "#242424",
-    "focusBorder": "#3a3a3a",
-    "input.background": "#0b0b0b",
-    "input.border": "#151515",
-    "list.activeSelectionBackground": "#242424",
-    "list.activeSelectionForeground": "#d6d6d6",
-    "list.focusOutline": "#3a3a3a",
-    "list.hoverBackground": "#111111",
-    "scrollbarSlider.background": "#636363",
-    "sideBar.background": "#000000",
-    "sideBar.border": "#151515",
-    "sideBar.foreground": "#d6d6d6",
-    "sideBarSectionHeader.background": "#000000",
-    "sideBarSectionHeader.foreground": "#858585",
-  },
-}) as CSSProperties;
-
-const fileTreeIcons: FileTreeIcons = {
-  set: "complete",
-  colored: true,
-};
-
-const treeContentAlignmentCss = `
-  :host {
-    text-rendering: auto;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: auto;
-  }
-
-  [data-type='item'] {
-    cursor: default;
-    line-height: 1.2;
-  }
-
-  [data-item-section='content'],
-  [data-item-flattened-subitems],
-  [data-item-flattened-subitem],
-  [data-truncate-container],
-  [data-truncate-grid],
-  [data-truncate-content='visible'] {
-    line-height: 1.2;
-  }
-
-  [data-item-section='content'],
-  [data-item-flattened-subitem] {
-    display: flex;
-    align-items: center;
-  }
-
-  [data-item-flattened-subitems] {
-    display: inline-flex;
-    align-items: center;
-    min-width: 0;
-    max-width: 100%;
-  }
-
-  [data-item-flattened-subitem] {
-    cursor: default;
-    min-width: 0;
-  }
-
-  [data-type='context-menu-trigger'] {
-    cursor: default;
-  }
-
-  [data-item-rename-input] {
-    cursor: text;
-  }
-
-  [data-item-flattened-subitem] > [data-truncate-container] {
-    margin-block: 0;
-  }
-`;
-
-interface ClickedFilePath {
-  readonly path: string;
-  readonly selected: boolean;
-}
+import {
+  TreeContextMenu,
+  type TreeGitFileActions,
+  hasTreeContextMenuActions,
+} from "./TreeContextMenu";
+import { TreeEmptyState, TreePanelHeader } from "./TreePanelChrome";
+import {
+  ancestorDirectoryPaths,
+  buildTreePanelData,
+  directoryPathsFor,
+} from "./treePanelData";
+import { getClickedFilePath } from "./treePanelPointer";
+import {
+  fileTreeIcons,
+  treeContentAlignmentCss,
+  treeDarkThemeStyles,
+} from "./treePanelTheme";
 
 interface TreePanelProps {
   files: TreeFile[];
@@ -123,6 +46,7 @@ interface TreePanelProps {
   onCreateFile?(parentPath: string | null): void;
   onDeleteFile?(path: string): void;
   onRenameFile?(fromPath: string, toPath: string): void;
+  gitFileActions?: TreeGitFileActions;
   onSelectPath(path: string): void;
 }
 
@@ -139,33 +63,13 @@ export const TreePanel = memo(function TreePanel({
   onCreateFile,
   onDeleteFile,
   onRenameFile,
+  gitFileActions,
   onSelectPath,
 }: TreePanelProps) {
-  const treeData = useMemo(() => {
-    const inputPaths = uniqueInputPaths(files);
-    const preparedInput = prepareFileTreeInput(inputPaths);
-    const paths = preparedInput.paths;
-    const selectablePaths = new Set(paths);
-    const statusByPath = new Map<string, TreeFile["status"]>();
-    for (const file of files) {
-      if (file.status && selectablePaths.has(file.path)) {
-        statusByPath.set(file.path, file.status);
-      }
-    }
-    const gitStatus = [...statusByPath].map(([path, status]) => ({
-      path,
-      status: status === "conflict" ? "modified" : status,
-    })) as GitStatusEntry[];
+  const treeData = useMemo(() => buildTreePanelData(files), [files]);
 
-    return {
-      paths,
-      preparedInput,
-      selectablePaths,
-      gitStatus,
-    };
-  }, [files]);
-
-  const { paths, preparedInput, selectablePaths, gitStatus } = treeData;
+  const { paths, preparedInput, selectablePaths, fileByPath, gitStatus } =
+    treeData;
   const selectablePathsRef = useRef(selectablePaths);
   const lastTreeSelectionPathRef = useRef(selectedPath);
   const onSelectPathRef = useRef(onSelectPath);
@@ -260,6 +164,10 @@ export const TreePanel = memo(function TreePanel({
     },
     [],
   );
+  const handleCreateRootFile = useCallback(() => {
+    onCreateFile?.(null);
+  }, [onCreateFile]);
+  const createRootFile = onCreateFile ? handleCreateRootFile : undefined;
 
   useEffect(() => {
     model.resetPaths(paths, {
@@ -278,20 +186,11 @@ export const TreePanel = memo(function TreePanel({
 
   if (files.length === 0) {
     return (
-      <div className="tree-empty-state">
-        <div className="empty-title">{emptyTitle}</div>
-        <div className="empty-copy">{emptyCopy}</div>
-        {onCreateFile ? (
-          <button
-            className="ghost-button tree-empty-action"
-            type="button"
-            onClick={() => onCreateFile(null)}
-          >
-            <FilePlus2 size={14} />
-            New file
-          </button>
-        ) : null}
-      </div>
+      <TreeEmptyState
+        emptyCopy={emptyCopy}
+        emptyTitle={emptyTitle}
+        onCreateRootFile={createRootFile}
+      />
     );
   }
 
@@ -303,44 +202,32 @@ export const TreePanel = memo(function TreePanel({
       onClickCapture={handleTreeClickCapture}
       header={
         showHeader ? (
-          <div
-            className="tree-header"
-            draggable={Boolean(onDragStart)}
-            title="Drag to dock the file tree"
+          <TreePanelHeader
+            fileCount={files.length}
+            title={title}
+            onCreateRootFile={createRootFile}
             onDragEnd={onDragEnd}
-            onDragStart={(event) => {
-              event.dataTransfer.effectAllowed = "move";
-              event.dataTransfer.setData("application/x-view-panel", "tree");
-              onDragStart?.(event);
-            }}
-          >
-            <span className="tree-title">{title}</span>
-            <span className="tree-header-actions">
-              {onCreateFile ? (
-                <button
-                  className="icon-button tree-action-button"
-                  type="button"
-                  aria-label="New file"
-                  title="New file"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onCreateFile(null);
-                  }}
-                >
-                  <FilePlus2 size={13} />
-                </button>
-              ) : null}
-              <span>{files.length}</span>
-            </span>
-          </div>
+            onDragStart={onDragStart}
+          />
         ) : null
       }
       renderContextMenu={
-        onCreateFile || onDeleteFile || onRenameFile
+        hasTreeContextMenuActions({
+          canStartRename: Boolean(onRenameFile),
+          gitFileActions,
+          onCreateFile,
+          onDeleteFile,
+        })
           ? (item, context) => (
               <TreeContextMenu
                 item={item}
                 context={context}
+                file={
+                  item.kind === "directory"
+                    ? null
+                    : (fileByPath.get(item.path) ?? null)
+                }
+                gitFileActions={gitFileActions}
                 onCreateFile={onCreateFile}
                 onDeleteFile={onDeleteFile}
                 onStartRename={
@@ -358,163 +245,6 @@ export const TreePanel = memo(function TreePanel({
     />
   );
 });
-
-function TreeContextMenu({
-  context,
-  item,
-  onCreateFile,
-  onDeleteFile,
-  onStartRename,
-}: {
-  context: ContextMenuOpenContext;
-  item: ContextMenuItem;
-  onCreateFile?(parentPath: string | null): void;
-  onDeleteFile?(path: string): void;
-  onStartRename?(path: string): void;
-}) {
-  const parentPath =
-    item.kind === "directory" ? item.path : parentPathFromTreePath(item.path);
-
-  return (
-    <div
-      className="tree-context-menu"
-      data-file-tree-context-menu-root="true"
-      role="menu"
-    >
-      {onCreateFile ? (
-        <button
-          role="menuitem"
-          type="button"
-          onClick={() => {
-            context.close();
-            onCreateFile(parentPath);
-          }}
-        >
-          <FilePlus2 size={13} />
-          New file
-        </button>
-      ) : null}
-      {onStartRename ? (
-        <button
-          role="menuitem"
-          type="button"
-          disabled={item.kind === "directory"}
-          onClick={() => onStartRename(item.path)}
-        >
-          <Pencil size={13} />
-          Rename
-        </button>
-      ) : null}
-      {onDeleteFile ? (
-        <button
-          role="menuitem"
-          type="button"
-          disabled={item.kind === "directory"}
-          onClick={() => {
-            context.close();
-            onDeleteFile(item.path);
-          }}
-        >
-          <Trash2 size={13} />
-          Delete
-        </button>
-      ) : null}
-      <button role="menuitem" type="button" onClick={() => context.close()}>
-        <X size={13} />
-        Close
-      </button>
-    </div>
-  );
-}
-
-function getClickedFilePath(
-  event: ReactMouseEvent<HTMLElement>,
-): ClickedFilePath | null {
-  if (
-    event.button !== 0 ||
-    event.altKey ||
-    event.ctrlKey ||
-    event.metaKey ||
-    event.shiftKey ||
-    event.defaultPrevented
-  ) {
-    return null;
-  }
-
-  for (const item of event.nativeEvent.composedPath()) {
-    if (!(item instanceof HTMLElement)) {
-      continue;
-    }
-    if (isTreeMenuOrEditorTarget(item)) {
-      return null;
-    }
-    if (item.dataset.itemType === "file") {
-      const path = item.dataset.itemPath;
-      return path
-        ? {
-            path,
-            selected: item.hasAttribute("data-item-selected"),
-          }
-        : null;
-    }
-  }
-
-  return null;
-}
-
-function isTreeMenuOrEditorTarget(element: HTMLElement): boolean {
-  return (
-    element.dataset.fileTreeContextMenuRoot === "true" ||
-    element.dataset.type === "context-menu-trigger" ||
-    element.hasAttribute("data-item-rename-input") ||
-    element.matches("input, textarea, button, [contenteditable='true']")
-  );
-}
-
-function ancestorDirectoryPaths(path: string): string[] {
-  const parts = path.split("/").filter(Boolean);
-  const directories: string[] = [];
-
-  for (let index = 1; index < parts.length; index += 1) {
-    directories.push(`${parts.slice(0, index).join("/")}/`);
-  }
-
-  return directories;
-}
-
-function parentPathFromTreePath(path: string): string | null {
-  const parts = path.split("/").filter(Boolean);
-  if (parts.length <= 1) {
-    return null;
-  }
-  return `${parts.slice(0, -1).join("/")}/`;
-}
-
-function directoryPathsFor(paths: readonly string[]): string[] {
-  const directories = new Set<string>();
-  for (const path of paths) {
-    for (const directoryPath of ancestorDirectoryPaths(path)) {
-      directories.add(directoryPath);
-    }
-  }
-  return [...directories];
-}
-
-function uniqueInputPaths(files: readonly TreeFile[]): string[] {
-  const seenPaths = new Set<string>();
-  const paths: string[] = [];
-
-  for (const file of files) {
-    const path = file.path;
-    if (!path || seenPaths.has(path)) {
-      continue;
-    }
-    seenPaths.add(path);
-    paths.push(path);
-  }
-
-  return paths;
-}
 
 function isDirectoryHandle(
   item: FileTreeItemHandle,

@@ -1,12 +1,14 @@
 import type { CSSProperties, ReactNode } from "react";
 import type { BranchInfo, CommitInfo, RepositoryPayload } from "../../lib/api";
 import type { BranchActionKind } from "../../lib/branchModels";
+import type { GitWriteActions } from "../../hooks/useGitWriteActions";
 import {
   buildGitPanelGridStyle,
   isGitPanelId,
 } from "../../lib/workbenchLayout";
 import type { GitPanelId, PanelSizes, ToolDock } from "../../lib/workbenchTypes";
 import { LoadingRows } from "../LoadingRows";
+import type { TreeGitFileActions } from "../TreeContextMenu";
 import { BranchTree } from "../git/BranchTree";
 import { CommitInspector } from "../git/CommitInspector";
 import { VirtualCommitList } from "../git/VirtualCommitList";
@@ -27,6 +29,8 @@ export interface GitPanelDataProps {
   readonly commitsLoading: boolean;
   readonly detailHeight: number;
   readonly filteredCommits: CommitInfo[];
+  readonly gitFileActions?: TreeGitFileActions;
+  readonly gitWriteActions: GitWriteActions;
   readonly payload: RepositoryPayload | undefined;
   readonly selectedBranch: BranchInfo | null;
   readonly selectedBranchRef: string | null;
@@ -119,6 +123,8 @@ export function GitPanelBody({
   commitsLoading,
   detailHeight,
   filteredCommits,
+  gitFileActions,
+  gitWriteActions,
   panelId,
   payload,
   selectedBranch,
@@ -159,6 +165,7 @@ export function GitPanelBody({
             activeCommit={activeCommit}
             branch={selectedBranch}
             filter={commitFilter}
+            gitWriteActions={gitWriteActions}
             loading={commitsLoading}
             onChangeFilter={onChangeCommitFilter}
             onSelectCommit={onSelectCommit}
@@ -172,6 +179,8 @@ export function GitPanelBody({
           branchName={selectedGitRefName(payload, selectedBranchRef)}
           commit={selectedCommit}
           files={payload?.files ?? []}
+          gitFileActions={gitFileActions}
+          gitWriteActions={gitWriteActions}
           detailHeight={detailHeight}
           selectedPath={selectedChangePath}
           onResizeDetails={onResizeCommitInfo}

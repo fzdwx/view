@@ -3,11 +3,13 @@ import { useLayoutEffect, useMemo, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { CheckCircle2, Search } from "lucide-react";
 import type { BranchInfo, CommitInfo } from "../../lib/api";
+import type { GitWriteActions } from "../../hooks/useGitWriteActions";
 import { buildCommitGraph, type CommitGraphRow } from "../../lib/commitGraph";
 import { formatDate } from "../../lib/dateFormat";
 import { shortBranchDisplayName } from "../../lib/branchModels";
 import { LoadingRows } from "../LoadingRows";
 import { CommitGraph, getCommitGraphWidth } from "./CommitGraph";
+import { PushAffordance } from "./PushAffordance";
 
 export function VirtualCommitList({
   commits,
@@ -15,6 +17,7 @@ export function VirtualCommitList({
   activeCommit,
   branch,
   filter,
+  gitWriteActions,
   loading,
   onChangeFilter,
   onSelectCommit,
@@ -25,6 +28,7 @@ export function VirtualCommitList({
   activeCommit: string | null;
   branch: BranchInfo | null;
   filter: string;
+  gitWriteActions: GitWriteActions;
   loading: boolean;
   onChangeFilter(filter: string): void;
   onSelectCommit(hash: string): void;
@@ -67,6 +71,7 @@ export function VirtualCommitList({
           activeCommit={activeCommit}
           branch={branch}
           filter={filter}
+          gitWriteActions={gitWriteActions}
           onChangeFilter={onChangeFilter}
           onSelectWorkingTree={onSelectWorkingTree}
         />
@@ -84,6 +89,7 @@ export function VirtualCommitList({
           activeCommit={activeCommit}
           branch={branch}
           filter={filter}
+          gitWriteActions={gitWriteActions}
           onChangeFilter={onChangeFilter}
           onSelectWorkingTree={onSelectWorkingTree}
         />
@@ -100,6 +106,7 @@ export function VirtualCommitList({
         activeCommit={activeCommit}
         branch={branch}
         filter={filter}
+        gitWriteActions={gitWriteActions}
         onChangeFilter={onChangeFilter}
         onSelectWorkingTree={onSelectWorkingTree}
       />
@@ -138,12 +145,14 @@ function CommitListHeader({
   activeCommit,
   branch,
   filter,
+  gitWriteActions,
   onChangeFilter,
   onSelectWorkingTree,
 }: {
   activeCommit: string | null;
   branch: BranchInfo | null;
   filter: string;
+  gitWriteActions: GitWriteActions;
   onChangeFilter(filter: string): void;
   onSelectWorkingTree(): void;
 }) {
@@ -159,15 +168,21 @@ function CommitListHeader({
           <CheckCircle2 size={13} />
         </button>
       </span>
-      <label className="commit-header-search">
-        <Search size={13} />
-        <input
-          value={filter}
-          onChange={(event) => onChangeFilter(event.target.value)}
-          placeholder="Search commits"
-        />
+      <div className="commit-header-search">
+        <label className="commit-header-search-field">
+          <Search size={13} />
+          <input
+            value={filter}
+            onChange={(event) => onChangeFilter(event.target.value)}
+            placeholder="Search commits"
+          />
+        </label>
         <BranchRelationSummary branch={branch} />
-      </label>
+        <PushAffordance
+          displayedBranch={branch}
+          gitWriteActions={gitWriteActions}
+        />
+      </div>
       <span>Author</span>
       <span>Date</span>
       <span>Hash</span>
