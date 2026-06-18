@@ -53,6 +53,52 @@ const fileTreeIcons: FileTreeIcons = {
   colored: true,
 };
 
+const treeContentAlignmentCss = `
+  [data-type='item'] {
+    cursor: default;
+    line-height: 1.2;
+  }
+
+  [data-item-section='content'],
+  [data-item-flattened-subitems],
+  [data-item-flattened-subitem],
+  [data-truncate-container],
+  [data-truncate-grid],
+  [data-truncate-content='visible'] {
+    line-height: 1.2;
+  }
+
+  [data-item-section='content'],
+  [data-item-flattened-subitem] {
+    display: flex;
+    align-items: center;
+  }
+
+  [data-item-flattened-subitems] {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  [data-item-flattened-subitem] {
+    cursor: default;
+    min-width: 0;
+  }
+
+  [data-type='context-menu-trigger'] {
+    cursor: default;
+  }
+
+  [data-item-rename-input] {
+    cursor: text;
+  }
+
+  [data-item-flattened-subitem] > [data-truncate-container] {
+    margin-block: 0;
+  }
+`;
+
 interface ClickedFilePath {
   readonly path: string;
   readonly selected: boolean;
@@ -130,6 +176,7 @@ export const TreePanel = memo(function TreePanel({
     initialSelectedPaths: selectedPath ? [selectedPath] : [],
     density: "compact",
     icons: fileTreeIcons,
+    unsafeCSS: treeContentAlignmentCss,
     renaming: onRenameFile
       ? {
           canRename: (item) => !item.isFolder,
