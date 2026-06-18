@@ -203,10 +203,22 @@ textarea,
 }
 
 .activity-button.active {
-  border-color: var(--line-strong);
-  background: var(--surface-2);
-  color: var(--accent-strong);
+  border-color: transparent;
+  background: var(--surface-3);
+  color: var(--ink);
   box-shadow: none;
+}
+
+.activity-button.active::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  top: 50%;
+  width: 2px;
+  height: 16px;
+  border-radius: 2px;
+  background: var(--success);
+  transform: translateY(-50%);
 }
 
 .activity-button:disabled {
