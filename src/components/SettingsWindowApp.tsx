@@ -1,5 +1,4 @@
 import { type CSSProperties, useCallback, useMemo, useState } from "react";
-import { isTauriRuntime } from "../lib/api";
 import { notifySettingsChanged } from "../lib/settingsEvents";
 import {
   appFontCss,
@@ -41,9 +40,6 @@ export function SettingsWindowApp() {
   const resetSettings = useCallback(() => {
     updateSettings(defaultAppSettings);
   }, [updateSettings]);
-  const closeSettings = useCallback(() => {
-    void closeSettingsWindow();
-  }, []);
 
   return (
     <main className="settings-window-shell" style={style}>
@@ -56,24 +52,8 @@ export function SettingsWindowApp() {
       <SettingsPage
         settings={settings}
         onChange={updateSettings}
-        onClose={closeSettings}
         onReset={resetSettings}
       />
     </main>
   );
-}
-
-async function closeSettingsWindow(): Promise<void> {
-  if (isTauriRuntime()) {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    await getCurrentWindow().hide();
-    return;
-  }
-
-  if (window.opener !== null) {
-    window.close();
-    return;
-  }
-
-  window.location.assign("/");
 }

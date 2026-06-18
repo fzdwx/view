@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { X } from "lucide-react";
 import type { SystemFont } from "../lib/api";
 import { isTauriRuntime, listSystemFonts } from "../lib/api";
 import {
@@ -19,7 +18,6 @@ import {
 interface SettingsPageProps {
   readonly settings: AppSettings;
   readonly onChange: (settings: AppSettings) => void;
-  readonly onClose: () => void;
   readonly onReset: () => void;
 }
 
@@ -31,7 +29,6 @@ const fallbackFonts: readonly SystemFont[] = [
 export function SettingsPage({
   settings,
   onChange,
-  onClose,
   onReset,
 }: SettingsPageProps) {
   const [activeSection, setActiveSection] =
@@ -80,14 +77,6 @@ export function SettingsPage({
             <div>
               <h1>{settingsSectionTitle(activeSection)}</h1>
             </div>
-            <button
-              type="button"
-              className="icon-button settings-close-button"
-              aria-label="Close settings"
-              onClick={onClose}
-            >
-              <X size={14} />
-            </button>
           </header>
 
           <SettingsSections

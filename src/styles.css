@@ -397,11 +397,6 @@ textarea,
   line-height: 1.2;
 }
 
-.settings-close-button {
-  align-self: start;
-  margin-top: 2px;
-}
-
 .settings-body {
   display: grid;
   align-content: start;
