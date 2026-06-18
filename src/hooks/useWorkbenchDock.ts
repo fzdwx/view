@@ -246,7 +246,7 @@ function reconcileRailActiveItems(
       nextActiveItems[side][slot] =
         currentItem && items.includes(currentItem)
           ? currentItem
-          : (items[0] ?? null);
+          : null;
     }
   }
 
