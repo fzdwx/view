@@ -56,7 +56,11 @@ export function PreviewTabBar({
                 ) : null}
               </button>
               <button
-                className="preview-tab-close"
+                className={
+                  dirtyTabIds.has(tab.id)
+                    ? "preview-tab-close preview-tab-close-dirty"
+                    : "preview-tab-close"
+                }
                 aria-label={`Close ${tab.path}`}
                 onClick={(event) => {
                   event.stopPropagation();
