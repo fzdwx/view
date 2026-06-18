@@ -1,51 +1,31 @@
 import { useCallback, useEffect, useState } from "react";
 import { clamp } from "../lib/numeric";
 import {
-  isGitPanelId,
   loadWorkbenchLayout,
   saveWorkbenchLayout,
 } from "../lib/workbenchLayout";
 import type {
-  EditorDock,
   GitPanelId,
   PanelSizes,
-  ProjectDock,
+  RailActiveItems,
   RailItemId,
   RailLayout,
   RailSide,
   RailSlot,
-  TreeDock,
-  ToolDock,
-  ToolPanelId,
 } from "../lib/workbenchTypes";
+import { defaultWorkbenchLayout } from "../lib/workbenchTypes";
 
 export interface WorkbenchDockController {
-  readonly activityView: ToolPanelId;
   readonly detachedGitPanels: GitPanelId[];
   readonly draggedGitPanel: GitPanelId | null;
-  readonly draggedToolPanel: ToolPanelId | null;
-  readonly draggingEditorPanel: boolean;
-  readonly draggingTreePanel: boolean;
   readonly gitPanelOrder: GitPanelId[];
   readonly panelSizes: PanelSizes;
-  readonly projectInToolDock: boolean;
-  readonly treeVisible: boolean;
-  readonly toolDock: ToolDock;
-  readonly toolPanelCollapsed: boolean;
-  readonly treeDock: TreeDock;
-  readonly clearDockDrag: () => void;
-  readonly dockEditorPanel: (dock: EditorDock) => void;
-  readonly dockProjectPanel: (dock: ProjectDock) => void;
-  readonly dockToolPanel: (panel: ToolPanelId, dock: ToolDock) => void;
-  readonly endToolPanelDrag: () => void;
-  readonly moveGitPanel: (panel: GitPanelId, targetPanel: GitPanelId) => void;
-  readonly toggleLeftRailTree: () => void;
-  readonly toggleTreeVisible: () => void;
+  readonly railActiveItems: RailActiveItems;
   readonly railLayout: RailLayout;
   readonly draggedRailItem: RailItemId | null;
-  readonly toggleSideRailTree: () => void;
-  readonly startRailItemDrag: (item: RailItemId) => void;
+  readonly clearDockDrag: () => void;
   readonly dropRailItem: (item: RailItemId, side: RailSide, slot: RailSlot) => void;
+  readonly moveGitPanel: (panel: GitPanelId, targetPanel: GitPanelId) => void;
   readonly reattachGitPanel: (panel: GitPanelId) => void;
   readonly resizePanel: (
     key: keyof PanelSizes,
@@ -53,30 +33,20 @@ export interface WorkbenchDockController {
     min: number,
     max: number,
   ) => void;
-  readonly selectToolPanelView: (view: ToolPanelId) => void;
-  readonly startEditorPanelDrag: () => void;
+  readonly selectRailItem: (
+    side: RailSide,
+    slot: RailSlot,
+    item: RailItemId,
+  ) => void;
   readonly startGitPanelDrag: (panel: GitPanelId) => void;
-  readonly startToolPanelDrag: (panel: ToolPanelId) => void;
-  readonly startTreePanelDrag: () => void;
+  readonly startRailItemDrag: (item: RailItemId) => void;
 }
+
+const railSides: readonly RailSide[] = ["left", "right"];
+const railSlots: readonly RailSlot[] = ["top", "bottom"];
 
 export function useWorkbenchDock(): WorkbenchDockController {
   const [initialLayout] = useState(loadWorkbenchLayout);
-  const [activityView, setActivityView] = useState<ToolPanelId>(
-    initialLayout.activityView,
-  );
-  const [toolPanelCollapsed, setToolPanelCollapsed] = useState(false);
-  const [toolDock, setToolDock] = useState<ToolDock>(initialLayout.toolDock);
-  const [draggedToolPanel, setDraggedToolPanel] = useState<ToolPanelId | null>(
-    null,
-  );
-  const [treeDock, setTreeDock] = useState<TreeDock>(initialLayout.treeDock);
-  const [projectInToolDock, setProjectInToolDock] = useState(
-    initialLayout.projectInToolDock,
-  );
-  const [treeVisible, setTreeVisible] = useState(initialLayout.treeVisible);
-  const [draggingTreePanel, setDraggingTreePanel] = useState(false);
-  const [draggingEditorPanel, setDraggingEditorPanel] = useState(false);
   const [gitPanelOrder, setGitPanelOrder] = useState<GitPanelId[]>(
     initialLayout.gitPanelOrder,
   );
@@ -90,38 +60,31 @@ export function useWorkbenchDock(): WorkbenchDockController {
   const [railLayout, setRailLayout] = useState<RailLayout>(
     initialLayout.railLayout,
   );
+  const [railActiveItems, setRailActiveItems] = useState<RailActiveItems>(
+    initialLayout.railActiveItems,
+  );
   const [draggedRailItem, setDraggedRailItem] = useState<RailItemId | null>(null);
 
   const clearDockDrag = useCallback(() => {
-    setDraggedToolPanel(null);
     setDraggedGitPanel(null);
-    setDraggingTreePanel(false);
-    setDraggingEditorPanel(false);
     setDraggedRailItem(null);
   }, []);
 
   useEffect(() => {
     saveWorkbenchLayout({
-      activityView,
-      toolDock,
-      treeDock,
-      treeVisible,
-      projectInToolDock,
+      ...defaultWorkbenchLayout,
       gitPanelOrder,
       detachedGitPanels,
       railLayout,
+      railActiveItems,
       panelSizes,
     });
   }, [
-    activityView,
     detachedGitPanels,
     gitPanelOrder,
     panelSizes,
-    projectInToolDock,
+    railActiveItems,
     railLayout,
-    treeVisible,
-    toolDock,
-    treeDock,
   ]);
 
   useEffect(() => {
@@ -135,7 +98,7 @@ export function useWorkbenchDock(): WorkbenchDockController {
 
   const resizePanel = useCallback(
     (key: keyof PanelSizes, delta: number, min: number, max: number) => {
-      setPanelSizes((current) => ({
+      setPanelSizes((current: PanelSizes) => ({
         ...current,
         [key]: clamp(current[key] + delta, min, max),
       }));
@@ -143,91 +106,21 @@ export function useWorkbenchDock(): WorkbenchDockController {
     [],
   );
 
-  const dockToolPanel = useCallback(
-    (panel: ToolPanelId, dock: ToolDock) => {
-      if (panel === "project") {
-        setProjectInToolDock(true);
-      } else if (isGitPanelId(panel)) {
-        setDetachedGitPanels((current) =>
-          current.includes(panel) ? current : [...current, panel],
-        );
-      }
-      setActivityView(panel);
-      setToolPanelCollapsed(false);
-      setToolDock(dock);
-      clearDockDrag();
-    },
-    [clearDockDrag],
-  );
-
-  const startToolPanelDrag = useCallback((panel: ToolPanelId) => {
-    setDraggedToolPanel(panel);
-    if (isGitPanelId(panel)) {
-      setDraggedGitPanel(panel);
-    }
-  }, []);
-
   const startGitPanelDrag = useCallback((panel: GitPanelId) => {
     setDraggedGitPanel(panel);
   }, []);
 
-  const endToolPanelDrag = useCallback(() => {
-    clearDockDrag();
-  }, [clearDockDrag]);
-
-  const dockProjectPanel = useCallback(
-    (nextDock: ProjectDock) => {
-      if (nextDock === "panel") {
-        setProjectInToolDock(true);
-        setActivityView("project");
-        setToolPanelCollapsed(false);
-        setToolDock("bottom");
-        clearDockDrag();
-        return;
-      }
-
-      setProjectInToolDock(false);
-      setTreeDock(nextDock);
-      setTreeVisible(true);
-      if (activityView === "project") {
-        setActivityView("git");
-        setToolPanelCollapsed(false);
-      }
-      clearDockDrag();
-    },
-    [activityView, clearDockDrag],
-  );
-
-  const selectToolPanelView = useCallback(
-    (view: ToolPanelId) => {
-      if (toolDock === "bottom" && activityView === view) {
-        setToolPanelCollapsed((collapsed) => !collapsed);
-        return;
-      }
-
-      setActivityView(view);
-      setToolPanelCollapsed(false);
-    },
-    [activityView, toolDock],
-  );
-
-  const dockEditorPanel = useCallback(
-    (nextDock: EditorDock) => {
-      setTreeDock(nextDock === "left" ? "right" : "left");
-      clearDockDrag();
-    },
-    [clearDockDrag],
-  );
-
   const moveGitPanel = useCallback(
     (panel: GitPanelId, targetPanel: GitPanelId) => {
-      setDetachedGitPanels((current) => current.filter((item) => item !== panel));
-      setGitPanelOrder((current) => {
+      setDetachedGitPanels((current: GitPanelId[]) =>
+        current.filter((item: GitPanelId) => item !== panel),
+      );
+      setGitPanelOrder((current: GitPanelId[]) => {
         if (panel === targetPanel) {
           return current;
         }
 
-        const nextOrder = current.filter((item) => item !== panel);
+        const nextOrder = current.filter((item: GitPanelId) => item !== panel);
         const targetIndex = nextOrder.indexOf(targetPanel);
         if (targetIndex === -1) {
           return current;
@@ -236,122 +129,130 @@ export function useWorkbenchDock(): WorkbenchDockController {
         nextOrder.splice(targetIndex, 0, panel);
         return nextOrder;
       });
-      if (activityView === panel) {
-        setActivityView("git");
-        setToolPanelCollapsed(false);
-      }
       clearDockDrag();
     },
-    [activityView, clearDockDrag],
+    [clearDockDrag],
   );
-
-  const toggleLeftRailTree = useCallback(() => {
-    if (treeDock !== "left") {
-      setProjectInToolDock(false);
-      setTreeDock("left");
-      setTreeVisible(true);
-      return;
-    }
-    setTreeVisible((visible) => !visible);
-  }, [treeDock]);
-
-  const toggleTreeVisible = useCallback(() => {
-    setTreeVisible((visible) => !visible);
-  }, []);
-
-  const toggleSideRailTree = useCallback(() => {
-    if (treeDock !== "right") {
-      setProjectInToolDock(false);
-      setTreeDock("right");
-      setTreeVisible(true);
-      return;
-    }
-    setTreeVisible((visible) => !visible);
-  }, [treeDock]);
 
   const reattachGitPanel = useCallback(
     (panel: GitPanelId) => {
-      setDetachedGitPanels((current) => current.filter((item) => item !== panel));
-      if (activityView === panel) {
-        setActivityView("git");
-        setToolPanelCollapsed(false);
-      }
+      setDetachedGitPanels((current: GitPanelId[]) =>
+        current.filter((item: GitPanelId) => item !== panel),
+      );
       clearDockDrag();
     },
-    [activityView, clearDockDrag],
+    [clearDockDrag],
   );
 
   const startRailItemDrag = useCallback((item: RailItemId) => {
-    // Defer setting drag state until after dragstart completes; rendering the
-    // dock overlay synchronously during dragstart cancels the native drag.
+    // Rendering the overlay synchronously inside dragstart cancels the native drag.
     window.requestAnimationFrame(() => {
       setDraggedRailItem(item);
     });
   }, []);
 
+  const selectRailItem = useCallback(
+    (side: RailSide, slot: RailSlot, item: RailItemId) => {
+      if (!railLayout[side][slot].includes(item)) {
+        return;
+      }
+      setRailActiveItems((current: RailActiveItems) => ({
+        ...current,
+        [side]: {
+          ...current[side],
+          [slot]: current[side][slot] === item ? null : item,
+        },
+      }));
+    },
+    [railLayout],
+  );
+
   const dropRailItem = useCallback(
     (item: RailItemId, side: RailSide, slot: RailSlot) => {
-      setRailLayout((current) => {
-        const next: RailLayout = {
-          left: { top: [...current.left.top], bottom: [...current.left.bottom] },
-          right: { top: [...current.right.top], bottom: [...current.right.bottom] },
-        };
-        for (const railSide of ["left", "right"] as const) {
-          for (const railSlot of ["top", "bottom"] as const) {
-            next[railSide][railSlot] = next[railSide][railSlot].filter(
+      setRailLayout((currentLayout: RailLayout) => {
+        const nextLayout = cloneRailLayout(currentLayout);
+        for (const railSide of railSides) {
+          for (const railSlot of railSlots) {
+            nextLayout[railSide][railSlot] = nextLayout[railSide][railSlot].filter(
               (existing) => existing !== item,
             );
           }
         }
-        next[side][slot] = [...next[side][slot], item];
-        return next;
+        nextLayout[side][slot] = [...nextLayout[side][slot], item];
+        setRailActiveItems((currentActiveItems: RailActiveItems) =>
+          reconcileRailActiveItems(currentActiveItems, nextLayout, {
+            item,
+            side,
+            slot,
+          }),
+        );
+        return nextLayout;
       });
       setDraggedRailItem(null);
     },
     [],
   );
 
-  const startTreePanelDrag = useCallback(() => {
-    setDraggingTreePanel(true);
-  }, []);
-
-  const startEditorPanelDrag = useCallback(() => {
-    setDraggingEditorPanel(true);
-  }, []);
-
   return {
-    activityView,
     detachedGitPanels,
     draggedGitPanel,
-    draggedToolPanel,
-    draggingEditorPanel,
-    draggingTreePanel,
     gitPanelOrder,
     panelSizes,
-    projectInToolDock,
-    treeVisible,
-    toolDock,
-    toolPanelCollapsed,
-    treeDock,
+    railActiveItems,
     railLayout,
     draggedRailItem,
     startRailItemDrag,
+    selectRailItem,
     dropRailItem,
     clearDockDrag,
-    dockEditorPanel,
-    dockProjectPanel,
-    dockToolPanel,
-    endToolPanelDrag,
     moveGitPanel,
     reattachGitPanel,
     resizePanel,
-    selectToolPanelView,
-    startEditorPanelDrag,
     startGitPanelDrag,
-    startToolPanelDrag,
-    startTreePanelDrag,
-    toggleLeftRailTree,
-    toggleTreeVisible,
-    toggleSideRailTree,
   };
+}
+
+function cloneRailLayout(layout: RailLayout): RailLayout {
+  return {
+    left: {
+      top: [...layout.left.top],
+      bottom: [...layout.left.bottom],
+    },
+    right: {
+      top: [...layout.right.top],
+      bottom: [...layout.right.bottom],
+    },
+  };
+}
+
+function reconcileRailActiveItems(
+  currentActiveItems: RailActiveItems,
+  railLayout: RailLayout,
+  preferred: {
+    side: RailSide;
+    slot: RailSlot;
+    item: RailItemId;
+  },
+): RailActiveItems {
+  const nextActiveItems: RailActiveItems = {
+    left: { top: null, bottom: null },
+    right: { top: null, bottom: null },
+  };
+
+  for (const side of railSides) {
+    for (const slot of railSlots) {
+      const items = railLayout[side][slot];
+      const currentItem = currentActiveItems[side][slot];
+      nextActiveItems[side][slot] =
+        currentItem && items.includes(currentItem)
+          ? currentItem
+          : (items[0] ?? null);
+    }
+  }
+
+  if (railLayout[preferred.side][preferred.slot].includes(preferred.item)) {
+    nextActiveItems[preferred.side][preferred.slot] = preferred.item;
+  }
+
+  return nextActiveItems;
 }

@@ -133,6 +133,72 @@ export function buildGitPanelGridStyle(
   };
 }
 
+export function buildRailWorkbenchGridStyle(
+  hasLeftTopPanel: boolean,
+  hasRightTopPanel: boolean,
+  hasBottomPanels: boolean,
+  leftTopWidth: number,
+  rightTopWidth: number,
+  bottomHeight: number,
+): CSSProperties {
+  const columns: string[] = [];
+  const topAreas: string[] = [];
+
+  if (hasLeftTopPanel) {
+    columns.push(`${leftTopWidth}px`, "6px");
+    topAreas.push("left-top", "left-top-splitter");
+  }
+
+  columns.push("minmax(0, 1fr)");
+  topAreas.push("center");
+
+  if (hasRightTopPanel) {
+    columns.push("6px", `${rightTopWidth}px`);
+    topAreas.push("right-top-splitter", "right-top");
+  }
+
+  const templateAreas = [`"${topAreas.join(" ")}"`];
+  if (hasBottomPanels) {
+    templateAreas.push(
+      `"${topAreas.map(() => "bottom-splitter").join(" ")}"`,
+      `"${topAreas.map(() => "bottom").join(" ")}"`,
+    );
+  }
+
+  return {
+    gridTemplateColumns: columns.join(" "),
+    gridTemplateRows: hasBottomPanels
+      ? `minmax(0, 1fr) 6px ${bottomHeight}px`
+      : "minmax(0, 1fr)",
+    gridTemplateAreas: templateAreas.join(" "),
+  };
+}
+
+export function buildRailBottomPanelsStyle(
+  hasLeftBottomPanel: boolean,
+  hasRightBottomPanel: boolean,
+  leftBottomWidth: number,
+): CSSProperties {
+  if (hasLeftBottomPanel && hasRightBottomPanel) {
+    return {
+      gridTemplateColumns: `${leftBottomWidth}px 10px minmax(0, 1fr)`,
+      gridTemplateAreas: '"left-bottom bottom-inner-splitter right-bottom"',
+    };
+  }
+
+  if (hasLeftBottomPanel) {
+    return {
+      gridTemplateColumns: "minmax(0, 1fr)",
+      gridTemplateAreas: '"left-bottom"',
+    };
+  }
+
+  return {
+    gridTemplateColumns: "minmax(0, 1fr)",
+    gridTemplateAreas: '"right-bottom"',
+  };
+}
+
 export function gitPanelLabel(panelId: GitPanelId): string {
   switch (panelId) {
     case "branches":

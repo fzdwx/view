@@ -2,11 +2,13 @@ import { clamp } from "./numeric";
 import { isGitPanelId } from "./workbenchGrid";
 import {
   defaultGitPanelOrder,
+  defaultRailActiveItems,
   defaultPanelSizes,
   defaultRailLayout,
   defaultWorkbenchLayout,
   type GitPanelId,
   type PanelSizes,
+  type RailActiveItems,
   type RailItemId,
   type RailLayout,
   type ToolDock,
@@ -15,7 +17,8 @@ import {
   type WorkbenchLayout,
 } from "./workbenchTypes";
 
-const layoutStorageKey = "view.workbench-layout.v1";
+const layoutStorageKey = "view.workbench-layout.v2";
+const legacyLayoutStorageKey = "view.workbench-layout.v1";
 
 export function loadWorkbenchLayout(): WorkbenchLayout {
   if (typeof localStorage === "undefined") {
@@ -23,7 +26,9 @@ export function loadWorkbenchLayout(): WorkbenchLayout {
   }
 
   try {
-    const raw = localStorage.getItem(layoutStorageKey);
+    const raw =
+      localStorage.getItem(layoutStorageKey) ??
+      localStorage.getItem(legacyLayoutStorageKey);
     if (!raw) {
       return defaultWorkbenchLayout;
     }
@@ -49,6 +54,7 @@ function normalizeWorkbenchLayout(value: unknown): WorkbenchLayout {
       ? record.projectInToolDock
       : defaultWorkbenchLayout.projectInToolDock;
   const detachedGitPanels = normalizeDetachedGitPanels(record.detachedGitPanels);
+  const railLayout = normalizeRailLayout(record.railLayout);
   const activityView = normalizeActivityView(
     record.activityView,
     projectInToolDock,
@@ -70,7 +76,11 @@ function normalizeWorkbenchLayout(value: unknown): WorkbenchLayout {
     projectInToolDock,
     gitPanelOrder: normalizeGitPanelOrder(record.gitPanelOrder),
     detachedGitPanels,
-    railLayout: normalizeRailLayout(record.railLayout),
+    railLayout,
+    railActiveItems: normalizeRailActiveItems(
+      record.railActiveItems,
+      railLayout,
+    ),
     panelSizes: normalizePanelSizes(record.panelSizes),
   };
 }
@@ -115,6 +125,57 @@ function normalizeRailLayout(value: unknown): RailLayout {
     }
   }
   return { left, right };
+}
+
+function normalizeRailActiveItems(
+  value: unknown,
+  railLayout: RailLayout,
+): RailActiveItems {
+  const record = isRecord(value) ? value : {};
+  const fallback = defaultRailActiveItemsForLayout(railLayout);
+  return {
+    left: normalizeRailActiveSide(record.left, railLayout.left, fallback.left),
+    right: normalizeRailActiveSide(record.right, railLayout.right, fallback.right),
+  };
+}
+
+function normalizeRailActiveSide(
+  value: unknown,
+  railSide: { top: RailItemId[]; bottom: RailItemId[] },
+  fallback: { top: RailItemId | null; bottom: RailItemId | null },
+): { top: RailItemId | null; bottom: RailItemId | null } {
+  const record = isRecord(value) ? value : {};
+  return {
+    top: normalizeRailActiveItem(record.top, railSide.top, fallback.top),
+    bottom: normalizeRailActiveItem(record.bottom, railSide.bottom, fallback.bottom),
+  };
+}
+
+function normalizeRailActiveItem(
+  value: unknown,
+  items: readonly RailItemId[],
+  fallback: RailItemId | null,
+): RailItemId | null {
+  if (isRailItemId(value) && items.includes(value)) {
+    return value;
+  }
+  if (fallback && items.includes(fallback)) {
+    return fallback;
+  }
+  return items[0] ?? null;
+}
+
+function defaultRailActiveItemsForLayout(railLayout: RailLayout): RailActiveItems {
+  return {
+    left: {
+      top: railLayout.left.top[0] ?? defaultRailActiveItems.left.top,
+      bottom: railLayout.left.bottom[0] ?? defaultRailActiveItems.left.bottom,
+    },
+    right: {
+      top: railLayout.right.top[0] ?? defaultRailActiveItems.right.top,
+      bottom: railLayout.right.bottom[0] ?? defaultRailActiveItems.right.bottom,
+    },
+  };
 }
 
 function normalizeRailSide(value: unknown): { top: RailItemId[]; bottom: RailItemId[] } {
@@ -203,6 +264,32 @@ function normalizePanelSizes(value: unknown): PanelSizes {
       defaultPanelSizes.sideDock,
       320,
       620,
+    ),
+    leftTop: normalizePanelSize(
+      record.leftTop,
+      typeof record.tree === "number" ? record.tree : defaultPanelSizes.leftTop,
+      220,
+      560,
+    ),
+    rightTop: normalizePanelSize(
+      record.rightTop,
+      typeof record.sideDock === "number"
+        ? record.sideDock
+        : defaultPanelSizes.rightTop,
+      220,
+      560,
+    ),
+    bottom: normalizePanelSize(
+      record.bottom,
+      typeof record.log === "number" ? record.log : defaultPanelSizes.bottom,
+      180,
+      560,
+    ),
+    bottomLeft: normalizePanelSize(
+      record.bottomLeft,
+      defaultPanelSizes.bottomLeft,
+      260,
+      1400,
     ),
   };
 }

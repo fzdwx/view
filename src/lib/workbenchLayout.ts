@@ -1,4 +1,6 @@
 export {
+  buildRailBottomPanelsStyle,
+  buildRailWorkbenchGridStyle,
   buildContentGridStyle,
   buildGitPanelGridStyle,
   gitPanelLabel,

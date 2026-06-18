@@ -10,7 +10,7 @@ export interface ProjectSideRailProps {
   readonly isActiveItem: (item: RailItemId) => boolean;
   readonly railLayout: RailLayout;
   readonly onDropRailItem: (item: RailItemId, slot: "top" | "bottom") => void;
-  readonly onSelectRailItem: (item: RailItemId) => void;
+  readonly onSelectRailItem: (item: RailItemId, slot: "top" | "bottom") => void;
   readonly onStartRailItemDrag: (item: RailItemId) => void;
 }
 

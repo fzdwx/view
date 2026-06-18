@@ -17,6 +17,11 @@ export interface RailPlacement {
 
 export type RailLayout = Record<RailSide, { top: RailItemId[]; bottom: RailItemId[] }>;
 
+export type RailActiveItems = Record<
+  RailSide,
+  { top: RailItemId | null; bottom: RailItemId | null }
+>;
+
 export type ToolPanelId = "project" | "git" | "terminal" | GitPanelId;
 
 export interface PanelSizes {
@@ -27,6 +32,10 @@ export interface PanelSizes {
   details: number;
   commitInfo: number;
   sideDock: number;
+  leftTop: number;
+  rightTop: number;
+  bottom: number;
+  bottomLeft: number;
 }
 
 export interface WorkbenchLayout {
@@ -38,6 +47,7 @@ export interface WorkbenchLayout {
   gitPanelOrder: GitPanelId[];
   detachedGitPanels: GitPanelId[];
   railLayout: RailLayout;
+  railActiveItems: RailActiveItems;
   panelSizes: PanelSizes;
 }
 
@@ -55,11 +65,20 @@ export const defaultPanelSizes: PanelSizes = {
   details: 280,
   commitInfo: 154,
   sideDock: 420,
+  leftTop: 300,
+  rightTop: 300,
+  bottom: 280,
+  bottomLeft: 480,
 };
 
 export const defaultRailLayout: RailLayout = {
   left: { top: ["fileTree"], bottom: ["git", "terminal"] },
   right: { top: [], bottom: [] },
+};
+
+export const defaultRailActiveItems: RailActiveItems = {
+  left: { top: "fileTree", bottom: "git" },
+  right: { top: null, bottom: null },
 };
 
 export const defaultWorkbenchLayout: WorkbenchLayout = {
@@ -71,5 +90,6 @@ export const defaultWorkbenchLayout: WorkbenchLayout = {
   gitPanelOrder: defaultGitPanelOrder,
   detachedGitPanels: [],
   railLayout: defaultRailLayout,
+  railActiveItems: defaultRailActiveItems,
   panelSizes: defaultPanelSizes,
 };

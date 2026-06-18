@@ -17,14 +17,10 @@ import { WindowControls } from "./components/WindowControls";
 import type { TreeGitFileActions } from "./components/TreeContextMenu";
 import { FilePreview } from "./components/editor/FilePreview";
 import {
-  GitPanels,
   type GitPanelDataProps,
 } from "./components/workbench/GitPanels";
 import { ProjectFileTreePanel } from "./components/workbench/ProjectFileTreePanel";
-import { ToolDockPanel } from "./components/workbench/ToolDockPanel";
-import { WorkbenchDockOverlay } from "./components/workbench/WorkbenchDockOverlay";
-import { WorkbenchToolPanelStack } from "./components/workbench/WorkbenchToolPanelStack";
-import { gitToolPanels, toolPanels } from "./components/workbench/toolPanels";
+import { WorkbenchRailSlotStack } from "./components/workbench/WorkbenchRailSlotStack";
 import { useAppKeyboardShortcuts } from "./hooks/useAppKeyboardShortcuts";
 import { useAppSettingsState } from "./hooks/useAppSettingsState";
 import { useCommandPanel } from "./hooks/useCommandPanel";
@@ -52,9 +48,16 @@ import {
 } from "./lib/projects";
 import { projectRootFromPayload } from "./lib/repositoryPayload";
 import {
-  buildContentGridStyle,
+  buildRailBottomPanelsStyle,
+  buildRailWorkbenchGridStyle,
 } from "./lib/workbenchLayout";
-import type { RailItemId } from "./lib/workbenchTypes";
+import type {
+  RailItemId,
+  RailLayout,
+  RailSlot,
+  RailSide,
+  ToolPanelId,
+} from "./lib/workbenchTypes";
 
 export function App() {
   const queryClient = useQueryClient();
@@ -72,40 +75,24 @@ export function App() {
   const [commitFilter, setCommitFilter] = useState("");
   const [projectSwitcherOpen, setProjectSwitcherOpen] = useState(false);
   const {
-    activityView,
-    detachedGitPanels,
     draggedGitPanel,
-    draggedToolPanel,
-    draggingTreePanel,
     gitPanelOrder,
     panelSizes,
-    projectInToolDock,
+    railActiveItems,
     railLayout,
     draggedRailItem,
-    toolDock,
-    toolPanelCollapsed,
-    treeDock,
-    treeVisible,
     clearDockDrag,
-    dockEditorPanel,
-    dockProjectPanel,
-    dockToolPanel,
     dropRailItem,
-    endToolPanelDrag,
     moveGitPanel,
     reattachGitPanel,
     resizePanel,
-    selectToolPanelView,
+    selectRailItem,
     startGitPanelDrag,
     startRailItemDrag,
-    startToolPanelDrag,
-    startTreePanelDrag,
-    toggleLeftRailTree,
-    toggleSideRailTree,
   } = useWorkbenchDock();
 
   const activeProject = projects.find(
-    (project) => project.id === activeProjectId,
+    (project: SavedProject) => project.id === activeProjectId,
   );
   const activeProjectPath = activeProject?.activePath ?? null;
   const {
@@ -320,9 +307,9 @@ export function App() {
 
     const rootPath = projectRootFromPayload(payload);
     const name = projectNameFromPath(rootPath);
-    setProjects((current) => {
+    setProjects((current: SavedProject[]) => {
       let changed = false;
-      const nextProjects = current.map((project) => {
+      const nextProjects = current.map((project: SavedProject) => {
         if (project.id !== activeProject.id) {
           return project;
         }
@@ -341,19 +328,31 @@ export function App() {
     });
   }, [activeProject?.id, repositoryQuery.data]);
 
-  const hasProjectSidePanel = !projectInToolDock && treeVisible;
-  const contentGridStyle = buildContentGridStyle(
-    treeDock,
-    toolDock,
-    hasProjectSidePanel,
-    panelSizes.tree,
-    toolPanelCollapsed ? 36 : panelSizes.log,
-    panelSizes.sideDock,
+  const leftTopActiveItem = railActiveItems.left.top;
+  const leftBottomActiveItem = railActiveItems.left.bottom;
+  const rightTopActiveItem = railActiveItems.right.top;
+  const rightBottomActiveItem = railActiveItems.right.bottom;
+  const hasLeftTopPanel = leftTopActiveItem !== null;
+  const hasLeftBottomPanel = leftBottomActiveItem !== null;
+  const hasRightTopPanel = rightTopActiveItem !== null;
+  const hasRightBottomPanel = rightBottomActiveItem !== null;
+  const hasBottomPanels = hasLeftBottomPanel || hasRightBottomPanel;
+  const contentGridStyle = buildRailWorkbenchGridStyle(
+    hasLeftTopPanel,
+    hasRightTopPanel,
+    hasBottomPanels,
+    panelSizes.leftTop,
+    panelSizes.rightTop,
+    panelSizes.bottom,
   );
-  const editorDock = treeDock === "left" ? "right" : "left";
-  const dockedGitPanelOrder = gitPanelOrder.filter(
-    (panel) => !detachedGitPanels.includes(panel),
-  );
+  const bottomPanelsStyle = hasBottomPanels
+    ? buildRailBottomPanelsStyle(
+        hasLeftBottomPanel,
+        hasRightBottomPanel,
+        panelSizes.bottomLeft,
+      )
+    : undefined;
+  const dockedGitPanelOrder = gitPanelOrder;
   const projectTreeTitle = useMemo(
     () =>
       activeProject ? (
@@ -363,12 +362,6 @@ export function App() {
       ),
     [activeProject?.activePath],
   );
-  const handleTreeDragEnd = useCallback(() => {
-    clearDockDrag();
-  }, [clearDockDrag]);
-  const handleTreeDragStart = useCallback(() => {
-    startTreePanelDrag();
-  }, [startTreePanelDrag]);
   const handleProjectTreeCreateFile = useCallback((parentPath: string | null) => {
     void createFileFromTree(parentPath);
   }, [createFileFromTree]);
@@ -394,7 +387,7 @@ export function App() {
     setSelectedChangePath(null);
   }, []);
   const toggleProjectSwitcher = useCallback(() => {
-    setProjectSwitcherOpen((open) => !open);
+    setProjectSwitcherOpen((open: boolean) => !open);
   }, []);
   const closeProjectSwitcher = useCallback(() => {
     setProjectSwitcherOpen(false);
@@ -430,7 +423,18 @@ export function App() {
     onOpenFindInFiles: () => openCommandPanel("content"),
     onOpenPullChoice: openPullChoice,
     onSaveActiveFile: saveActivePreviewFile,
-    onSelectToolPanelView: selectToolPanelView,
+    onSelectToolPanelView: (view: ToolPanelId) => {
+      const item =
+        view === "project"
+          ? "fileTree"
+          : view === "terminal"
+            ? "terminal"
+            : "git";
+      const placement = findRailItemPlacement(railLayout, item);
+      if (placement) {
+        selectRailItem(placement.side, placement.slot, item);
+      }
+    },
     onSwitchTab: activateAdjacentTab,
     onToggleProjectSwitcher: toggleProjectSwitcher,
     onJumpToDiffFile: () => {
@@ -490,13 +494,13 @@ export function App() {
       pendingKind: gitFileActionPending?.kind ?? null,
       pendingPath: gitFileActionPending?.path ?? null,
       pendingTitle: gitFileActionPendingTitle,
-      onRestoreFile: (path) => {
+      onRestoreFile: (path: string) => {
         void restoreFile(path);
       },
-      onStageFile: (path) => {
+      onStageFile: (path: string) => {
         void stageFile(path);
       },
-      onUnstageFile: (path) => {
+      onUnstageFile: (path: string) => {
         void unstageFile(path);
       },
     }),
@@ -541,8 +545,6 @@ export function App() {
       selectedPath={selectedProjectPath}
       title={projectTreeTitle}
       gitFileActions={treeGitFileActions}
-      onDragEnd={handleTreeDragEnd}
-      onDragStart={handleTreeDragStart}
       onCreateFile={handleProjectTreeCreateFile}
       onDeleteFile={handleProjectTreeDeleteFile}
       onRenameFile={handleProjectTreeRenameFile}
@@ -550,78 +552,25 @@ export function App() {
     />
   );
 
-  const gitPanelContent = (
-    <GitPanels
-      data={gitPanelData}
-      dockedPanelOrder={dockedGitPanelOrder}
-      draggedGitPanel={draggedGitPanel}
-      panelSizes={panelSizes}
-      toolDock={toolDock}
-      onDragEnd={clearDockDrag}
-      onDragStart={startGitPanelDrag}
-      onDropPanel={moveGitPanel}
-      onReattachPanel={reattachGitPanel}
-      resizePanel={resizePanel}
-    />
-  );
-
-  const toolPanelContent = (
-    <WorkbenchToolPanelStack
-      activeProjectPath={activeProject?.activePath ?? null}
-      activityView={activityView}
-      gitPanelContent={gitPanelContent}
-      gitPanelData={gitPanelData}
-      projectTreeContent={projectTreeContent}
-      onDragEnd={clearDockDrag}
-      onDragStart={startToolPanelDrag}
-    />
-  );
-  const visibleToolPanels = [
-    ...(projectInToolDock
-      ? toolPanels.filter((panel) => panel.id === "project")
-      : []),
-    ...gitToolPanels.filter((panel) => detachedGitPanels.includes(panel.id)),
-  ];
-  const hasRightRail =
-    railLayout.right.top.length > 0 || railLayout.right.bottom.length > 0;
-
   const isRailItemActive = useCallback(
     (side: "left" | "right") => (item: RailItemId) => {
-      if (item === "git") {
-        return activityView === "git";
-      }
-      if (item === "terminal") {
-        return activityView === "terminal";
-      }
-      return treeDock === side && treeVisible;
+      return (
+        railActiveItems[side].top === item || railActiveItems[side].bottom === item
+      );
     },
-    [activityView, treeDock, treeVisible],
+    [railActiveItems],
   );
 
   const handleSelectRailItem = useCallback(
-    (side: "left" | "right") => (item: RailItemId) => {
-      if (item === "git") {
-        selectToolPanelView("git");
-        return;
-      }
-      if (item === "terminal") {
-        selectToolPanelView("terminal");
-        return;
-      }
-      if (side === "left") {
-        toggleLeftRailTree();
-        return;
-      }
-      toggleSideRailTree();
+    (side: "left" | "right") => (item: RailItemId, slot: "top" | "bottom") => {
+      selectRailItem(side, slot, item);
     },
-    [selectToolPanelView, toggleLeftRailTree, toggleSideRailTree],
+    [selectRailItem],
   );
 
   const shellStyle = {
     ...appShellStyle,
-    gridTemplateColumns: hasRightRail
-      ? "48px minmax(0, 1fr) 48px"
-      : "48px minmax(0, 1fr)",
+    gridTemplateColumns: "48px minmax(0, 1fr) 48px",
     gridTemplateRows: "35px minmax(0, 1fr)",
   };
 
@@ -711,30 +660,38 @@ export function App() {
           </div>
         ) : (
           <div
-            className={`content-grid dock-${toolDock} tree-dock-${treeDock}${
-              draggedToolPanel ||
-              draggedGitPanel ||
-              draggingTreePanel
-                ? " is-docking"
-                : ""
-            }`}
+            className="content-grid"
             style={contentGridStyle}
           >
-            {hasProjectSidePanel ? (
+            {hasLeftTopPanel ? (
               <>
-                {projectTreeContent}
+                <WorkbenchRailSlotStack
+                  activeItem={leftTopActiveItem}
+                  activeProjectPath={activeProject?.activePath ?? null}
+                  dockedGitPanelOrder={dockedGitPanelOrder}
+                  draggedGitPanel={draggedGitPanel}
+                  gitPanelData={gitPanelData}
+                  items={railLayout.left.top}
+                  panelSizes={panelSizes}
+                  projectTreeContent={projectTreeContent}
+                  side="left"
+                  slot="top"
+                  onDragEnd={clearDockDrag}
+                  onDragStart={startGitPanelDrag}
+                  onDropPanel={moveGitPanel}
+                  onReattachPanel={reattachGitPanel}
+                  resizePanel={resizePanel}
+                />
                 <ResizeHandle
                   axis="x"
-                  className="tree-diff-splitter"
-                  label="Resize file tree panel"
-                  onResize={(delta) =>
-                    resizePanel("tree", treeDock === "left" ? delta : -delta, 220, 560)
-                  }
+                  className="rail-left-top-splitter"
+                  label="Resize left rail slot"
+                  onResize={(delta) => resizePanel("leftTop", delta, 220, 560)}
                 />
               </>
             ) : null}
 
-            <section className="diff-panel">
+            <section className="diff-panel rail-editor-panel">
               {previewMode === "file" ? (
                 <FilePreview
                   draft={activeEditorDraft}
@@ -792,84 +749,108 @@ export function App() {
                 </div>
               )}
             </section>
-            {toolDock === "bottom" ? (
-              <>
-                <ResizeHandle
-                  axis="y"
-                  className="main-log-splitter"
-                  label="Resize tool panel"
-                  onResize={(delta) => resizePanel("log", -delta, 180, 560)}
-                />
-                <ToolDockPanel
-                  activeView={activityView}
-                  collapsed={toolPanelCollapsed}
-                  dock="bottom"
-                  panels={visibleToolPanels}
-                  onDragEnd={endToolPanelDrag}
-                  onDragStart={startToolPanelDrag}
-                  onSelectView={selectToolPanelView}
-                >
-                  {toolPanelContent}
-                </ToolDockPanel>
-              </>
-            ) : (
+            {hasRightTopPanel ? (
               <>
                 <ResizeHandle
                   axis="x"
-                  className="side-dock-splitter"
-                  label="Resize tool panel"
-                  onResize={(delta) =>
-                    resizePanel(
-                      "sideDock",
-                      toolDock === "left" ? delta : -delta,
-                      320,
-                      620,
-                    )
-                  }
+                  className="rail-right-top-splitter"
+                  label="Resize right rail slot"
+                  onResize={(delta) => resizePanel("rightTop", -delta, 220, 560)}
                 />
-                <ToolDockPanel
-                  activeView={activityView}
-                  collapsed={toolPanelCollapsed}
-                  dock={toolDock}
-                  panels={visibleToolPanels}
-                  onDragEnd={endToolPanelDrag}
-                  onDragStart={startToolPanelDrag}
-                  onSelectView={selectToolPanelView}
-                >
-                  {toolPanelContent}
-                </ToolDockPanel>
+                <WorkbenchRailSlotStack
+                  activeItem={rightTopActiveItem}
+                  activeProjectPath={activeProject?.activePath ?? null}
+                  dockedGitPanelOrder={dockedGitPanelOrder}
+                  draggedGitPanel={draggedGitPanel}
+                  gitPanelData={gitPanelData}
+                  items={railLayout.right.top}
+                  panelSizes={panelSizes}
+                  projectTreeContent={projectTreeContent}
+                  side="right"
+                  slot="top"
+                  onDragEnd={clearDockDrag}
+                  onDragStart={startGitPanelDrag}
+                  onDropPanel={moveGitPanel}
+                  onReattachPanel={reattachGitPanel}
+                  resizePanel={resizePanel}
+                />
               </>
-            )}
-            {draggedToolPanel ||
-            draggedGitPanel ||
-            draggingTreePanel ? (
-              <WorkbenchDockOverlay
-                activeEditorDock={editorDock}
-                activeProjectDock={projectInToolDock ? "panel" : treeDock}
-                activeToolDock={toolDock}
-                draggedGitPanel={draggedGitPanel}
-                draggedToolPanel={draggedToolPanel}
-                draggingEditorPanel={false}
-                draggingTreePanel={draggingTreePanel}
-                onDockEditor={dockEditorPanel}
-                onDockProject={dockProjectPanel}
-                onDockTool={dockToolPanel}
-              />
+            ) : null}
+            {hasBottomPanels ? (
+              <>
+                <ResizeHandle
+                  axis="y"
+                  className="rail-bottom-splitter"
+                  label="Resize bottom rail slot"
+                  onResize={(delta) => resizePanel("bottom", -delta, 180, 560)}
+                />
+                <section
+                  className="rail-bottom-panels"
+                  style={bottomPanelsStyle}
+                >
+                  {hasLeftBottomPanel ? (
+                    <WorkbenchRailSlotStack
+                      activeItem={leftBottomActiveItem}
+                      activeProjectPath={activeProject?.activePath ?? null}
+                      dockedGitPanelOrder={dockedGitPanelOrder}
+                      draggedGitPanel={draggedGitPanel}
+                      gitPanelData={gitPanelData}
+                      items={railLayout.left.bottom}
+                      panelSizes={panelSizes}
+                      projectTreeContent={projectTreeContent}
+                      side="left"
+                      slot="bottom"
+                      onDragEnd={clearDockDrag}
+                      onDragStart={startGitPanelDrag}
+                      onDropPanel={moveGitPanel}
+                      onReattachPanel={reattachGitPanel}
+                      resizePanel={resizePanel}
+                    />
+                  ) : null}
+                  {hasLeftBottomPanel && hasRightBottomPanel ? (
+                    <ResizeHandle
+                      axis="x"
+                      className="rail-bottom-inner-splitter"
+                      label="Resize bottom rail panels"
+                      onResize={(delta) =>
+                        resizePanel("bottomLeft", delta, 260, 1400)
+                      }
+                    />
+                  ) : null}
+                  {hasRightBottomPanel ? (
+                    <WorkbenchRailSlotStack
+                      activeItem={rightBottomActiveItem}
+                      activeProjectPath={activeProject?.activePath ?? null}
+                      dockedGitPanelOrder={dockedGitPanelOrder}
+                      draggedGitPanel={draggedGitPanel}
+                      gitPanelData={gitPanelData}
+                      items={railLayout.right.bottom}
+                      panelSizes={panelSizes}
+                      projectTreeContent={projectTreeContent}
+                      side="right"
+                      slot="bottom"
+                      onDragEnd={clearDockDrag}
+                      onDragStart={startGitPanelDrag}
+                      onDropPanel={moveGitPanel}
+                      onReattachPanel={reattachGitPanel}
+                      resizePanel={resizePanel}
+                    />
+                  ) : null}
+                </section>
+              </>
             ) : null}
           </div>
         )}
       </section>
-      {hasRightRail ? (
-        <ProjectSideRail
-          draggedRailItem={draggedRailItem}
-          hasActiveProject={Boolean(activeProject)}
-          isActiveItem={isRailItemActive("right")}
-          railLayout={railLayout}
-          onDropRailItem={(item, slot) => dropRailItem(item, "right", slot)}
-          onSelectRailItem={handleSelectRailItem("right")}
-          onStartRailItemDrag={startRailItemDrag}
-        />
-      ) : null}
+      <ProjectSideRail
+        draggedRailItem={draggedRailItem}
+        hasActiveProject={Boolean(activeProject)}
+        isActiveItem={isRailItemActive("right")}
+        railLayout={railLayout}
+        onDropRailItem={(item, slot) => dropRailItem(item, "right", slot)}
+        onSelectRailItem={handleSelectRailItem("right")}
+        onStartRailItemDrag={startRailItemDrag}
+      />
       {draggedRailItem ? (
         <RailDockOverlay
           draggedRailItem={draggedRailItem}
@@ -896,4 +877,19 @@ export function App() {
       />
     </main>
   );
+}
+
+function findRailItemPlacement(
+  railLayout: RailLayout,
+  item: RailItemId,
+): { side: RailSide; slot: RailSlot } | null {
+  for (const side of ["left", "right"] as const) {
+    for (const slot of ["top", "bottom"] as const) {
+      if (railLayout[side][slot].includes(item)) {
+        return { side, slot };
+      }
+    }
+  }
+
+  return null;
 }

@@ -13,8 +13,8 @@ export interface ProjectFileTreePanelProps {
   readonly title: ReactNode;
   readonly onCreateFile: (parentPath: string | null) => void;
   readonly onDeleteFile: (path: string) => void;
-  readonly onDragEnd: () => void;
-  readonly onDragStart: (event: DragEvent<HTMLDivElement>) => void;
+  readonly onDragEnd?: () => void;
+  readonly onDragStart?: (event: DragEvent<HTMLDivElement>) => void;
   readonly onRenameFile: (fromPath: string, toPath: string) => void;
   readonly onSelectPath: (path: string) => void;
 }

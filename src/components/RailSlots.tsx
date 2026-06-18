@@ -8,7 +8,7 @@ export interface RailSlotProps {
   readonly items: readonly RailItemId[];
   readonly slot: RailSlot;
   readonly disabled: boolean;
-  readonly onSelectRailItem: (item: RailItemId) => void;
+  readonly onSelectRailItem: (item: RailItemId, slot: RailSlot) => void;
   readonly onStartRailItemDrag: (item: RailItemId) => void;
   readonly onDropRailItem: (item: RailItemId, slot: RailSlot) => void;
 }
@@ -61,7 +61,7 @@ export function RailSlotList({
           item={item}
           active={isActiveItem(item)}
           disabled={disabled}
-          onSelect={onSelectRailItem}
+          onSelect={() => onSelectRailItem(item, slot)}
           onStartDrag={onStartRailItemDrag}
         />
       ))}
@@ -79,7 +79,7 @@ function RailButton({
   item: RailItemId;
   active: boolean;
   disabled: boolean;
-  onSelect(item: RailItemId): void;
+  onSelect(): void;
   onStartDrag(item: RailItemId): void;
 }) {
   const definition = railItemDefinitions[item];
@@ -95,7 +95,7 @@ function RailButton({
       title={definition.label}
       disabled={disabled}
       draggable
-      onClick={() => onSelect(item)}
+      onClick={onSelect}
       onDragStart={(event) => {
         event.dataTransfer.effectAllowed = "move";
         event.dataTransfer.setData("application/x-view-rail-item", item);

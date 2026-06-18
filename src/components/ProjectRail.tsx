@@ -22,7 +22,7 @@ export interface ProjectRailProps {
   readonly onRemoveProject: (projectId: string) => void;
   readonly onSelectProject: (project: SavedProject) => void;
   readonly onDropRailItem: (item: RailItemId, slot: "top" | "bottom") => void;
-  readonly onSelectRailItem: (item: RailItemId) => void;
+  readonly onSelectRailItem: (item: RailItemId, slot: "top" | "bottom") => void;
   readonly onStartRailItemDrag: (item: RailItemId) => void;
   readonly onToggleProjectSwitcher: () => void;
 }
