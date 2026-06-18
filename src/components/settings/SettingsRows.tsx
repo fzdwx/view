@@ -5,15 +5,22 @@ import {
   defaultMonoFontFamily,
   defaultUiFontFamily,
 } from "../../lib/settings";
-import { SettingsNumberInput } from "./SettingsNumberInput";
+import { SettingsSegmented, type SegmentedOption } from "./SettingsSegmented";
 import { SettingsSelect, type SettingsSelectOption } from "./SettingsSelect";
+import { SettingsSlider } from "./SettingsSlider";
 
-const fontWeightOptions: readonly SettingsSelectOption[] = [
+const fontWeightOptions: readonly SegmentedOption[] = [
   { label: "Light", value: "300" },
   { label: "Regular", value: "400" },
   { label: "Medium", value: "500" },
   { label: "Semibold", value: "600" },
 ];
+
+const fontSizeMin = 10;
+const fontSizeMax = 22;
+const lineHeightMin = 1.2;
+const lineHeightMax = 2;
+const lineHeightStep = 0.05;
 
 export function SettingsGroup({
   children,
@@ -55,7 +62,7 @@ export function SettingRow({
   );
 }
 
-export function UiFontRow({
+export function UiFontCard({
   fonts,
   loading,
   settings,
@@ -67,10 +74,11 @@ export function UiFontRow({
   readonly onChange: (settings: AppSettings) => void;
 }) {
   return (
-    <SettingRow
-      description="Branches, commits, panels and dialogs."
-      label="UI font"
-    >
+    <section className="font-card">
+      <header className="font-card-heading">
+        <h3>UI font</h3>
+        <p>Branches, commits, panels and dialogs.</p>
+      </header>
       <SettingsSelect
         ariaLabel="UI font"
         fallbackLabel="System default"
@@ -81,11 +89,17 @@ export function UiFontRow({
         value={settings.uiFontFamily}
         onChange={(value) => onChange({ ...settings, uiFontFamily: value })}
       />
-    </SettingRow>
+      <pre className="font-preview font-preview-ui">
+        {`main  feature/settings-redesign
+  feat: rework fonts page
+  fix:  restore staged file
+› ○ Unstaged changes (3)`}
+      </pre>
+    </section>
   );
 }
 
-export function EditorFontRows({
+export function CodeFontCard({
   fonts,
   loading,
   settings,
@@ -97,102 +111,74 @@ export function EditorFontRows({
   readonly onChange: (settings: AppSettings) => void;
 }) {
   return (
-    <SettingsFieldset
-      description="Editor, diff and terminal text share this typography."
-      title="Code text"
-    >
-      <SettingRow
-        description="Font family."
-        label="Code font"
-      >
-        <SettingsSelect
-          ariaLabel="Code font"
-          fallbackLabel="System default"
-          menuSize="large"
-          options={fontOptions(fonts, loading, defaultMonoFontFamily)}
-          searchable={true}
-          searchPlaceholder="Search fonts"
-          value={settings.monoFontFamily}
-          onChange={(value) => onChange({ ...settings, monoFontFamily: value })}
-        />
-      </SettingRow>
-      <div className="settings-control-stack">
-        <SettingRow description="Text pixels." label="Size">
-          <SettingsNumberInput
-            ariaLabel="Font size"
-            min={10}
-            max={22}
+    <section className="font-card">
+      <header className="font-card-heading">
+        <h3>Code font</h3>
+        <p>Editor, diff and terminal text.</p>
+      </header>
+      <SettingsSelect
+        ariaLabel="Code font"
+        fallbackLabel="System default"
+        menuSize="large"
+        options={fontOptions(fonts, loading, defaultMonoFontFamily)}
+        searchable={true}
+        searchPlaceholder="Search fonts"
+        value={settings.monoFontFamily}
+        onChange={(value) => onChange({ ...settings, monoFontFamily: value })}
+      />
+      <div className="font-controls">
+        <div className="font-control">
+          <div className="font-control-label">
+            <span>Size</span>
+            <output className="font-control-value">{settings.fontSize}px</output>
+          </div>
+          <SettingsSlider
+            ariaLabel="Code font size"
+            max={fontSizeMax}
+            min={fontSizeMin}
             value={settings.fontSize}
-            onChange={(value) =>
-              onChange({
-                ...settings,
-                fontSize: value,
-              })
-            }
+            onChange={(value) => onChange({ ...settings, fontSize: value })}
           />
-        </SettingRow>
-        <SettingRow description="Stroke weight." label="Weight">
-          <SettingsSelect
-            ariaLabel="Font weight"
+        </div>
+        <div className="font-control">
+          <div className="font-control-label">
+            <span>Weight</span>
+          </div>
+          <SettingsSegmented
+            ariaLabel="Code font weight"
             options={fontWeightOptions}
             value={settings.fontWeight}
             onChange={(value) => onChange({ ...settings, fontWeight: value })}
           />
-        </SettingRow>
-        <SettingRow description="Row spacing." label="Line height">
-          <SettingsNumberInput
-            ariaLabel="Line height"
-            min={1.2}
-            max={2}
-            step={0.05}
+        </div>
+        <div className="font-control">
+          <div className="font-control-label">
+            <span>Line height</span>
+            <output className="font-control-value">
+              {settings.lineHeight.toFixed(2)}
+            </output>
+          </div>
+          <SettingsSlider
+            ariaLabel="Code line height"
+            max={lineHeightMax}
+            min={lineHeightMin}
+            step={lineHeightStep}
             value={settings.lineHeight}
-            onChange={(value) =>
-              onChange({
-                ...settings,
-                lineHeight: value,
-              })
-            }
+            onChange={(value) => onChange({ ...settings, lineHeight: value })}
           />
-        </SettingRow>
+        </div>
       </div>
-      <pre className="settings-font-preview">
-        {`🚀 feat: add image diff preview
+      <pre className="font-preview font-preview-code">
+        {`// src/lib/settings.ts
+export const lineHeight = 1.56;
 
-// Typescript
-const render = (props: EditorProps) => {
-  return <FileDiff mode="diff" />;
-};
-
-# Rust
-fn main() -> Result<(), String> {
-    println!("Hello, 世界! 🌍");
+fn render(diff: &Diff) -> Result<()> {
+    println!("Hello, 世界!");
     Ok(())
 }
 
-$ git commit -m "fix: 修復 emoji 🎉"
-diff --git a/src/App.tsx b/src/App.tsx
 +import { useState } from "react";`}
       </pre>
-    </SettingsFieldset>
-  );
-}
-
-function SettingsFieldset({
-  children,
-  description,
-  title,
-}: {
-  readonly children: ReactNode;
-  readonly description: string;
-  readonly title: string;
-}) {
-  return (
-    <section className="settings-fieldset">
-      <div className="settings-fieldset-heading">
-        <h3>{title}</h3>
-        <p>{description}</p>
-      </div>
-      {children}
     </section>
   );
 }

@@ -6,10 +6,10 @@ import {
 } from "../../lib/settings";
 import { ShortcutRecorder, type ShortcutChangeHandler } from "./ShortcutRecorder";
 import {
-  EditorFontRows,
+  CodeFontCard,
   SettingRow,
   SettingsGroup,
-  UiFontRow,
+  UiFontCard,
 } from "./SettingsRows";
 import type { SettingsSectionId } from "./types";
 
@@ -64,23 +64,20 @@ function FontSettings({
   readonly onChange: (settings: AppSettings) => void;
 }) {
   return (
-    <SettingsGroup
-      description="UI font controls app chrome. Code font controls editor, diff and terminal text."
-      title="Application and code text"
-    >
-      <UiFontRow
+    <div className="font-cards">
+      <UiFontCard
         fonts={uiFonts}
         loading={fontsLoading}
         settings={settings}
         onChange={onChange}
       />
-      <EditorFontRows
+      <CodeFontCard
         fonts={monoFonts}
         loading={fontsLoading}
         settings={settings}
         onChange={onChange}
       />
-    </SettingsGroup>
+    </div>
   );
 }
 

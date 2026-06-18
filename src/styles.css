@@ -252,13 +252,14 @@ textarea,
 }
 
 .settings-page {
-  display: block;
+  display: grid;
   min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
   background: var(--surface-0);
 }
 
 .settings-window-shell {
-  min-height: 100%;
+  height: 100%;
   display: grid;
   grid-template-rows: 32px minmax(0, 1fr);
   background: var(--surface-0);
@@ -289,6 +290,7 @@ textarea,
   width: 100%;
   min-height: 0;
   grid-template-columns: 208px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   border: 0;
   border-radius: 0;
   background: var(--surface-0);
@@ -438,30 +440,27 @@ textarea,
   gap: 16px;
 }
 
-.settings-control-stack {
+.font-cards {
   display: grid;
-  max-width: 680px;
   grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
+  gap: 14px;
 }
 
-.settings-fieldset {
+.font-card {
   display: grid;
-  max-width: 680px;
-  gap: 13px;
+  gap: 11px;
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: 4px;
   background: var(--surface-1);
-  padding: 12px;
+  padding: 13px 14px;
 }
 
-.settings-fieldset-heading {
+.font-card-heading {
   display: grid;
-  gap: 4px;
-  padding-bottom: 1px;
+  gap: 2px;
 }
 
-.settings-fieldset h3 {
+.font-card-heading h3 {
   margin: 0;
   color: var(--ink);
   font-size: 12px;
@@ -469,20 +468,138 @@ textarea,
   line-height: 1.35;
 }
 
-.settings-fieldset p {
+.font-card-heading p {
   margin: 0;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
 }
 
-.settings-fieldset .settings-control-stack,
-.settings-fieldset .settings-font-preview {
-  max-width: none;
+.font-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
 }
 
-.settings-fieldset .settings-control-stack {
-  gap: 12px;
+.font-control {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.font-control-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.font-control-value {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.settings-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  margin: 9px 0;
+  border-radius: 2px;
+  background: var(--surface-3);
+  outline: 0;
+  cursor: pointer;
+}
+
+.settings-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ink);
+  cursor: pointer;
+}
+
+.settings-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ink);
+  cursor: pointer;
+}
+
+.settings-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--surface-4);
+}
+
+.settings-segmented {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.settings-segmented-option {
+  border: 0;
+  border-right: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.settings-segmented-option:last-child {
+  border-right: 0;
+}
+
+.settings-segmented-option:hover {
+  color: var(--ink);
+}
+
+.settings-segmented-option.active {
+  background: var(--surface-4);
+  color: var(--ink);
+}
+
+.settings-segmented-option:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: -2px;
+}
+
+.font-preview {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--surface-0);
+  color: var(--muted);
+  overflow: auto;
+  padding: 10px 12px;
+  white-space: pre;
+  text-rendering: auto;
+  -webkit-font-smoothing: subpixel-antialiased;
+  -moz-osx-font-smoothing: auto;
+}
+
+.font-preview-ui {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.font-preview-code {
+  font-family: var(--mono);
+  font-size: var(--editor-font-size);
+  font-weight: var(--editor-font-weight);
+  line-height: var(--editor-line-height);
 }
 
 .settings-row {
@@ -528,11 +645,6 @@ textarea,
   color-scheme: dark;
   font-size: 12px;
   padding: 0 7px;
-}
-
-.settings-number-input {
-  width: 214px;
-  max-width: 214px;
 }
 
 .settings-row input:focus,
@@ -699,40 +811,14 @@ textarea,
   color: var(--warning);
 }
 
-.settings-font-preview {
-  max-width: 680px;
-  margin: -2px 0 0;
-  border: 1px solid var(--line);
-  border-radius: 2px;
-  background: var(--surface-1);
-  color: var(--muted);
-  font-size: var(--editor-font-size);
-  font-weight: var(--editor-font-weight);
-  line-height: var(--editor-line-height);
-  overflow: hidden;
-  font-family: var(--mono);
-  text-rendering: auto;
-  -webkit-font-smoothing: subpixel-antialiased;
-  -moz-osx-font-smoothing: auto;
-  padding: 8px 10px;
-  white-space: pre;
-}
-
 @media (max-width: 760px) {
   .settings-panel {
     grid-template-columns: 176px minmax(0, 1fr);
   }
 
-  .settings-fieldset {
-    padding: 10px;
-  }
-
-  .settings-row {
+  .font-controls {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .settings-control-stack {
-    grid-template-columns: 1fr;
+    gap: 13px;
   }
 
   .settings-head h1 {
