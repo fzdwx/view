@@ -60,6 +60,10 @@ function normalizeWorkbenchLayout(value: unknown): WorkbenchLayout {
     treeDock: isTreeDock(record.treeDock)
       ? record.treeDock
       : defaultWorkbenchLayout.treeDock,
+    treeVisible:
+      typeof record.treeVisible === "boolean"
+        ? record.treeVisible
+        : defaultWorkbenchLayout.treeVisible,
     projectInToolDock,
     gitPanelOrder: normalizeGitPanelOrder(record.gitPanelOrder),
     detachedGitPanels,

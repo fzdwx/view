@@ -19,6 +19,7 @@ export interface WorkbenchLayout {
   activityView: ToolPanelId;
   toolDock: ToolDock;
   treeDock: TreeDock;
+  treeVisible: boolean;
   projectInToolDock: boolean;
   gitPanelOrder: GitPanelId[];
   detachedGitPanels: GitPanelId[];
@@ -45,6 +46,7 @@ export const defaultWorkbenchLayout: WorkbenchLayout = {
   activityView: "git",
   toolDock: "bottom",
   treeDock: "left",
+  treeVisible: true,
   projectInToolDock: false,
   gitPanelOrder: defaultGitPanelOrder,
   detachedGitPanels: [],

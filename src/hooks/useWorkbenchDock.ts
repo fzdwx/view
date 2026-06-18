@@ -25,6 +25,7 @@ export interface WorkbenchDockController {
   readonly gitPanelOrder: GitPanelId[];
   readonly panelSizes: PanelSizes;
   readonly projectInToolDock: boolean;
+  readonly treeVisible: boolean;
   readonly toolDock: ToolDock;
   readonly toolPanelCollapsed: boolean;
   readonly treeDock: TreeDock;
@@ -34,6 +35,7 @@ export interface WorkbenchDockController {
   readonly dockToolPanel: (panel: ToolPanelId, dock: ToolDock) => void;
   readonly endToolPanelDrag: () => void;
   readonly moveGitPanel: (panel: GitPanelId, targetPanel: GitPanelId) => void;
+  readonly toggleTreeVisible: () => void;
   readonly reattachGitPanel: (panel: GitPanelId) => void;
   readonly resizePanel: (
     key: keyof PanelSizes,
@@ -62,6 +64,7 @@ export function useWorkbenchDock(): WorkbenchDockController {
   const [projectInToolDock, setProjectInToolDock] = useState(
     initialLayout.projectInToolDock,
   );
+  const [treeVisible, setTreeVisible] = useState(initialLayout.treeVisible);
   const [draggingTreePanel, setDraggingTreePanel] = useState(false);
   const [draggingEditorPanel, setDraggingEditorPanel] = useState(false);
   const [gitPanelOrder, setGitPanelOrder] = useState<GitPanelId[]>(
@@ -87,6 +90,7 @@ export function useWorkbenchDock(): WorkbenchDockController {
       activityView,
       toolDock,
       treeDock,
+      treeVisible,
       projectInToolDock,
       gitPanelOrder,
       detachedGitPanels,
@@ -98,8 +102,10 @@ export function useWorkbenchDock(): WorkbenchDockController {
     gitPanelOrder,
     panelSizes,
     projectInToolDock,
+    treeVisible,
     toolDock,
     treeDock,
+    treeVisible,
   ]);
 
   useEffect(() => {
@@ -166,6 +172,7 @@ export function useWorkbenchDock(): WorkbenchDockController {
 
       setProjectInToolDock(false);
       setTreeDock(nextDock);
+      setTreeVisible(true);
       if (activityView === "project") {
         setActivityView("git");
         setToolPanelCollapsed(false);
@@ -222,6 +229,10 @@ export function useWorkbenchDock(): WorkbenchDockController {
     [activityView, clearDockDrag],
   );
 
+  const toggleTreeVisible = useCallback(() => {
+    setTreeVisible((visible) => !visible);
+  }, []);
+
   const reattachGitPanel = useCallback(
     (panel: GitPanelId) => {
       setDetachedGitPanels((current) => current.filter((item) => item !== panel));
@@ -252,6 +263,7 @@ export function useWorkbenchDock(): WorkbenchDockController {
     gitPanelOrder,
     panelSizes,
     projectInToolDock,
+    treeVisible,
     toolDock,
     toolPanelCollapsed,
     treeDock,
@@ -268,5 +280,6 @@ export function useWorkbenchDock(): WorkbenchDockController {
     startGitPanelDrag,
     startToolPanelDrag,
     startTreePanelDrag,
+    toggleTreeVisible,
   };
 }

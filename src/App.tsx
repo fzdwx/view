@@ -80,6 +80,7 @@ export function App() {
     toolDock,
     toolPanelCollapsed,
     treeDock,
+    treeVisible,
     clearDockDrag,
     dockEditorPanel,
     dockProjectPanel,
@@ -92,6 +93,7 @@ export function App() {
     startGitPanelDrag,
     startToolPanelDrag,
     startTreePanelDrag,
+    toggleTreeVisible,
   } = useWorkbenchDock();
 
   const activeProject = projects.find(
@@ -331,10 +333,11 @@ export function App() {
     });
   }, [activeProject?.id, repositoryQuery.data]);
 
+  const hasProjectSidePanel = !projectInToolDock && treeVisible;
   const contentGridStyle = buildContentGridStyle(
     treeDock,
     toolDock,
-    !projectInToolDock,
+    hasProjectSidePanel,
     panelSizes.tree,
     toolPanelCollapsed ? 36 : panelSizes.log,
     panelSizes.sideDock,
@@ -581,12 +584,15 @@ export function App() {
         hasActiveProject={Boolean(activeProject)}
         projectSwitcherOpen={projectSwitcherOpen}
         projects={projects}
+        treeDocked={projectInToolDock}
+        treeVisible={treeVisible}
         onChooseRepository={chooseRepository}
         onCloseProjectSwitcher={closeProjectSwitcher}
         onRemoveProject={removeProject}
         onSelectProject={selectProject}
         onSelectToolPanelView={selectToolPanelView}
         onToggleProjectSwitcher={toggleProjectSwitcher}
+        onToggleTreeVisible={toggleTreeVisible}
       />
 
       {pullChoiceOpen ? (
@@ -639,7 +645,7 @@ export function App() {
             }`}
             style={contentGridStyle}
           >
-            {!projectInToolDock ? (
+            {hasProjectSidePanel ? (
               <>
                 {projectTreeContent}
                 <ResizeHandle
