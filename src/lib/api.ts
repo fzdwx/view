@@ -59,9 +59,30 @@ export type GitStatus =
   | "renamed"
   | "untracked";
 
+export type GitPorcelainStatus =
+  | " "
+  | "!"
+  | "?"
+  | "A"
+  | "C"
+  | "D"
+  | "M"
+  | "R"
+  | "T"
+  | "U";
+
 export interface TreeFile {
-  path: string;
-  status: GitStatus | null;
+  readonly path: string;
+  readonly status: GitStatus | null;
+  readonly oldPath?: string | null;
+  readonly indexStatus?: GitPorcelainStatus | null;
+  readonly worktreeStatus?: GitPorcelainStatus | null;
+  readonly staged?: boolean;
+  readonly unstaged?: boolean;
+  readonly untracked?: boolean;
+  readonly renamed?: boolean;
+  readonly deleted?: boolean;
+  readonly conflict?: boolean;
 }
 
 export interface RepositoryPayload {
@@ -97,6 +118,9 @@ export interface FileSearchResult {
   score: number;
   lineNumber: number | null;
   lineText: string | null;
+  contextBefore: string[];
+  contextAfter: string[];
+  matchRanges: [number, number][];
 }
 
 export interface EditorTextMatch {
@@ -127,6 +151,32 @@ export interface TerminalSessionInfo {
 export interface SystemFont {
   family: string;
   monospace: boolean;
+}
+
+export interface GitPathsRequest {
+  readonly path: string;
+  readonly paths: readonly string[];
+}
+
+export type RestoreMode = "all" | "staged" | "worktree";
+
+export interface RestoreFilesRequest extends GitPathsRequest {
+  readonly mode: RestoreMode;
+}
+
+export interface CommitRequest {
+  readonly path: string;
+  readonly message: string;
+}
+
+export interface GitWriteResponse {
+  readonly summary: RepositorySummary;
+  readonly files: TreeFile[];
+}
+
+export interface CommitWriteResponse extends GitWriteResponse {
+  readonly hash: string;
+  readonly shortHash: string;
 }
 
 export async function loadRepository(
@@ -242,6 +292,30 @@ export async function searchFiles(
   });
 }
 
+export async function searchFileNames(
+  path: string,
+  query: string,
+  limit?: number,
+): Promise<FileSearchResult[]> {
+  return invoke<FileSearchResult[]>("search_file_names", {
+    path,
+    query,
+    limit: limit ?? null,
+  });
+}
+
+export async function searchFileContents(
+  path: string,
+  query: string,
+  limit?: number,
+): Promise<FileSearchResult[]> {
+  return invoke<FileSearchResult[]>("search_file_contents", {
+    path,
+    query,
+    limit: limit ?? null,
+  });
+}
+
 export async function searchEditorText(
   content: string,
   query: string,
@@ -310,6 +384,36 @@ export async function pullCurrentBranch(
   mode: PullMode,
 ): Promise<void> {
   return invoke<void>("pull_current_branch", { path, mode });
+}
+
+export async function stageFiles(
+  request: GitPathsRequest,
+): Promise<GitWriteResponse> {
+  return invoke<GitWriteResponse>("stage_files", { request });
+}
+
+export async function unstageFiles(
+  request: GitPathsRequest,
+): Promise<GitWriteResponse> {
+  return invoke<GitWriteResponse>("unstage_files", { request });
+}
+
+export async function restoreFiles(
+  request: RestoreFilesRequest,
+): Promise<GitWriteResponse> {
+  return invoke<GitWriteResponse>("restore_files", { request });
+}
+
+export async function createCommit(
+  request: CommitRequest,
+): Promise<CommitWriteResponse> {
+  return invoke<CommitWriteResponse>("create_commit", { request });
+}
+
+export async function pushCurrentBranch(
+  path: string,
+): Promise<GitWriteResponse> {
+  return invoke<GitWriteResponse>("push_current_branch", { path });
 }
 
 export async function terminalSpawn(

@@ -8,7 +8,9 @@ export type ShortcutAction =
   | "closeTab"
   | "nextTab"
   | "prevTab"
-  | "jumpToDiffFile";
+  | "jumpToDiffFile"
+  | "findFiles"
+  | "findInFiles";
 
 export interface AppSettings {
   uiFontFamily: string;
@@ -51,6 +53,8 @@ export const defaultAppSettings: AppSettings = {
     nextTab: "Mod+Shift+]",
     prevTab: "Mod+Shift+[",
     jumpToDiffFile: "F4",
+    findFiles: "Mod+Shift+O",
+    findInFiles: "Mod+Shift+F",
   },
 };
 
@@ -104,6 +108,16 @@ export const shortcutRows: readonly ShortcutRow[] = [
     action: "jumpToDiffFile",
     label: "Jump to file",
     description: "Open the file from a diff view",
+  },
+  {
+    action: "findFiles",
+    label: "Find files",
+    description: "Search file names by fuzzy match",
+  },
+  {
+    action: "findInFiles",
+    label: "Find in files",
+    description: "Search file contents",
   },
 ];
 

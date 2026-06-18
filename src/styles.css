@@ -1984,7 +1984,7 @@ body.is-resizing-y * {
   border-radius: 6px;
   background: transparent;
   color: var(--ink);
-  padding: 0 8px;
+  padding: 6px 8px;
   text-align: left;
 }
 
@@ -2006,7 +2006,8 @@ body.is-resizing-y * {
 }
 
 .command-result-main {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   gap: 1px;
 }
@@ -2034,8 +2035,74 @@ body.is-resizing-y * {
   background: transparent;
   color: #69b1ff;
   font-weight: 600;
+  margin: 0;
+  padding: 0;
 }
 
+.command-result-path {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.command-result-path-dir {
+  color: var(--faint);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.command-result-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-result-line-number {
+  flex: 0 0 auto;
+  min-width: 28px;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 10px;
+  text-align: right;
+}
+
+.command-result-context {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: 2px;
+  border-left: 2px solid var(--line);
+  padding-left: 8px;
+}
+
+.command-result-context-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.command-result-context-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-result-line-matched {
+  color: var(--ink);
+  font-weight: 500;
+}
 .command-result-match {
   color: var(--accent-strong) !important;
 }

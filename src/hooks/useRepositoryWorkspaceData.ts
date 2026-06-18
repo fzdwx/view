@@ -16,8 +16,10 @@ import {
   getFileDiff,
   getProjectFiles,
   loadRepository,
-  searchFiles,
+  searchFileContents,
+  searchFileNames,
 } from "../lib/api";
+import type { CommandPanelMode } from "./useCommandPanel";
 import { filterCommits } from "../lib/commitFilters";
 import {
   countDiffStats,
@@ -55,6 +57,7 @@ export interface RepositoryProjectDataOptions {
   readonly activeBranchRef: string | null;
   readonly activeCommit: string | null;
   readonly activeProjectPath: string | null;
+  readonly commandMode: CommandPanelMode;
   readonly commandOpen: boolean;
   readonly commitFilter: string;
   readonly debouncedCommandQuery: string;
@@ -104,6 +107,7 @@ export function useRepositoryProjectData({
   activeBranchRef,
   activeCommit,
   activeProjectPath,
+  commandMode,
   commandOpen,
   commitFilter,
   debouncedCommandQuery,
@@ -166,10 +170,11 @@ export function useRepositoryProjectData({
     retry: false,
   });
 
+  const searchFn = commandMode === "content" ? searchFileContents : searchFileNames;
   const fileSearchQuery = useQuery({
-    queryKey: ["file-search", activeProjectPath, debouncedCommandQuery],
+    queryKey: ["file-search", commandMode, activeProjectPath, debouncedCommandQuery],
     queryFn: () =>
-      searchFiles(
+      searchFn(
         requireQueryInput(activeProjectPath, "file search path"),
         debouncedCommandQuery,
         80,

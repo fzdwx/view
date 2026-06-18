@@ -12,6 +12,7 @@ export function CommandPanel({
   activeIndex,
   error,
   loading,
+  mode,
   open,
   projectName,
   query,
@@ -24,6 +25,7 @@ export function CommandPanel({
   activeIndex: number;
   error: string | null;
   loading: boolean;
+  mode: "files" | "content";
   open: boolean;
   projectName?: string;
   query: string;
@@ -99,12 +101,19 @@ export function CommandPanel({
             ref={inputRef}
             value={query}
             onChange={(event) => onChangeQuery(event.target.value)}
-            placeholder="Search files by name or path…"
+            placeholder={
+              mode === "content"
+                ? "Search file contents…"
+                : "Search files by name or path…"
+            }
           />
           {loading ? <Loader2 className="spin" size={16} /> : null}
         </div>
         <div className="command-context">
-          <span>{projectName ?? "No project"}</span>
+          <span>
+            {mode === "content" ? "Find in files" : "Find files"} ·{" "}
+            {projectName ?? "No project"}
+          </span>
           <kbd>Enter</kbd>
           <kbd>Esc</kbd>
         </div>
@@ -116,21 +125,27 @@ export function CommandPanel({
             </div>
           ) : !hasQuery ? (
             <div className="command-empty">
-              <div className="empty-title">Type a file name or path</div>
+              <div className="empty-title">
+                {mode === "content" ? "Type to search file contents" : "Type a file name or path"}
+              </div>
               <div className="empty-copy">
-                Fuzzy search scans tracked and untracked files in the active worktree.
+                {mode === "content"
+                  ? "Search scans file contents for matching text in the active worktree."
+                  : "Fuzzy search scans tracked and untracked files in the active worktree."}
               </div>
             </div>
           ) : results.length === 0 && !loading ? (
             <div className="command-empty">
-              <div className="empty-title">No files found</div>
-              <div className="empty-copy">Try another filename or path segment.</div>
+              <div className="empty-title">No results found</div>
+              <div className="empty-copy">
+                {mode === "content" ? "Try another search term." : "Try another filename or path segment."}
+              </div>
             </div>
           ) : (
             results.map((result, index) => {
-              const hasLineMatch = Boolean(result.lineNumber && result.lineText);
               const fileName = fileNameFromPath(result.path);
               const parentPath = parentPathFromPath(result.path) || "./";
+              const hasLineMatch = Boolean(result.lineNumber && result.lineText);
 
               return (
                 <button
@@ -147,16 +162,55 @@ export function CommandPanel({
                     <ResultFileIcon path={result.path} />
                   </span>
                   <span className="command-result-main">
-                    <span>
-                      {hasLineMatch
-                        ? fileName
-                        : highlightMatch(fileName, lowerQuery)}
-                    </span>
-                    <small className={hasLineMatch ? "command-result-match" : undefined}>
-                      {hasLineMatch
-                        ? `${result.lineNumber}: ${result.lineText}`
-                        : highlightMatch(parentPath, lowerQuery)}
-                    </small>
+                    {mode === "content" && hasLineMatch ? (
+                      <>
+                        <span className="command-result-path">
+                          {highlightMatch(fileName, lowerQuery)}{" "}
+                          <small className="command-result-path-dir">
+                            {parentPath}
+                          </small>
+                        </span>
+                        <div className="command-result-context">
+                          {result.contextBefore.map((line, i) => (
+                            <small
+                              key={`before-${i}`}
+                              className="command-result-context-line"
+                            >
+                              <span className="command-result-line-number">
+                                {(result.lineNumber ?? 0) - result.contextBefore.length + i}
+                              </span>
+                              <span className="command-result-context-text">{line}</span>
+                            </small>
+                          ))}
+                          <small className="command-result-line command-result-line-matched">
+                            <span className="command-result-line-number">
+                              {result.lineNumber}
+                            </span>
+                            {highlightRanges(result.lineText ?? "", result.matchRanges)}
+                          </small>
+                          {result.contextAfter.map((line, i) => (
+                            <small
+                              key={`after-${i}`}
+                              className="command-result-context-line"
+                            >
+                              <span className="command-result-line-number">
+                                {(result.lineNumber ?? 0) + 1 + i}
+                              </span>
+                              <span className="command-result-context-text">{line}</span>
+                            </small>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <span>
+                          {highlightMatch(fileName, lowerQuery)}
+                        </span>
+                        <small>
+                          {highlightMatch(parentPath, lowerQuery)}
+                        </small>
+                      </>
+                    )}
                   </span>
                 </button>
               );
@@ -218,6 +272,36 @@ function highlightMatch(text: string, query: string): ReactNode {
       </mark>,
     );
     lastEnd = idx + 1;
+  }
+
+  if (lastEnd < text.length) {
+    segments.push(text.slice(lastEnd));
+  }
+
+  return segments;
+}
+
+/**
+ * Highlight matched ranges using exact byte offsets from the Rust grep.
+ * matchRanges are [start, end) byte offsets within lineText.
+ */
+function highlightRanges(text: string, ranges: [number, number][]): ReactNode {
+  if (ranges.length === 0) return text;
+
+  const segments: ReactNode[] = [];
+  let lastEnd = 0;
+  let key = 0;
+
+  for (const [start, end] of ranges) {
+    if (start > lastEnd) {
+      segments.push(text.slice(lastEnd, start));
+    }
+    segments.push(
+      <mark key={key++} className="command-match">
+        {text.slice(start, end)}
+      </mark>,
+    );
+    lastEnd = Math.max(lastEnd, end);
   }
 
   if (lastEnd < text.length) {

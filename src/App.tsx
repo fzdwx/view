@@ -96,6 +96,7 @@ export function App() {
   );
   const activeProjectPath = activeProject?.activePath ?? null;
   const {
+    commandMode,
     commandOpen,
     commandQuery,
     commandSelectionIndex,
@@ -130,6 +131,7 @@ export function App() {
     activeBranchRef,
     activeCommit,
     activeProjectPath,
+    commandMode,
     commandOpen,
     commitFilter,
     debouncedCommandQuery,
@@ -386,7 +388,9 @@ export function App() {
     },
     onCloseCommandPanel: closeCommandPanel,
     onClosePullChoice: closePullChoice,
-    onOpenCommandPanel: openCommandPanel,
+    onOpenCommandPanel: () => openCommandPanel("files"),
+    onOpenFindFiles: () => openCommandPanel("files"),
+    onOpenFindInFiles: () => openCommandPanel("content"),
     onOpenPullChoice: openPullChoice,
     onSaveActiveFile: saveActivePreviewFile,
     onSelectToolPanelView: selectToolPanelView,
@@ -743,6 +747,7 @@ export function App() {
             : null
         }
         loading={fileSearchQuery.isFetching}
+        mode={commandMode}
         open={commandOpen}
         projectName={activeProject?.name}
         query={commandQuery}

@@ -16,6 +16,8 @@ interface UseAppKeyboardShortcutsOptions {
   readonly onCloseCommandPanel: () => void;
   readonly onClosePullChoice: () => void;
   readonly onOpenCommandPanel: () => void;
+  readonly onOpenFindFiles: () => void;
+  readonly onOpenFindInFiles: () => void;
   readonly onOpenPullChoice: () => void;
   readonly onSaveActiveFile: () => void;
   readonly onSelectToolPanelView: (view: ToolPanelId) => void;
@@ -35,6 +37,8 @@ export function useAppKeyboardShortcuts({
   onCloseCommandPanel,
   onClosePullChoice,
   onOpenCommandPanel,
+  onOpenFindFiles,
+  onOpenFindInFiles,
   onOpenPullChoice,
   onSaveActiveFile,
   onSelectToolPanelView,
@@ -50,6 +54,21 @@ export function useAppKeyboardShortcuts({
         event.preventDefault();
         if (canUseProjectCommands) {
           onOpenCommandPanel();
+        }
+      }
+
+      if (matchesShortcut(event, shortcuts.findFiles)) {
+        event.preventDefault();
+        if (canUseProjectCommands) {
+          onOpenFindFiles();
+        }
+        return;
+      }
+
+      if (matchesShortcut(event, shortcuts.findInFiles)) {
+        event.preventDefault();
+        if (canUseProjectCommands) {
+          onOpenFindInFiles();
         }
         return;
       }
@@ -92,9 +111,11 @@ export function useAppKeyboardShortcuts({
         return;
       }
 
-      if (event.key === "F4" && previewMode === "diff") {
-        event.preventDefault();
-        onJumpToDiffFile();
+      if (matchesShortcut(event, shortcuts.jumpToDiffFile)) {
+        if (previewMode === "diff") {
+          event.preventDefault();
+          onJumpToDiffFile();
+        }
         return;
       }
 
@@ -148,6 +169,8 @@ export function useAppKeyboardShortcuts({
     onCloseCommandPanel,
     onClosePullChoice,
     onOpenCommandPanel,
+    onOpenFindFiles,
+    onOpenFindInFiles,
     onOpenPullChoice,
     onSaveActiveFile,
     onSelectToolPanelView,

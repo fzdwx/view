@@ -31,6 +31,17 @@ use std::time::Duration;
 use tauri::State;
 use tungstenite::{accept, Error as WsError, Message, WebSocket};
 
+mod git_pathspec;
+mod git_commit_push;
+mod git_restore;
+mod git_status;
+mod git_write;
+
+use git_status::{
+    count_statuses, normalize_git_path, parse_name_status_entries, parse_porcelain_v1_z_status,
+    StatusCounts, TreeFile, WORKTREE_STATUS_ARGS,
+};
+
 const MAX_TEXT_FILE_BYTES: u64 = 1_048_576;
 const MAX_MEDIA_FILE_BYTES: u64 = 5_242_880;
 const DEFAULT_FILE_SEARCH_LIMIT: usize = 50;
@@ -50,16 +61,6 @@ struct RepositorySummary {
     worktrees: Vec<WorktreeInfo>,
     branches: Vec<BranchInfo>,
     tags: Vec<TagInfo>,
-}
-
-#[derive(Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct StatusCounts {
-    added: usize,
-    modified: usize,
-    deleted: usize,
-    renamed: usize,
-    untracked: usize,
 }
 
 #[derive(Serialize)]
@@ -104,13 +105,6 @@ struct CommitInfo {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TreeFile {
-    path: String,
-    status: Option<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 struct RepositoryPayload {
     summary: RepositorySummary,
     commits: Vec<CommitInfo>,
@@ -135,6 +129,9 @@ struct FileSearchResult {
     score: i32,
     line_number: Option<usize>,
     line_text: Option<String>,
+    context_before: Vec<String>,
+    context_after: Vec<String>,
+    match_ranges: Vec<(u32, u32)>,
 }
 
 #[derive(Clone)]
@@ -431,6 +428,143 @@ fn search_files(
 }
 
 #[tauri::command]
+fn search_file_names(
+    path: String,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<FileSearchResult>, String> {
+    let root = repository_root(&path)?;
+    let query = query.trim();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let limit = limit
+        .unwrap_or(DEFAULT_FILE_SEARCH_LIMIT)
+        .clamp(1, MAX_FILE_SEARCH_LIMIT);
+    let shared_picker = SharedFilePicker::default();
+    let shared_frecency = SharedFrecency::default();
+    FilePicker::new_with_shared_state(
+        shared_picker.clone(),
+        shared_frecency,
+        FilePickerOptions {
+            base_path: root.to_string_lossy().to_string(),
+            mode: FFFMode::Ai,
+            watch: false,
+            ..Default::default()
+        },
+    )
+    .map_err(|error| error.to_string())?;
+    if !shared_picker.wait_for_scan(FILE_SEARCH_SCAN_TIMEOUT) {
+        return Err("Timed out while indexing files for search".to_string());
+    }
+    let parsed_query = QueryParser::default().parse(query);
+    let picker_guard = shared_picker.read().map_err(|error| error.to_string())?;
+    let picker = picker_guard
+        .as_ref()
+        .ok_or_else(|| "File search index was not initialized".to_string())?;
+    let file_results = picker.fuzzy_search(
+        &parsed_query,
+        None,
+        FuzzySearchOptions {
+            max_threads: 0,
+            current_file: None,
+            project_path: Some(root.as_path()),
+            pagination: PaginationArgs { offset: 0, limit },
+            ..Default::default()
+        },
+    );
+    let results = file_results
+        .items
+        .iter()
+        .zip(file_results.scores.iter())
+        .map(|(item, score)| FileSearchResult {
+            path: item.relative_path(picker).replace('\\', "/"),
+            score: score.total,
+            line_number: None,
+            line_text: None,
+            context_before: Vec::new(),
+            context_after: Vec::new(),
+            match_ranges: Vec::new(),
+        })
+        .fold(Vec::<FileSearchResult>::new(), |mut results, result| {
+            if results.iter().all(|current| current.path != result.path) {
+                results.push(result);
+            }
+            results
+        });
+    Ok(results)
+}
+
+#[tauri::command]
+fn search_file_contents(
+    path: String,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<FileSearchResult>, String> {
+    let root = repository_root(&path)?;
+    let query = query.trim();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let limit = limit
+        .unwrap_or(DEFAULT_FILE_SEARCH_LIMIT)
+        .clamp(1, MAX_FILE_SEARCH_LIMIT);
+    let shared_picker = SharedFilePicker::default();
+    let shared_frecency = SharedFrecency::default();
+    FilePicker::new_with_shared_state(
+        shared_picker.clone(),
+        shared_frecency,
+        FilePickerOptions {
+            base_path: root.to_string_lossy().to_string(),
+            mode: FFFMode::Ai,
+            watch: false,
+            ..Default::default()
+        },
+    )
+    .map_err(|error| error.to_string())?;
+    if !shared_picker.wait_for_scan(FILE_SEARCH_SCAN_TIMEOUT) {
+        return Err("Timed out while indexing files for search".to_string());
+    }
+    let grep_query = QueryParser::new(GrepConfig).parse(query);
+    let picker_guard = shared_picker.read().map_err(|error| error.to_string())?;
+    let picker = picker_guard
+        .as_ref()
+        .ok_or_else(|| "File search index was not initialized".to_string())?;
+    let grep_results = picker.grep(
+        &grep_query,
+        &GrepSearchOptions {
+            max_matches_per_file: 1,
+            page_limit: limit,
+            mode: GrepMode::PlainText,
+            time_budget_ms: 400,
+            before_context: 2,
+            after_context: 2,
+            trim_whitespace: true,
+            ..Default::default()
+        },
+    );
+    let mut results = Vec::new();
+    for matched in &grep_results.matches {
+        let Some(file) = grep_results.files.get(matched.file_index) else {
+            continue;
+        };
+        results.push(FileSearchResult {
+            path: file.relative_path(picker).replace('\\', "/"),
+            score: matched.fuzzy_score.map(i32::from).unwrap_or(0),
+            line_number: Some(matched.line_number as usize),
+            line_text: Some(matched.line_content.clone()),
+            context_before: matched.context_before.clone(),
+            context_after: matched.context_after.clone(),
+            match_ranges: matched.match_byte_offsets.iter().map(|(s, e)| (*s, *e)).collect(),
+        });
+        if results.len() >= limit {
+            break;
+        }
+    }
+    Ok(results)
+}
+
+#[tauri::command]
 fn search_editor_text(content: String, query: String) -> Result<EditorSearchResponse, String> {
     Ok(EditorSearchResponse {
         matches: editor_text_matches(&content, &query)
@@ -612,7 +746,7 @@ fn repository_summary(root: &Path) -> Result<RepositorySummary, String> {
         .unwrap_or_else(|_| "no commits".to_string())
         .trim()
         .to_string();
-    let status = git(root, &["status", "--porcelain=v1"]).unwrap_or_default();
+    let status = git(root, WORKTREE_STATUS_ARGS).unwrap_or_default();
     let worktrees = parse_worktrees(&git(root, &["worktree", "list", "--porcelain"])?);
     let branches = git_branches(root)?;
     let tags = git_tags(root)?;
@@ -625,7 +759,7 @@ fn repository_summary(root: &Path) -> Result<RepositorySummary, String> {
             branch
         },
         head,
-        status_counts: count_statuses(&status),
+        status_counts: count_statuses(&status).unwrap_or_default(),
         worktrees,
         branches,
         tags,
@@ -930,90 +1064,9 @@ fn commit_changed_files(root: &Path, hash: &str) -> Result<Vec<TreeFile>, String
 }
 
 fn worktree_changed_files(root: &Path) -> Result<Vec<TreeFile>, String> {
-    let staged = git(root, &["diff", "--cached", "--name-status", "-M"])?;
-    let unstaged = git(root, &["diff", "--name-status", "-M"])?;
-    let status = git(root, &["status", "--porcelain=v1", "-uall"]).unwrap_or_default();
-    let untracked = git(root, &["ls-files", "--others", "--exclude-standard"])?;
+    let status = git(root, WORKTREE_STATUS_ARGS)?;
 
-    let status_by_path: HashMap<String, String> =
-        parse_status_entries(&status).into_iter().collect();
-    let mut files = staged
-        .lines()
-        .chain(unstaged.lines())
-        .filter_map(parse_name_status_line)
-        .chain(untracked.lines().filter_map(|path| {
-            let path = path.trim();
-            (!path.is_empty()).then(|| TreeFile {
-                path: path.to_string(),
-                status: Some("untracked".to_string()),
-            })
-        }))
-        .into_iter()
-        .map(|mut file| {
-            if file.status.is_none() {
-                file.status = status_by_path.get(&file.path).cloned();
-            }
-            file
-        })
-        .collect::<Vec<_>>();
-
-    files.sort_by(|left, right| left.path.cmp(&right.path));
-    files.dedup_by(|left, right| left.path == right.path);
-    Ok(files)
-}
-
-fn parse_name_status_entries(output: &str) -> Vec<TreeFile> {
-    let mut files = output
-        .lines()
-        .filter_map(parse_name_status_line)
-        .collect::<Vec<_>>();
-    files.sort_by(|left, right| left.path.cmp(&right.path));
-    files.dedup_by(|left, right| left.path == right.path);
-    files
-}
-
-fn parse_name_status_line(line: &str) -> Option<TreeFile> {
-    let mut parts = line.split('\t');
-    let code = parts.next()?;
-    let first_path = parts.next()?;
-    let second_path = parts.next();
-    let status = name_status_code_to_status(code);
-    let path = if code.starts_with('R') || code.starts_with('C') {
-        second_path.unwrap_or(first_path)
-    } else {
-        first_path
-    };
-
-    Some(TreeFile {
-        path: normalize_git_path(path),
-        status: Some(status.to_string()),
-    })
-}
-
-fn name_status_code_to_status(code: &str) -> &'static str {
-    if is_unmerged_status_code(code) {
-        return "conflict";
-    }
-
-    match code.chars().next().unwrap_or('M') {
-        'A' => "added",
-        'D' => "deleted",
-        'R' => "renamed",
-        _ => "modified",
-    }
-}
-
-fn is_unmerged_status_code(code: &str) -> bool {
-    code.contains('U') || matches!(code, "DD" | "AA")
-}
-
-fn normalize_git_path(path: &str) -> String {
-    path.trim()
-        .trim_matches('"')
-        .strip_prefix("b/")
-        .or_else(|| path.trim().trim_matches('"').strip_prefix("a/"))
-        .unwrap_or_else(|| path.trim().trim_matches('"'))
-        .to_string()
+    parse_porcelain_v1_z_status(&status)
 }
 
 fn normalize_user_repo_path(path: &str) -> Result<String, String> {
@@ -1091,20 +1144,25 @@ fn validate_cross_platform_path_part(part: &str) -> Result<(), String> {
 
 fn git_files(root: &Path) -> Result<Vec<TreeFile>, String> {
     let tracked = git(root, &["ls-files", "-co", "--exclude-standard"])?;
-    let status = git(root, &["status", "--porcelain=v1", "-uall"]).unwrap_or_default();
-    let statuses = parse_status_entries(&status);
+    let status = git(root, WORKTREE_STATUS_ARGS).unwrap_or_default();
+    let mut statuses_by_path = parse_porcelain_v1_z_status(&status)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|file| (file.path.clone(), file))
+        .collect::<HashMap<_, _>>();
 
     let mut files: Vec<TreeFile> = tracked
         .lines()
         .filter(|path| !path.trim().is_empty())
-        .map(|path| TreeFile {
-            path: path.to_string(),
-            status: statuses
-                .iter()
-                .find(|(status_path, _)| status_path == path)
-                .map(|(_, status)| status.clone()),
+        .map(|path| {
+            statuses_by_path.remove(path).unwrap_or_else(|| TreeFile {
+                path: path.to_string(),
+                ..TreeFile::default()
+            })
         })
         .collect();
+
+    files.extend(statuses_by_path.into_values());
 
     files.sort_by(|left, right| left.path.cmp(&right.path));
     files.dedup_by(|left, right| left.path == right.path);
@@ -2168,6 +2226,9 @@ fn search_project_files(
             score: score.total,
             line_number: None,
             line_text: None,
+            context_before: Vec::new(),
+            context_after: Vec::new(),
+            match_ranges: Vec::new(),
         })
         .map(|mut result| {
             if let Some((line_number, line_text, _)) = grep_matches_by_path.get(&result.path) {
@@ -2196,6 +2257,9 @@ fn search_project_files(
             score: matched.fuzzy_score.map(i32::from).unwrap_or(0),
             line_number: Some(matched.line_number as usize),
             line_text: Some(matched.line_content.clone()),
+            context_before: Vec::new(),
+            context_after: Vec::new(),
+            match_ranges: Vec::new(),
         });
         if combined.len() >= limit {
             break;
@@ -2288,6 +2352,10 @@ fn commit_parents(root: &Path, hash: &str) -> Result<Vec<String>, String> {
 }
 
 fn git_worktree_file_diff(root: &Path, file_path: &str) -> Result<String, String> {
+    let pathspecs = git_pathspec::validate_existing_pathspecs(root, &[file_path.to_string()])?;
+    let file_path = pathspecs
+        .first()
+        .ok_or_else(|| "File path is required".to_string())?;
     let unstaged = git(
         root,
         &["diff", "--no-ext-diff", "--unified=8", "--", file_path],
@@ -2317,17 +2385,15 @@ fn git_worktree_file_diff(root: &Path, file_path: &str) -> Result<String, String
 }
 
 fn is_untracked_file(root: &Path, file_path: &str) -> bool {
-    let output = git(
-        root,
-        &[
-            "ls-files",
-            "--others",
-            "--exclude-standard",
-            "--",
-            file_path,
-        ],
-    )
-    .unwrap_or_default();
+    let Ok(pathspecs) = git_pathspec::validate_existing_pathspecs(root, &[file_path.to_string()])
+    else {
+        return false;
+    };
+    let args = git_pathspec::git_args_with_pathspecs(
+        &["ls-files", "--others", "--exclude-standard"],
+        &pathspecs,
+    );
+    let output = git_owned(root, &args).unwrap_or_default();
     output.lines().any(|path| path == file_path)
 }
 
@@ -2348,12 +2414,22 @@ fn git_untracked_file_diff(root: &Path, file_path: &str) -> Result<String, Strin
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
+    git_with_env(root, args, &[])
+}
+
+fn git_with_env(root: &Path, args: &[&str], envs: &[(&str, &str)]) -> Result<String, String> {
+    let mut command = Command::new("git");
+    command
         .arg("-c")
         .arg("core.quotepath=false")
         .arg("-C")
         .arg(root)
-        .args(args)
+        .args(args);
+    for (key, value) in envs {
+        command.env(*key, *value);
+    }
+
+    let output = command
         .output()
         .map_err(|error| format!("Failed to run git: {error}"))?;
 
@@ -2362,6 +2438,42 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
     } else {
         Err(stderr_or_status("git command failed", output.stderr))
     }
+}
+
+fn git_with_env_stdout_on_error(
+    root: &Path,
+    args: &[&str],
+    envs: &[(&str, &str)],
+) -> Result<String, String> {
+    let mut command = Command::new("git");
+    command
+        .arg("-c")
+        .arg("core.quotepath=false")
+        .arg("-C")
+        .arg(root)
+        .args(args);
+    for (key, value) in envs {
+        command.env(*key, *value);
+    }
+
+    let output = command
+        .output()
+        .map_err(|error| format!("Failed to run git: {error}"))?;
+
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        Err(stdout_stderr_or_status(
+            "git command failed",
+            &output.stdout,
+            &output.stderr,
+        ))
+    }
+}
+
+fn git_owned(root: &Path, args: &[String]) -> Result<String, String> {
+    let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+    git(root, &arg_refs)
 }
 
 fn git_allow_exit(root: &Path, args: &[&str], allowed_codes: &[i32]) -> Result<String, String> {
@@ -2390,54 +2502,15 @@ fn stderr_or_status(prefix: &str, stderr: Vec<u8>) -> String {
     }
 }
 
-fn count_statuses(status: &str) -> StatusCounts {
-    let mut counts = StatusCounts::default();
-    for (_, status) in parse_status_entries(status) {
-        match status.as_str() {
-            "added" => counts.added += 1,
-            "modified" => counts.modified += 1,
-            "deleted" => counts.deleted += 1,
-            "renamed" => counts.renamed += 1,
-            "untracked" => counts.untracked += 1,
-            _ => {}
-        }
+fn stdout_stderr_or_status(prefix: &str, stdout: &[u8], stderr: &[u8]) -> String {
+    let stdout_message = String::from_utf8_lossy(stdout).trim().to_string();
+    let stderr_message = String::from_utf8_lossy(stderr).trim().to_string();
+    match (stderr_message.is_empty(), stdout_message.is_empty()) {
+        (true, true) => prefix.to_string(),
+        (true, false) => stdout_message,
+        (false, true) => stderr_message,
+        (false, false) => format!("{stderr_message}\n{stdout_message}"),
     }
-    counts
-}
-
-fn parse_status_entries(status: &str) -> Vec<(String, String)> {
-    status
-        .lines()
-        .filter_map(|line| {
-            if line.len() < 4 {
-                return None;
-            }
-
-            let code = &line[..2];
-            let raw_path = line[3..].trim();
-            let path = raw_path
-                .split(" -> ")
-                .last()
-                .unwrap_or(raw_path)
-                .trim_matches('"')
-                .to_string();
-            let status = if is_unmerged_status_code(code) {
-                "conflict"
-            } else if code == "??" {
-                "untracked"
-            } else if code.contains('R') {
-                "renamed"
-            } else if code.contains('A') {
-                "added"
-            } else if code.contains('D') {
-                "deleted"
-            } else {
-                "modified"
-            };
-
-            Some((path, status.to_string()))
-        })
-        .collect()
 }
 
 fn parse_worktrees(output: &str) -> Vec<WorktreeInfo> {
@@ -3205,18 +3278,20 @@ mod tests {
 
     #[test]
     fn status_entries_mark_unmerged_files_as_conflicts() {
-        let statuses = parse_status_entries("UU src/app.ts\n U src/lib.rs\nAA README.md\n");
+        let statuses = parse_porcelain_v1_z_status("UU src/app.ts\0 U src/lib.rs\0AA README.md\0")
+            .expect("parse conflict statuses");
 
         assert_eq!(
-            statuses,
+            statuses
+                .into_iter()
+                .map(|file| (file.path, file.status.unwrap_or_default()))
+                .collect::<Vec<_>>(),
             vec![
+                ("README.md".to_string(), "conflict".to_string()),
                 ("src/app.ts".to_string(), "conflict".to_string()),
                 ("src/lib.rs".to_string(), "conflict".to_string()),
-                ("README.md".to_string(), "conflict".to_string()),
             ]
         );
-        assert_eq!(name_status_code_to_status("U"), "conflict");
-        assert_eq!(name_status_code_to_status("UU"), "conflict");
     }
 
     #[test]
@@ -3426,6 +3501,8 @@ pub fn run() {
             rename_project_file,
             delete_project_file,
             search_files,
+            search_file_names,
+            search_file_contents,
             search_editor_text,
             replace_editor_text,
             fetch_remotes,
@@ -3434,6 +3511,11 @@ pub fn run() {
             rename_branch,
             delete_branch,
             pull_current_branch,
+            git_commit_push::create_commit,
+            git_commit_push::push_current_branch,
+            git_write::stage_files,
+            git_write::unstage_files,
+            git_restore::restore_files,
             terminal_spawn,
             terminal_resize,
             terminal_kill
