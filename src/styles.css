@@ -118,6 +118,11 @@ button {
   box-shadow: none;
 }
 
+.activity-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .brand-row,
 .panel-toolbar,
 .diff-topbar,
@@ -908,6 +913,14 @@ kbd {
 .tool-dock-panel.collapsed .tool-dock-content {
   visibility: hidden;
   overflow: hidden;
+}
+
+.tool-dock-panel.no-tabs {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.tool-dock-panel.no-tabs.collapsed {
+  grid-template-rows: 0;
 }
 
 .tool-dock-bottom {

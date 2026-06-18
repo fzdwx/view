@@ -1818,8 +1818,8 @@ export function App() {
   );
   const visibleToolPanels = [
     ...(projectInToolDock
-      ? toolPanels
-      : toolPanels.filter((panel) => panel.id !== "project")),
+      ? toolPanels.filter((panel) => panel.id === "project")
+      : []),
     ...gitToolPanels.filter((panel) => detachedGitPanels.includes(panel.id)),
   ];
 
@@ -1860,6 +1860,32 @@ export function App() {
         </div>
 
         <div className="rail-spacer" />
+        <button
+          className={
+            activityView === "git"
+              ? "activity-button rail-project-button active"
+              : "activity-button rail-project-button"
+          }
+          aria-label="Git"
+          title="Git"
+          disabled={!activeProject}
+          onClick={() => selectToolPanelView("git")}
+        >
+          <GitBranch size={18} />
+        </button>
+        <button
+          className={
+            activityView === "terminal"
+              ? "activity-button rail-project-button active"
+              : "activity-button rail-project-button"
+          }
+          aria-label="Terminal"
+          title="Terminal"
+          disabled={!activeProject}
+          onClick={() => selectToolPanelView("terminal")}
+        >
+          <TerminalSquare size={18} />
+        </button>
         <button
           className="activity-button rail-project-button"
           aria-label="Settings"
@@ -2114,55 +2140,55 @@ function ToolDockPanel({
   onDragStart(panel: ToolPanelId): void;
   onSelectView(view: ToolPanelId): void;
 }) {
+  const hasTabs = panels.length > 0;
+  const sectionClass = collapsed
+    ? `tool-dock-panel tool-dock-${dock} collapsed${hasTabs ? "" : " no-tabs"}`
+    : `tool-dock-panel tool-dock-${dock}${hasTabs ? "" : " no-tabs"}`;
   return (
-    <section
-      className={
-        collapsed
-          ? `tool-dock-panel tool-dock-${dock} collapsed`
-          : `tool-dock-panel tool-dock-${dock}`
-      }
-    >
+    <section className={sectionClass}>
       <div className="tool-dock-content" aria-hidden={collapsed}>
         {children}
       </div>
-      <nav className="tool-dock-tabs" aria-label="Tool panel views">
-        <div className="tool-tab-group">
-          {panels.map((panel) => {
-            const Icon = panel.icon;
-            return (
-              <button
-                key={panel.id}
-                className={
-                  activeView === panel.id
-                    ? "activity-button active"
-                    : "activity-button"
-                }
-                aria-label={`${panel.label} view`}
-                title={`${panel.label}, drag to dock`}
-                draggable
-                onClick={() => onSelectView(panel.id)}
-                onDragEnd={onDragEnd}
-                onDragStart={(event) => {
-                  event.dataTransfer.effectAllowed = "move";
-                  event.dataTransfer.setData(
-                    "application/x-view-tool-panel",
-                    panel.id,
-                  );
-                  if (isGitPanelId(panel.id)) {
+      {hasTabs ? (
+        <nav className="tool-dock-tabs" aria-label="Tool panel views">
+          <div className="tool-tab-group">
+            {panels.map((panel) => {
+              const Icon = panel.icon;
+              return (
+                <button
+                  key={panel.id}
+                  className={
+                    activeView === panel.id
+                      ? "activity-button active"
+                      : "activity-button"
+                  }
+                  aria-label={`${panel.label} view`}
+                  title={`${panel.label}, drag to dock`}
+                  draggable
+                  onClick={() => onSelectView(panel.id)}
+                  onDragEnd={onDragEnd}
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = "move";
                     event.dataTransfer.setData(
-                      "application/x-view-git-panel",
+                      "application/x-view-tool-panel",
                       panel.id,
                     );
-                  }
-                  onDragStart(panel.id);
-                }}
-              >
-                <Icon size={19} />
-              </button>
-            );
-          })}
-        </div>
-      </nav>
+                    if (isGitPanelId(panel.id)) {
+                      event.dataTransfer.setData(
+                        "application/x-view-git-panel",
+                        panel.id,
+                      );
+                    }
+                    onDragStart(panel.id);
+                  }}
+                >
+                  <Icon size={19} />
+                </button>
+              );
+            })}
+          </div>
+        </nav>
+      ) : null}
     </section>
   );
 }
