@@ -44,6 +44,20 @@ export function filterDiffFiles(
   );
 }
 
+export function countDiffStats(files: readonly FileDiffMetadata[]) {
+  return files.reduce(
+    (total, file) => {
+      for (const hunk of file.hunks) {
+        total.additions += hunk.additionLines;
+        total.deletions += hunk.deletionLines;
+      }
+      total.files += 1;
+      return total;
+    },
+    { additions: 0, deletions: 0, files: 0 },
+  );
+}
+
 function changeTypeToStatus(changeType: FileDiffMetadata["type"]): GitStatus {
   switch (changeType) {
     case "new":
