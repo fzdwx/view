@@ -10,6 +10,7 @@ import {
   type AppSettings,
 } from "../lib/settings";
 import { SettingsPage } from "./SettingsPage";
+import { WindowControls } from "./WindowControls";
 
 type SettingsWindowStyle = CSSProperties & {
   readonly "--app-font-family": string;
@@ -46,6 +47,12 @@ export function SettingsWindowApp() {
 
   return (
     <main className="settings-window-shell" style={style}>
+      <div className="settings-title-bar" data-tauri-drag-region>
+        <span className="settings-title-label" data-tauri-drag-region>
+          Settings
+        </span>
+        <WindowControls />
+      </div>
       <SettingsPage
         settings={settings}
         onChange={updateSettings}

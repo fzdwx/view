@@ -260,9 +260,29 @@ textarea,
 
 .settings-window-shell {
   min-height: 100%;
+  display: grid;
+  grid-template-rows: 32px minmax(0, 1fr);
   background: var(--surface-0);
   color: var(--ink);
   font-family: var(--app-font-family);
+}
+
+.settings-title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 32px;
+  padding: 0 0 0 12px;
+  background: var(--surface-0);
+  border-bottom: 1px solid var(--line);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.settings-title-label {
+  font-size: 12px;
+  color: var(--muted);
+  pointer-events: none;
 }
 
 .settings-panel {
