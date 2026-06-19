@@ -9,14 +9,11 @@ const settingsWindowHeight = 620;
 
 let preloadPromise: Promise<void> | null = null;
 
-export async function installSettingsWindowDpiScaling(): Promise<void> {
+export async function installSettingsWindowZoom(
+  appZoom: number,
+): Promise<void> {
   try {
-    await applyDisplayScale({
-      logicalSize: {
-        width: settingsWindowWidth,
-        height: settingsWindowHeight,
-      },
-    });
+    await applyDisplayScale({ appZoom });
   } catch {
     // ignore zoom failures
   }

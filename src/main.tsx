@@ -13,7 +13,8 @@ import { DiffRenderingProvider } from "./components/workbench/DiffRenderingProvi
 import { prewarmFontFallbacks } from "./lib/fontFallbackPrewarm";
 import { installNativeWebviewBehavior } from "./lib/nativeWebviewBehavior";
 import { installMainWindowStatePersistence } from "./lib/nativeWindowState";
-import { preloadSettingsWindow, installSettingsWindowDpiScaling } from "./lib/settingsWindow";
+import { loadAppSettings } from "./lib/settings";
+import { preloadSettingsWindow, installSettingsWindowZoom } from "./lib/settingsWindow";
 import { applyDisplayScale } from "./lib/windowDpiScaling";
 import "./styles.css";
 
@@ -73,9 +74,9 @@ installNativeWebviewBehavior();
 installMainWindowStatePersistence();
 prewarmFontFallbacks();
 if (isSettingsWindowRoute()) {
-  void installSettingsWindowDpiScaling();
+  void installSettingsWindowZoom(loadAppSettings().appZoom);
 } else {
   void preloadSettingsWindow();
-  void applyDisplayScale();
+  void applyDisplayScale({ appZoom: loadAppSettings().appZoom });
 }
 createRoot(rootElement()).render(<RootApp />);

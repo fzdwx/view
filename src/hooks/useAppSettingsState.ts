@@ -7,6 +7,7 @@ import {
   saveAppSettings,
 } from "../lib/settings";
 import { subscribeToSettingsChanges } from "../lib/settingsEvents";
+import { applyDisplayScale } from "../lib/windowDpiScaling";
 
 interface AppShellStyle extends CSSProperties {
   readonly "--app-font-family": string;
@@ -27,6 +28,10 @@ export function useAppSettingsState(): AppSettingsState {
   useEffect(() => {
     saveAppSettings(appSettings);
   }, [appSettings]);
+
+  useEffect(() => {
+    void applyDisplayScale({ appZoom: appSettings.appZoom });
+  }, [appSettings.appZoom]);
 
   useEffect(
     () =>

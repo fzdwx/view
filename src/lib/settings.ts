@@ -18,6 +18,7 @@ export interface AppSettings {
   fontSize: number;
   fontWeight: string;
   lineHeight: number;
+  appZoom: number;
   shortcuts: Record<ShortcutAction, string>;
   useCodeMirrorEditor: boolean;
 }
@@ -37,12 +38,18 @@ export const defaultUiFontFamily =
 export const defaultMonoFontFamily =
   '"SFMono-Regular", "Cascadia Mono", "Cascadia Code", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", monospace';
 
+export const appZoomMin = 0.75;
+export const appZoomMax = 2;
+export const appZoomStep = 0.05;
+export const defaultAppZoom = 1;
+
 export const defaultAppSettings: AppSettings = {
   uiFontFamily: defaultUiFontFamily,
   monoFontFamily: defaultMonoFontFamily,
   fontSize: 12,
   fontWeight: "400",
   lineHeight: 1.56,
+  appZoom: defaultAppZoom,
   shortcuts: {
     commandPanel: "Mod+P",
     saveFile: "Mod+S",
@@ -176,6 +183,12 @@ function normalizeAppSettings(value: unknown): AppSettings {
       defaultAppSettings.lineHeight,
       1.2,
       2,
+    ),
+    appZoom: normalizeNumber(
+      record.appZoom,
+      defaultAppSettings.appZoom,
+      appZoomMin,
+      appZoomMax,
     ),
     shortcuts: shortcutRows.reduce<Record<ShortcutAction, string>>((current, row) => {
       const shortcut = shortcuts[row.action];

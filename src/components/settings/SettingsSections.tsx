@@ -2,11 +2,15 @@ import { useMemo } from "react";
 import type { SystemFont } from "../../lib/api";
 import {
   type AppSettings,
+  appZoomMax,
+  appZoomMin,
+  appZoomStep,
   type ShortcutAction,
   type ShortcutRow,
   shortcutRows,
 } from "../../lib/settings";
 import { ShortcutRecorder, type ShortcutChangeHandler } from "./ShortcutRecorder";
+import { SettingsSlider } from "./SettingsSlider";
 import {
   CodeFontCard,
   UiFontCard,
@@ -62,6 +66,31 @@ function EditorSettings({
 }) {
   return (
     <div className="font-cards">
+      <section className="font-card">
+        <header className="font-card-heading">
+          <h3>Application scale</h3>
+          <p>
+            Adjust the current app zoom. This is applied on top of automatic
+            WSL DPI detection.
+          </p>
+        </header>
+        <div className="font-control">
+          <div className="font-control-label">
+            <span>Scale</span>
+            <output className="font-control-value">
+              {Math.round(settings.appZoom * 100)}%
+            </output>
+          </div>
+          <SettingsSlider
+            ariaLabel="Application scale"
+            max={appZoomMax}
+            min={appZoomMin}
+            step={appZoomStep}
+            value={settings.appZoom}
+            onChange={(value) => onChange({ ...settings, appZoom: value })}
+          />
+        </div>
+      </section>
       <section className="font-card">
         <header className="font-card-heading">
           <h3>CodeMirror editor</h3>

@@ -7,7 +7,6 @@ import {
   type Window as TauriWindow,
 } from "@tauri-apps/api/window";
 import { isTauriRuntime } from "./api";
-import { resolveDisplayScale } from "./windowDpiScaling";
 
 const mainWindowStateStorageKey = "view.main-window-state.v1";
 const windowStatePersistenceMark = "view:window-state-persistence";
@@ -23,7 +22,6 @@ interface SavedWindowState {
   readonly width: number;
   readonly height: number;
   readonly maximized: boolean;
-  readonly scale: number | null;
 }
 
 let windowStatePersistenceInstalled = false;
@@ -66,25 +64,16 @@ async function restoreWindowState(appWindow: TauriWindow): Promise<void> {
     return;
   }
 
-  // When the Windows DPI scale changes between sessions (e.g. 100% -> 150%
-  // under WSLg), the previously saved physical size is stale. Compensate by
-  // the ratio of the current scale to the scale captured at save time so the
-  // restored window matches the new display density. When the scale is
-  // unchanged the factor is 1.0 and behavior is preserved exactly.
-  const currentScale = (await resolveDisplayScale()) ?? 1;
-  const savedScale = savedState.scale ?? 1;
-  const scaleFactor = savedScale > 0 ? currentScale / savedScale : 1;
-
   await appWindow.setSize(
     new PhysicalSize(
-      Math.round(savedState.width * scaleFactor),
-      Math.round(savedState.height * scaleFactor),
+      Math.round(savedState.width),
+      Math.round(savedState.height),
     ),
   );
   await appWindow.setPosition(
     new PhysicalPosition(
-      Math.round(savedState.x * scaleFactor),
-      Math.round(savedState.y * scaleFactor),
+      Math.round(savedState.x),
+      Math.round(savedState.y),
     ),
   );
   if (savedState.maximized) {
@@ -139,14 +128,12 @@ async function persistCurrentWindowState(
       return;
     }
 
-    const scale = (await resolveDisplayScale()) ?? null;
     saveWindowState({
       x: Math.round(position.x),
       y: Math.round(position.y),
       width: Math.round(size.width),
       height: Math.round(size.height),
       maximized,
-      scale,
     });
   } catch (error) {
     reportNativeWindowStateError("save", error);
@@ -181,7 +168,7 @@ function normalizeSavedWindowState(value: unknown): SavedWindowState | null {
     return null;
   }
 
-  const { x, y, width, height, maximized, scale } = value;
+  const { x, y, width, height, maximized } = value;
   if (
     !isFiniteNumber(x) ||
     !isFiniteNumber(y) ||
@@ -199,7 +186,6 @@ function normalizeSavedWindowState(value: unknown): SavedWindowState | null {
     width,
     height,
     maximized: typeof maximized === "boolean" ? maximized : false,
-    scale: typeof scale === "number" && scale > 0 ? scale : null,
   };
 }
 

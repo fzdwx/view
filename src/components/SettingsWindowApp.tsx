@@ -1,4 +1,4 @@
-import { type CSSProperties, useCallback, useMemo, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useState } from "react";
 import { notifySettingsChanged } from "../lib/settingsEvents";
 import {
   appFontCss,
@@ -8,6 +8,7 @@ import {
   saveAppSettings,
   type AppSettings,
 } from "../lib/settings";
+import { applyDisplayScale } from "../lib/windowDpiScaling";
 import { SettingsPage } from "./SettingsPage";
 import { WindowControls } from "./WindowControls";
 
@@ -21,6 +22,11 @@ type SettingsWindowStyle = CSSProperties & {
 
 export function SettingsWindowApp() {
   const [settings, setSettings] = useState(loadAppSettings);
+
+  useEffect(() => {
+    void applyDisplayScale({ appZoom: settings.appZoom });
+  }, [settings.appZoom]);
+
   const style = useMemo<SettingsWindowStyle>(
     () => ({
       "--app-font-family": appFontCss(settings),
