@@ -27,6 +27,7 @@ import type { TreeGitFileActions } from "./components/TreeContextMenu";
 import { CodeMirrorFilePreview } from "./components/editor/CodeMirrorFilePreview";
 import { PreviewDebugPage } from "./components/editor/PreviewDebugPage";
 import {
+  type GitAvailability,
   type GitPanelDataProps,
 } from "./components/workbench/GitPanels";
 import {
@@ -187,6 +188,13 @@ export function App() {
     reflogFilter,
     selectedProjectPath,
   });
+  const gitAvailability: GitAvailability =
+    payload && !repositoryQuery.isPlaceholderData
+      ? payload.summary.isGitRepo
+        ? "git"
+        : "non-git"
+      : "loading";
+  const hasGitRepository = gitAvailability === "git";
   const handleFileSaved = useCallback(
     async (projectPath: string, filePath: string) => {
       await Promise.all([
@@ -264,6 +272,7 @@ export function App() {
     discardDraftForPath,
     editorDrafts,
     gitWriteGuard,
+    hasGitRepository,
     removePreviewTabsForPath,
     selectedProjectPath,
     setSelectedProjectPath,
@@ -272,6 +281,7 @@ export function App() {
     activeProject,
     editorDrafts,
     gitWriteGuard,
+    hasGitRepository,
     repositoryPayload: payload,
   });
   const {
@@ -288,6 +298,7 @@ export function App() {
     activeCommit,
     activeProjectPath,
     fileContentReady: currentFileContent !== null,
+    hasGitRepository,
     previewMode,
     selectedChangePath,
     selectedProjectPath,
@@ -341,6 +352,7 @@ export function App() {
     activeProject,
     confirmDiscardProjectDrafts,
     discardDraftsForProject,
+    hasGitRepository,
     refetchCommits: commitsQuery.refetch,
     refetchReflog: reflogQuery.refetch,
     refetchFileWorktreeDiff: fileWorktreeDiffQuery.refetch,
@@ -547,6 +559,7 @@ export function App() {
   });
   useRepositoryRemotePolling({
     activeProjectPath,
+    hasGitRepository,
     refetchCommits: commitsQuery.refetch,
     refetchProjectFiles: projectFilesQuery.refetch,
     refetchRepository: repositoryQuery.refetch,
@@ -647,6 +660,9 @@ export function App() {
       unstageFile,
     ],
   );
+  const activeTreeGitFileActions = hasGitRepository
+    ? treeGitFileActions
+    : undefined;
 
   const gitPanelData = useMemo<GitPanelDataProps>(
     () => ({
@@ -656,7 +672,7 @@ export function App() {
       commits,
       commitsLoading: commitsQuery.isLoading,
       filteredCommits,
-      gitFileActions: treeGitFileActions,
+      gitFileActions: activeTreeGitFileActions,
       historyMode,
       gitWriteActions,
       payload,
@@ -708,16 +724,21 @@ export function App() {
       selectedCommit,
       selectedReflogEntry,
       setReflogFilter,
-      treeGitFileActions,
+      activeTreeGitFileActions,
     ],
   );
+  const projectTreeEmptyCopy =
+    hasGitRepository
+      ? "Tracked and untracked files will appear here."
+      : "Files in this folder will appear here.";
 
   const projectTreeContent = (
     <MemoProjectFileTreePanel
+      emptyCopy={projectTreeEmptyCopy}
       files={projectFilesQuery.data}
       selectedPath={selectedProjectPath}
       title={projectTreeTitle}
-      gitFileActions={treeGitFileActions}
+      gitFileActions={activeTreeGitFileActions}
       onCreateFile={handleProjectTreeCreateFile}
       onDeleteFile={handleProjectTreeDeleteFile}
       onRenameFile={handleProjectTreeRenameFile}
@@ -905,10 +926,10 @@ export function App() {
             <div className="welcome-icon">
               <FolderOpen size={26} />
             </div>
-            <h1>Open a Git repository</h1>
+            <h1>Open a folder</h1>
             <p>
-              View keeps multiple repositories in the rail and lets each project
-              switch between its worktrees.
+              View keeps multiple folders in the rail and unlocks Git history
+              automatically when a folder is a repository.
             </p>
             <button type="button" className="primary-action compact" onClick={chooseRepository}>
              <FolderOpen size={16} />
@@ -921,7 +942,7 @@ export function App() {
         ) : repositoryQuery.isError ? (
           <div className="error-surface">
             <div className="welcome-drag-strip" data-tauri-drag-region />
-            <div className="error-title">Repository could not be loaded</div>
+            <div className="error-title">Project could not be loaded</div>
             <pre>{String(repositoryQuery.error.message)}</pre>
             <div className="welcome-controls">
               <WindowControls />
@@ -938,6 +959,7 @@ export function App() {
                 <WorkbenchRailSlotStack
                   activeItem={leftTopActiveItem}
                   activeProjectPath={activeProject?.activePath ?? null}
+                  gitAvailability={gitAvailability}
                   dockedGitPanelOrder={dockedGitPanelOrder}
                   draggedGitPanel={draggedGitPanel}
                   gitPanelData={gitPanelData}
@@ -1002,6 +1024,17 @@ export function App() {
                     onSave={saveActivePreviewFile}
                     onSetConflictDraftContent={setConflictDraftContent}
                   />
+              ) : gitAvailability === "loading" ? (
+                <div className="diff-loading">
+                  <Loader2 className="spin" size={18} />
+                </div>
+              ) : !hasGitRepository ? (
+                <div className="empty-state">
+                  <div className="empty-title">Git Diff Unavailable</div>
+                  <div className="empty-copy">
+                    This folder is not inside a Git repository.
+                  </div>
+                </div>
               ) : payload && !selectedChangePath ? (
                 <div className="empty-state">
                   <div className="empty-title">Select a changed file</div>
@@ -1044,6 +1077,7 @@ export function App() {
                 <WorkbenchRailSlotStack
                   activeItem={rightTopActiveItem}
                   activeProjectPath={activeProject?.activePath ?? null}
+                  gitAvailability={gitAvailability}
                   dockedGitPanelOrder={dockedGitPanelOrder}
                   draggedGitPanel={draggedGitPanel}
                   gitPanelData={gitPanelData}
@@ -1079,6 +1113,7 @@ export function App() {
                     <WorkbenchRailSlotStack
                       activeItem={leftBottomActiveItem}
                       activeProjectPath={activeProject?.activePath ?? null}
+                      gitAvailability={gitAvailability}
                       dockedGitPanelOrder={dockedGitPanelOrder}
                       draggedGitPanel={draggedGitPanel}
                       gitPanelData={gitPanelData}
@@ -1109,6 +1144,7 @@ export function App() {
                     <WorkbenchRailSlotStack
                       activeItem={rightBottomActiveItem}
                       activeProjectPath={activeProject?.activePath ?? null}
+                      gitAvailability={gitAvailability}
                       dockedGitPanelOrder={dockedGitPanelOrder}
                       draggedGitPanel={draggedGitPanel}
                       gitPanelData={gitPanelData}

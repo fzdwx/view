@@ -849,7 +849,7 @@ function TerminalSessionView({
 export function TerminalPanel({ active, projectPath }: TerminalPanelProps) {
   const [workspaces, setWorkspaces] = useState<Record<string, TerminalWorkspace>>({});
   const unavailableMessage = !projectPath
-    ? "Open a repository first."
+    ? "Open a folder first."
     : !isTauriRuntime()
       ? "Terminal is available in Tauri."
       : null;

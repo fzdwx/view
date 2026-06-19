@@ -69,7 +69,7 @@ export function useProjectSelectionActions({
     const selected = await open({
       directory: true,
       multiple: false,
-      title: "Open Git repository",
+      title: "Open project folder",
     });
 
     if (typeof selected !== "string") {

@@ -4,6 +4,7 @@ import { TerminalPanel } from "../TerminalPanel";
 import {
   GitPanels,
   selectedGitRefName,
+  type GitAvailability,
   type GitPanelDataProps,
 } from "./GitPanels";
 import type {
@@ -18,6 +19,7 @@ import type {
 export interface WorkbenchRailSlotStackProps {
   readonly activeItem: RailItemId | null;
   readonly activeProjectPath: string | null;
+  readonly gitAvailability: GitAvailability;
   readonly branchSize: number;
   readonly commitDetailSize: number;
   readonly detailsSize: number;
@@ -43,6 +45,7 @@ export interface WorkbenchRailSlotStackProps {
 export const WorkbenchRailSlotStack = memo(function WorkbenchRailSlotStack({
   activeItem,
   activeProjectPath,
+  gitAvailability,
   branchSize,
   commitDetailSize,
   detailsSize,
@@ -89,6 +92,7 @@ export const WorkbenchRailSlotStack = memo(function WorkbenchRailSlotStack({
             aria-hidden={activeItem !== "git"}
           >
             <GitPanels
+              availability={gitAvailability}
               branchSize={branchSize}
               commitDetailSize={commitDetailSize}
               data={gitPanelData}
@@ -113,22 +117,31 @@ export const WorkbenchRailSlotStack = memo(function WorkbenchRailSlotStack({
             }
             aria-hidden={activeItem !== "commit"}
           >
-            <CommitInspector
-              commit={null}
-              orientation={isBottomSlot ? "horizontal" : "vertical"}
-              showCommitForm
-              branchName={selectedGitRefName(
-                gitPanelData.payload,
-                gitPanelData.selectedBranchRef,
-              )}
-              detailHeight={commitDetailSize}
-              files={gitPanelData.payload?.files ?? []}
-              gitFileActions={gitPanelData.gitFileActions}
-              gitWriteActions={gitPanelData.gitWriteActions}
-              selectedPath={gitPanelData.selectedChangePath}
-              onResizeDetails={gitPanelData.onResizeCommitInfo}
-              onSelectPath={gitPanelData.onOpenDiffPath}
-            />
+            {gitAvailability === "loading" ? (
+              <div className="diff-loading">Loading Git status…</div>
+            ) : gitAvailability === "non-git" ? (
+              <ToolPanelEmptyState
+                title="Commit Unavailable"
+                copy="Open a Git repository to stage files and create commits."
+              />
+            ) : (
+              <CommitInspector
+                commit={null}
+                orientation={isBottomSlot ? "horizontal" : "vertical"}
+                showCommitForm
+                branchName={selectedGitRefName(
+                  gitPanelData.payload,
+                  gitPanelData.selectedBranchRef,
+                )}
+                detailHeight={commitDetailSize}
+                files={gitPanelData.payload?.files ?? []}
+                gitFileActions={gitPanelData.gitFileActions}
+                gitWriteActions={gitPanelData.gitWriteActions}
+                selectedPath={gitPanelData.selectedChangePath}
+                onResizeDetails={gitPanelData.onResizeCommitInfo}
+                onSelectPath={gitPanelData.onOpenDiffPath}
+              />
+            )}
           </div>
         ) : null}
         {items.includes("terminal") ? (
@@ -160,3 +173,18 @@ export const WorkbenchRailSlotStack = memo(function WorkbenchRailSlotStack({
 });
 
 WorkbenchRailSlotStack.displayName = "WorkbenchRailSlotStack";
+
+function ToolPanelEmptyState({
+  title,
+  copy,
+}: {
+  readonly title: string;
+  readonly copy: string;
+}) {
+  return (
+    <div className="empty-state">
+      <div className="empty-title">{title}</div>
+      <div className="empty-copy">{copy}</div>
+    </div>
+  );
+}

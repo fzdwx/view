@@ -84,7 +84,9 @@ pub(crate) fn push_current_branch(path: String) -> Result<GitWriteResponse, Stri
 }
 
 #[tauri::command]
-pub(crate) fn reset_hard_to_reflog(request: ResetHardToReflogRequest) -> Result<GitWriteResponse, String> {
+pub(crate) fn reset_hard_to_reflog(
+    request: ResetHardToReflogRequest,
+) -> Result<GitWriteResponse, String> {
     let root = repository_root(&request.path)?;
     let selector = normalize_reflog_selector(&request.selector)?;
     git(&root, &["reset", "--hard", selector.as_str()]).map_err(map_reset_error)?;

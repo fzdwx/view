@@ -5,6 +5,7 @@ type RefetchRepositoryData = () => Promise<unknown>;
 
 export interface UseRepositoryRemotePollingOptions {
   readonly activeProjectPath: string | null;
+  readonly hasGitRepository: boolean;
   readonly refetchCommits: RefetchRepositoryData;
   readonly refetchProjectFiles: RefetchRepositoryData;
   readonly refetchRepository: RefetchRepositoryData;
@@ -12,6 +13,7 @@ export interface UseRepositoryRemotePollingOptions {
 
 export function useRepositoryRemotePolling({
   activeProjectPath,
+  hasGitRepository,
   refetchCommits,
   refetchProjectFiles,
   refetchRepository,
@@ -19,7 +21,7 @@ export function useRepositoryRemotePolling({
   const remoteFetchInFlightRef = useRef(false);
 
   useEffect(() => {
-    if (!activeProjectPath || !isTauriRuntime()) {
+    if (!activeProjectPath || !hasGitRepository || !isTauriRuntime()) {
       return;
     }
 
@@ -50,6 +52,7 @@ export function useRepositoryRemotePolling({
     return () => window.clearInterval(timer);
   }, [
     activeProjectPath,
+    hasGitRepository,
     refetchCommits,
     refetchProjectFiles,
     refetchRepository,

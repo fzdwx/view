@@ -99,6 +99,7 @@ export interface RepositoryPreviewDataOptions {
   readonly activeCommit: string | null;
   readonly activeProjectPath: string | null;
   readonly fileContentReady: boolean;
+  readonly hasGitRepository: boolean;
   readonly previewMode: PreviewMode;
   readonly selectedChangePath: string | null;
   readonly selectedProjectPath: string | null;
@@ -172,6 +173,11 @@ export function useRepositoryProjectData({
     placeholderData: keepPreviousData,
     retry: false,
   });
+  const gitQueriesEnabled = Boolean(
+    activeProjectPath &&
+      !repositoryQuery.isPlaceholderData &&
+      repositoryQuery.data?.summary.isGitRepo,
+  );
 
   // The whole query object is returned to consumers (App.tsx) that read many
   // fields (data/isFetching/isError/refetch/isPlaceholderData), so it must be
@@ -190,7 +196,7 @@ export function useRepositoryProjectData({
         activeBranchRef,
         debouncedCommitFilter,
       ),
-    enabled: Boolean(activeProjectPath),
+    enabled: gitQueriesEnabled,
     placeholderData: keepPreviousData,
     retry: false,
   });
@@ -206,7 +212,7 @@ export function useRepositoryProjectData({
         requireQueryInput(activeProjectPath, "reflog path"),
         debouncedReflogFilter,
       ),
-    enabled: Boolean(activeProjectPath),
+    enabled: gitQueriesEnabled,
     placeholderData: keepPreviousData,
     retry: false,
   });
@@ -404,12 +410,14 @@ export function useRepositoryPreviewData({
   activeCommit,
   activeProjectPath,
   fileContentReady,
+  hasGitRepository,
   previewMode,
   selectedChangePath,
   selectedProjectPath,
   selectedProjectStatus,
 }: RepositoryPreviewDataOptions): RepositoryPreviewData {
   const canLoadFilePreviewMetadata = Boolean(
+    hasGitRepository &&
     activeProjectPath &&
       selectedProjectPath &&
       previewMode === "file" &&
@@ -466,7 +474,10 @@ export function useRepositoryPreviewData({
       };
     },
     enabled: Boolean(
-      activeProjectPath && selectedChangePath && previewMode === "diff",
+      hasGitRepository &&
+        activeProjectPath &&
+        selectedChangePath &&
+        previewMode === "diff",
     ),
     placeholderData: keepPreviousData,
     retry: false,

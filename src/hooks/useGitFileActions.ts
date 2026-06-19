@@ -35,6 +35,7 @@ export interface UseGitFileActionsOptions {
   readonly discardDraftForPath: (projectPath: string, filePath: string) => void;
   readonly editorDrafts: Record<string, EditorDraft>;
   readonly gitWriteGuard: GitWriteGuard;
+  readonly hasGitRepository: boolean;
   readonly removePreviewTabsForPath: (path: string) => void;
   readonly selectedProjectPath: string | null;
   readonly setSelectedProjectPath: Dispatch<SetStateAction<string | null>>;
@@ -60,6 +61,7 @@ export function useGitFileActions({
   discardDraftForPath,
   editorDrafts,
   gitWriteGuard,
+  hasGitRepository,
   removePreviewTabsForPath,
   selectedProjectPath,
   setSelectedProjectPath,
@@ -91,7 +93,7 @@ export function useGitFileActions({
         scope: "file",
       } satisfies GitWriteOperation;
 
-      if (!activeProject || !beginGitWrite(operation)) {
+      if (!activeProject || !hasGitRepository || !beginGitWrite(operation)) {
         return false;
       }
 
@@ -116,7 +118,13 @@ export function useGitFileActions({
         endGitWrite(operation);
       }
     },
-    [activeProject, beginGitWrite, endGitWrite, refreshProjectFileState],
+    [
+      activeProject,
+      beginGitWrite,
+      endGitWrite,
+      hasGitRepository,
+      refreshProjectFileState,
+    ],
   );
 
   const saveDirtyDraftBeforeStage = useCallback(
@@ -219,7 +227,7 @@ export function useGitFileActions({
   );
 
   return {
-    canRunGitFileAction: Boolean(activeProject && !pendingOperation),
+    canRunGitFileAction: Boolean(activeProject && hasGitRepository && !pendingOperation),
     gitFileActionError,
     gitFileActionPending,
     gitFileActionPendingTitle,

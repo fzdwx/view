@@ -903,7 +903,7 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
       <div className="empty-state">
         <div className="empty-title">Select a file</div>
         <div className="empty-copy">
-          The project tree shows tracked and untracked files from the repository.
+          The project tree shows files in the current folder.
         </div>
       </div>
     );

@@ -35,6 +35,7 @@ export interface RepositorySummary {
   root: string;
   branch: string;
   head: string;
+  isGitRepo: boolean;
   statusCounts: StatusCounts;
   worktrees: WorktreeInfo[];
   branches: BranchInfo[];

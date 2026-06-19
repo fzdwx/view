@@ -9,6 +9,7 @@ export type { GitRepositoryWriteKind } from "./useGitWriteGuard";
 export interface CommitReasonInput {
   readonly activeProjectPath: string | null;
   readonly conflictCount: number;
+  readonly hasGitRepository: boolean;
   readonly hasNulByte: boolean;
   readonly pendingOperation: GitWriteOperation | null;
   readonly stagedCount: number;
@@ -18,6 +19,7 @@ export interface CommitReasonInput {
 export interface PushReasonInput {
   readonly activeProjectPath: string | null;
   readonly branch: BranchInfo | null;
+  readonly hasGitRepository: boolean;
   readonly pendingOperation: GitWriteOperation | null;
 }
 
@@ -46,13 +48,17 @@ export function commitDirtyDraftWarning(dirtyDraftCount: number): string | null 
 export function commitDisabledReason({
   activeProjectPath,
   conflictCount,
+  hasGitRepository,
   hasNulByte,
   pendingOperation,
   stagedCount,
   trimmedMessage,
 }: CommitReasonInput): string | null {
   if (!activeProjectPath) {
-    return "Open a repository before committing.";
+    return "Open a folder before committing.";
+  }
+  if (!hasGitRepository) {
+    return "Open a Git repository before committing.";
   }
   const pendingReason = gitWriteOperationPendingTitle(pendingOperation);
   if (pendingReason) {
@@ -95,10 +101,14 @@ export function commitMessageLint(message: string): string | null {
 export function pushDisabledReason({
   activeProjectPath,
   branch,
+  hasGitRepository,
   pendingOperation,
 }: PushReasonInput): string | null {
   if (!activeProjectPath) {
-    return "Open a repository before pushing.";
+    return "Open a folder before pushing.";
+  }
+  if (!hasGitRepository) {
+    return "Open a Git repository before pushing.";
   }
   const pendingReason = gitWriteOperationPendingTitle(pendingOperation);
   if (pendingReason) {

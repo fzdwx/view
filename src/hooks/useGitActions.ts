@@ -32,6 +32,7 @@ export interface UseGitActionsOptions {
     action: string,
   ) => boolean;
   readonly discardDraftsForProject: (projectPath: string) => void;
+  readonly hasGitRepository: boolean;
   readonly refetchCommits: RefetchQuery;
   readonly refetchFileWorktreeDiff: RefetchQuery;
   readonly refetchProjectFiles: RefetchQuery;
@@ -62,6 +63,7 @@ export function useGitActions({
   activeProject,
   confirmDiscardProjectDrafts,
   discardDraftsForProject,
+  hasGitRepository,
   refetchCommits,
   refetchFileWorktreeDiff,
   refetchProjectFiles,
@@ -79,16 +81,16 @@ export function useGitActions({
   const branchPullInFlightRef = useRef(false);
 
   const openPullChoice = useCallback(() => {
-    if (!activeProject || !isTauriRuntime()) {
+    if (!activeProject || !hasGitRepository || !isTauriRuntime()) {
       return;
     }
     setPullError(null);
     setPullChoiceOpen(true);
-  }, [activeProject]);
+  }, [activeProject, hasGitRepository]);
 
   const performPull = useCallback(
     async (mode: PullMode) => {
-      if (!activeProject || branchPullInFlightRef.current) {
+      if (!activeProject || !hasGitRepository || branchPullInFlightRef.current) {
         return;
       }
 
@@ -118,6 +120,7 @@ export function useGitActions({
       activeProject,
       refetchCommits,
       refetchFileWorktreeDiff,
+      hasGitRepository,
       refetchProjectFiles,
       refetchReflog,
       refetchRepository,
@@ -132,7 +135,7 @@ export function useGitActions({
 
   const performBranchAction = useCallback(
     async (action: BranchActionKind, branch: BranchInfo) => {
-      if (!activeProject || !isTauriRuntime()) {
+      if (!activeProject || !hasGitRepository || !isTauriRuntime()) {
         return;
       }
 
@@ -252,6 +255,7 @@ export function useGitActions({
       activeProject,
       confirmDiscardProjectDrafts,
       discardDraftsForProject,
+      hasGitRepository,
       refreshProjectFileState,
       resetDiffSelection,
       setActiveBranchRef,

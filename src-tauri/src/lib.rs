@@ -31,8 +31,8 @@ use std::time::Duration;
 use tauri::State;
 use tungstenite::{accept, Error as WsError, Message, WebSocket};
 
-mod git_pathspec;
 mod git_commit_push;
+mod git_pathspec;
 mod git_restore;
 mod git_status;
 mod git_write;
@@ -58,6 +58,7 @@ struct RepositorySummary {
     root: String,
     branch: String,
     head: String,
+    is_git_repo: bool,
     status_counts: StatusCounts,
     worktrees: Vec<WorktreeInfo>,
     branches: Vec<BranchInfo>,
@@ -409,10 +410,17 @@ fn load_repository(
     commit: Option<String>,
     branch: Option<String>,
 ) -> Result<RepositoryPayload, String> {
-    let root = repository_root(&path)?;
-    let summary = repository_summary(&root)?;
-    let commits = git_log(&root, branch.as_deref(), None)?;
-    let files = changed_files(&root, commit.as_deref())?;
+    let root = project_root(&path)?;
+    let Some(repository_root) = discover_repository_root(&root)? else {
+        return Ok(RepositoryPayload {
+            summary: non_git_project_summary(&root),
+            commits: Vec::new(),
+            files: Vec::new(),
+        });
+    };
+    let summary = repository_summary(&repository_root)?;
+    let commits = git_log(&repository_root, branch.as_deref(), None)?;
+    let files = changed_files(&repository_root, commit.as_deref())?;
 
     Ok(RepositoryPayload {
         summary,
@@ -461,13 +469,16 @@ fn get_reflog(path: String, filter: Option<String>) -> Result<Vec<ReflogEntry>, 
 
 #[tauri::command]
 fn get_project_files(path: String) -> Result<Vec<TreeFile>, String> {
-    let root = repository_root(&path)?;
-    git_files(&root)
+    let root = project_root(&path)?;
+    match discover_repository_root(&root)? {
+        Some(repository_root) => git_files(&repository_root),
+        None => workspace_files(&root),
+    }
 }
 
 #[tauri::command]
 fn get_file_content(path: String, file_path: String) -> Result<FileContent, String> {
-    let root = repository_root(&path)?;
+    let root = workspace_root(&path)?;
     read_file_content(&root, &file_path)
 }
 
@@ -479,7 +490,7 @@ fn get_file_blame(path: String, file_path: String) -> Result<Vec<FileBlameLine>,
 
 #[tauri::command]
 fn save_file_content(request: SaveFileRequest) -> Result<SaveFileResponse, String> {
-    let root = repository_root(&request.path)?;
+    let root = workspace_root(&request.path)?;
     write_file_content(
         &root,
         &request.file_path,
@@ -490,19 +501,19 @@ fn save_file_content(request: SaveFileRequest) -> Result<SaveFileResponse, Strin
 
 #[tauri::command]
 fn create_project_file(path: String, file_path: String) -> Result<String, String> {
-    let root = repository_root(&path)?;
+    let root = workspace_root(&path)?;
     create_repo_file(&root, &file_path)
 }
 
 #[tauri::command]
 fn rename_project_file(path: String, from_path: String, to_path: String) -> Result<String, String> {
-    let root = repository_root(&path)?;
+    let root = workspace_root(&path)?;
     rename_repo_file(&root, &from_path, &to_path)
 }
 
 #[tauri::command]
 fn delete_project_file(path: String, file_path: String) -> Result<(), String> {
-    let root = repository_root(&path)?;
+    let root = workspace_root(&path)?;
     delete_repo_file(&root, &file_path)
 }
 
@@ -512,7 +523,7 @@ fn search_file_names(
     query: String,
     limit: Option<usize>,
 ) -> Result<Vec<FileSearchResult>, String> {
-    let root = repository_root(&path)?;
+    let root = workspace_root(&path)?;
     let query = query.trim();
     if query.is_empty() {
         return Ok(Vec::new());
@@ -580,7 +591,7 @@ fn search_file_contents(
     query: String,
     limit: Option<usize>,
 ) -> Result<Vec<FileSearchResult>, String> {
-    let root = repository_root(&path)?;
+    let root = workspace_root(&path)?;
     let query = query.trim();
     if query.is_empty() {
         return Ok(Vec::new());
@@ -634,7 +645,11 @@ fn search_file_contents(
             line_text: Some(matched.line_content.clone()),
             context_before: matched.context_before.clone(),
             context_after: matched.context_after.clone(),
-            match_ranges: matched.match_byte_offsets.iter().map(|(s, e)| (*s, *e)).collect(),
+            match_ranges: matched
+                .match_byte_offsets
+                .iter()
+                .map(|(s, e)| (*s, *e))
+                .collect(),
         });
         if results.len() >= limit {
             break;
@@ -767,7 +782,7 @@ fn terminal_spawn(
     cols: Option<u16>,
     rows: Option<u16>,
 ) -> Result<TerminalSessionInfo, String> {
-    let root = repository_root(&path)?;
+    let root = workspace_root(&path)?;
     spawn_terminal_session(state.inner(), &root, cwd.as_deref(), cols, rows)
 }
 
@@ -838,6 +853,7 @@ fn repository_summary(root: &Path) -> Result<RepositorySummary, String> {
             branch
         },
         head,
+        is_git_repo: true,
         status_counts: count_statuses(&status).unwrap_or_default(),
         worktrees,
         branches,
@@ -845,29 +861,78 @@ fn repository_summary(root: &Path) -> Result<RepositorySummary, String> {
     })
 }
 
-fn repository_root(path: &str) -> Result<PathBuf, String> {
+fn non_git_project_summary(root: &Path) -> RepositorySummary {
+    RepositorySummary {
+        root: root.to_string_lossy().to_string(),
+        branch: String::new(),
+        head: String::new(),
+        is_git_repo: false,
+        status_counts: StatusCounts::default(),
+        worktrees: Vec::new(),
+        branches: Vec::new(),
+        tags: Vec::new(),
+    }
+}
+
+fn project_root(path: &str) -> Result<PathBuf, String> {
     let candidate = PathBuf::from(path);
     if !candidate.exists() {
         return Err(format!("Path does not exist: {path}"));
     }
 
+    let canonical = candidate
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve project folder: {error}"))?;
+    if !canonical.is_dir() {
+        return Err(format!("Path is not a directory: {path}"));
+    }
+
+    Ok(canonical)
+}
+
+fn workspace_root(path: &str) -> Result<PathBuf, String> {
+    let root = project_root(path)?;
+    Ok(discover_repository_root(&root)?.unwrap_or(root))
+}
+
+fn repository_root(path: &str) -> Result<PathBuf, String> {
+    let root = project_root(path)?;
+    discover_repository_root(&root)?.ok_or_else(|| "Not a git repository".to_string())
+}
+
+fn discover_repository_root(path: &Path) -> Result<Option<PathBuf>, String> {
     let output = Command::new("git")
         .args([
             "-C",
-            candidate.to_string_lossy().as_ref(),
+            path.to_string_lossy().as_ref(),
             "rev-parse",
             "--show-toplevel",
         ])
         .output()
         .map_err(|error| format!("Failed to run git: {error}"))?;
 
-    if !output.status.success() {
-        return Err(stderr_or_status("Not a git repository", output.stderr));
+    if output.status.success() {
+        return Ok(Some(PathBuf::from(
+            String::from_utf8_lossy(&output.stdout).trim(),
+        )));
     }
 
-    Ok(PathBuf::from(
-        String::from_utf8_lossy(&output.stdout).trim(),
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if is_not_git_repository_message(&stderr) {
+        return Ok(None);
+    }
+
+    Err(stderr_or_status(
+        "Failed to inspect Git repository",
+        output.stderr,
     ))
+}
+
+fn is_not_git_repository_message(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("not a git repository")
+        || lower.contains("outside repository")
+        || lower.contains("cannot chdir")
 }
 
 fn git_log(
@@ -1051,7 +1116,11 @@ fn parse_file_blame(output: &str) -> Vec<FileBlameLine> {
 fn parse_blame_header(line: &str) -> Option<(String, usize)> {
     let mut parts = line.split_whitespace();
     let commit_hash = parts.next()?;
-    if commit_hash.len() != 40 || !commit_hash.chars().all(|character| character.is_ascii_hexdigit()) {
+    if commit_hash.len() != 40
+        || !commit_hash
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+    {
         return None;
     }
 
@@ -1143,10 +1212,10 @@ fn parse_reflog_line(line: &str) -> Option<ReflogEntry> {
 fn matches_commit_text_terms(commit: &CommitInfo, text_terms: &[String]) -> bool {
     matches_search_terms(
         &[
-        commit.subject.as_str(),
-        commit.author.as_str(),
-        commit.hash.as_str(),
-        commit.short_hash.as_str(),
+            commit.subject.as_str(),
+            commit.author.as_str(),
+            commit.hash.as_str(),
+            commit.short_hash.as_str(),
         ],
         text_terms,
     )
@@ -1426,7 +1495,7 @@ fn normalize_user_repo_path(path: &str) -> Result<String, String> {
         .next()
         .is_some_and(|part| part.len() == 2 && part.ends_with(':'))
     {
-        return Err("Use a path relative to the repository root".to_string());
+        return Err("Use a path relative to the project root".to_string());
     }
 
     let mut parts = Vec::new();
@@ -1519,6 +1588,53 @@ fn git_files(root: &Path) -> Result<Vec<TreeFile>, String> {
     Ok(files)
 }
 
+fn workspace_files(root: &Path) -> Result<Vec<TreeFile>, String> {
+    let root = root
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve project root: {error}"))?;
+    let mut directories = vec![root.clone()];
+    let mut files = Vec::new();
+
+    while let Some(directory) = directories.pop() {
+        let mut entries = fs::read_dir(&directory)
+            .map_err(|error| format!("Failed to read project files: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("Failed to read project files: {error}"))?;
+        entries.sort_by_key(|entry| entry.path());
+
+        for entry in entries {
+            let entry_path = entry.path();
+            let file_type = entry
+                .file_type()
+                .map_err(|error| format!("Failed to read project file metadata: {error}"))?;
+
+            if file_type.is_dir() {
+                if entry.file_name() == ".git" {
+                    continue;
+                }
+                directories.push(entry_path);
+                continue;
+            }
+
+            if !file_type.is_file() && !entry_path.is_file() {
+                continue;
+            }
+
+            let relative = entry_path
+                .strip_prefix(&root)
+                .map_err(|error| format!("Failed to resolve project file path: {error}"))?;
+            files.push(TreeFile {
+                path: relative.to_string_lossy().replace('\\', "/"),
+                ..TreeFile::default()
+            });
+        }
+    }
+
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    files.dedup_by(|left, right| left.path == right.path);
+    Ok(files)
+}
+
 fn resolve_existing_repo_file(root: &Path, file_path: &str) -> Result<(String, PathBuf), String> {
     let normalized = normalize_git_path(file_path);
     let full_path = resolve_repo_child_path(root, &normalized)?;
@@ -1539,7 +1655,7 @@ fn resolve_repo_child_path(root: &Path, normalized: &str) -> Result<PathBuf, Str
 
     let root = root
         .canonicalize()
-        .map_err(|error| format!("Failed to resolve repository root: {error}"))?;
+        .map_err(|error| format!("Failed to resolve project root: {error}"))?;
     let full_path = root.join(normalized);
     let parent = full_path
         .parent()
@@ -1548,7 +1664,7 @@ fn resolve_repo_child_path(root: &Path, normalized: &str) -> Result<PathBuf, Str
         .canonicalize()
         .map_err(|error| format!("Failed to resolve parent directory: {error}"))?;
     if !canonical_parent.starts_with(&root) {
-        return Err("File is outside the repository".to_string());
+        return Err("File is outside the project".to_string());
     }
 
     Ok(full_path)
@@ -1561,7 +1677,7 @@ fn resolve_new_repo_child_path(root: &Path, normalized: &str) -> Result<PathBuf,
 
     let root = root
         .canonicalize()
-        .map_err(|error| format!("Failed to resolve repository root: {error}"))?;
+        .map_err(|error| format!("Failed to resolve project root: {error}"))?;
     let mut current = root.clone();
     for part in normalized.split('/') {
         current.push(part);
@@ -1573,7 +1689,7 @@ fn resolve_new_repo_child_path(root: &Path, normalized: &str) -> Result<PathBuf,
             .canonicalize()
             .map_err(|error| format!("Failed to resolve path: {error}"))?;
         if !canonical.starts_with(&root) {
-            return Err("File is outside the repository".to_string());
+            return Err("File is outside the project".to_string());
         }
     }
 
@@ -1729,12 +1845,15 @@ fn get_file_blob(
     file_path: String,
     ref_name: Option<String>,
 ) -> Result<FileContent, String> {
-    let root = repository_root(&path)?;
     match ref_name.as_deref() {
         Some(ref_spec) if !ref_spec.trim().is_empty() => {
+            let root = repository_root(&path)?;
             read_file_content_at_ref(&root, &file_path, ref_spec.trim())
         }
-        _ => read_file_content(&root, &file_path),
+        _ => {
+            let root = workspace_root(&path)?;
+            read_file_content(&root, &file_path)
+        }
     }
 }
 
@@ -1978,7 +2097,7 @@ fn line_for_byte_range(content: &str, start_byte: usize) -> (usize, String) {
 fn resolve_terminal_cwd(root: &Path, cwd: Option<&str>) -> Result<PathBuf, String> {
     let root = root
         .canonicalize()
-        .map_err(|error| format!("Failed to resolve repository root: {error}"))?;
+        .map_err(|error| format!("Failed to resolve project root: {error}"))?;
     let candidate = cwd
         .filter(|value| !value.trim().is_empty())
         .map(PathBuf::from)
@@ -1992,7 +2111,7 @@ fn resolve_terminal_cwd(root: &Path, cwd: Option<&str>) -> Result<PathBuf, Strin
         .canonicalize()
         .map_err(|error| format!("Failed to resolve terminal cwd: {error}"))?;
     if !canonical.starts_with(&root) {
-        return Err("Terminal cwd must stay inside the repository".to_string());
+        return Err("Terminal cwd must stay inside the project".to_string());
     }
     if !canonical.is_dir() {
         return Err("Terminal cwd is not a directory".to_string());
@@ -3298,6 +3417,56 @@ mod tests {
     }
 
     #[test]
+    fn load_repository_supports_plain_directory() {
+        let workspace = create_plain_workspace();
+        fs::create_dir_all(workspace.join("src")).expect("create src");
+        fs::write(workspace.join("src").join("main.ts"), "export {};\n").expect("write file");
+
+        let payload = load_repository(workspace.to_string_lossy().to_string(), None, None)
+            .expect("load plain directory");
+
+        assert!(!payload.summary.is_git_repo);
+        assert_eq!(
+            payload.summary.root,
+            workspace
+                .canonicalize()
+                .expect("canonical workspace")
+                .to_string_lossy()
+                .to_string()
+        );
+        assert!(payload.commits.is_empty());
+        assert!(payload.files.is_empty());
+
+        fs::remove_dir_all(workspace).ok();
+    }
+
+    #[test]
+    fn project_files_include_plain_directory_files() {
+        let workspace = create_plain_workspace();
+        fs::create_dir_all(workspace.join("nested")).expect("create nested");
+        fs::write(workspace.join("top.txt"), "top\n").expect("write top");
+        fs::write(workspace.join("nested").join("child.txt"), "child\n").expect("write child");
+
+        let files = get_project_files(workspace.to_string_lossy().to_string())
+            .expect("list plain directory files");
+
+        assert!(
+            files
+                .iter()
+                .any(|file| file.path == "top.txt" && file.status.is_none()),
+            "top-level files should appear in non-git folders"
+        );
+        assert!(
+            files
+                .iter()
+                .any(|file| file.path == "nested/child.txt" && file.status.is_none()),
+            "nested files should appear in non-git folders"
+        );
+
+        fs::remove_dir_all(workspace).ok();
+    }
+
+    #[test]
     fn create_repo_file_accepts_repo_root_shortcut_and_creates_parents() {
         let repo = create_basic_repo();
 
@@ -3855,7 +4024,10 @@ mod tests {
         let filtered = git_reflog(&repo, Some("notes")).expect("filtered reflog");
         assert_eq!(filtered.len(), 1);
         assert!(filtered[0].action.contains("update notes"));
-        assert_eq!(filtered[0].short_hash, run_git(&repo, &["rev-parse", "--short", "HEAD~1"]));
+        assert_eq!(
+            filtered[0].short_hash,
+            run_git(&repo, &["rev-parse", "--short", "HEAD~1"])
+        );
 
         let all_entries = git_reflog(&repo, None).expect("all reflog");
         assert!(all_entries.len() >= 2);
@@ -3871,6 +4043,12 @@ mod tests {
         run_git(&repo, &["config", "user.email", "view@example.test"]);
         run_git(&repo, &["config", "user.name", "View Test"]);
         repo
+    }
+
+    fn create_plain_workspace() -> PathBuf {
+        let workspace = unique_temp_repo_path();
+        fs::create_dir_all(&workspace).expect("create plain workspace");
+        workspace
     }
 
     fn unique_temp_repo_path() -> PathBuf {

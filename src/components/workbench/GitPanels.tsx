@@ -35,6 +35,8 @@ type ResizePanel = (
   max: number,
 ) => void;
 
+export type GitAvailability = "loading" | "git" | "non-git";
+
 export interface GitPanelDataProps {
   readonly activeCommit: string | null;
   readonly activeReflogSelector: string | null;
@@ -71,6 +73,7 @@ export interface GitPanelDataProps {
 }
 
 export interface GitPanelsProps {
+  readonly availability: GitAvailability;
   readonly branchSize: number;
   readonly commitDetailSize: number;
   readonly data: GitPanelDataProps;
@@ -86,6 +89,7 @@ export interface GitPanelsProps {
 }
 
 export const GitPanels = memo(function GitPanels({
+  availability,
   branchSize,
   commitDetailSize,
   data,
@@ -191,6 +195,27 @@ export const GitPanels = memo(function GitPanels({
       ),
     [branchSize, detailsSize, dockedPanelOrder, toolDock],
   );
+
+  if (availability === "loading") {
+    return (
+      <section className="git-log-panel" style={buildGitPanelGridStyle(toolDock, [], branchSize, detailsSize)}>
+        <LoadingRows />
+      </section>
+    );
+  }
+
+  if (availability === "non-git") {
+    return (
+      <section className="git-log-panel" style={buildGitPanelGridStyle(toolDock, [], branchSize, detailsSize)}>
+        <div className="empty-state">
+          <div className="empty-title">Git Features Unavailable</div>
+          <div className="empty-copy">
+            This folder is not inside a Git repository.
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="git-log-panel" ref={panelRef} style={gitLogStyle}>

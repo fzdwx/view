@@ -37,6 +37,7 @@ export interface UseGitWriteActionsOptions {
   readonly activeProject: SavedProject | undefined;
   readonly editorDrafts: Record<string, EditorDraft>;
   readonly gitWriteGuard: GitWriteGuard;
+  readonly hasGitRepository: boolean;
   readonly repositoryPayload: RepositoryPayload | undefined;
 }
 
@@ -71,6 +72,7 @@ export function useGitWriteActions({
   activeProject,
   editorDrafts,
   gitWriteGuard,
+  hasGitRepository,
   repositoryPayload,
 }: UseGitWriteActionsOptions): GitWriteActions {
   const activeProjectPath = activeProject?.activePath ?? null;
@@ -110,6 +112,7 @@ export function useGitWriteActions({
   const commitDisabledReason = commitReason({
     activeProjectPath,
     conflictCount,
+    hasGitRepository,
     hasNulByte,
     pendingOperation,
     stagedCount,
@@ -119,10 +122,13 @@ export function useGitWriteActions({
   const pushDisabledReason = pushReason({
     activeProjectPath,
     branch: currentBranch,
+    hasGitRepository,
     pendingOperation,
   });
   const resetDisabledReason = !activeProjectPath
-    ? "Open a repository before resetting history."
+    ? "Open a folder before resetting history."
+    : !hasGitRepository
+      ? "Open a Git repository before resetting history."
     : gitWriteOperationPendingTitle(pendingOperation);
   const commitWarning = commitDirtyDraftWarning(dirtyDraftCount);
 

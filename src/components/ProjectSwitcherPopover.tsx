@@ -32,12 +32,12 @@ export function ProjectSwitcherPopover({
       </div>
       <button type="button" className="primary-action rail-action" onClick={onChooseRepository}>
        <Plus size={16} />
-        Open repository
+        Open folder
       </button>
       <div className="project-list project-switcher-list">
         {projects.length === 0 ? (
           <div className="rail-empty">
-            Add a repository to inspect logs, worktrees, and diffs.
+            Add a folder to browse files. Git folders also unlock logs, branches, and diffs.
           </div>
         ) : null}
         {projects.map((project) => (
