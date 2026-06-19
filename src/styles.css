@@ -4615,7 +4615,7 @@ body.is-resizing-y * {
 .preview-debug-body {
   display: grid;
   min-height: 0;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   padding: 12px;
 }
@@ -4641,12 +4641,6 @@ body.is-resizing-y * {
 
 .preview-debug-pane-body {
   min-height: 0;
-}
-
-@media (max-width: 1280px) {
-  .preview-debug-body {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 
 .terminal-panel {

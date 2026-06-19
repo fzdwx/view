@@ -4,7 +4,6 @@ import { buildEditorGitMarkers } from "../../lib/editorGitMarkers";
 import type { EditorDraft } from "../../lib/editorTypes";
 import type { PreviewTarget } from "../../lib/previewTabs";
 import { CodeMirrorFilePreview } from "./CodeMirrorFilePreview";
-import { FilePreview } from "./FilePreview";
 
 type PreviewScenario =
   | "text"
@@ -249,33 +248,7 @@ export function PreviewDebugPage({
     setSaveCount((count) => count + 1);
   }
 
-  function renderPane(kind: "legacy" | "codemirror") {
-    if (kind === "legacy") {
-      return (
-        <FilePreview
-          blameError={blameError}
-          blameLines={blameLines}
-          blameLoading={blameLoading}
-          draft={draft}
-          editorFontSize={12}
-          editorLineHeightRatio={1.56}
-          editorSessionKey={`fixture-${scenario}`}
-          error={forceError ? "Fixture error: file preview failed to load." : null}
-          file={file}
-          gitMarkers={gitMarkers}
-          loading={loading}
-          saveError={saveError}
-          saving={false}
-          selectedPath={file?.path ?? null}
-          target={target}
-          onChangeDraft={setDraftContent}
-          onDiscardConflict={() => applyScenario("text")}
-          onSave={handleSave}
-          onSetConflictDraftContent={setDraftContent}
-        />
-      );
-    }
-
+  function renderPane() {
     return (
       <CodeMirrorFilePreview
         blameError={blameError}
@@ -393,12 +366,8 @@ export function PreviewDebugPage({
       </section>
       <section className="preview-debug-body">
         <article className="preview-debug-pane">
-          <header>Legacy textarea preview</header>
-          <div className="preview-debug-pane-body">{renderPane("legacy")}</div>
-        </article>
-        <article className="preview-debug-pane">
           <header>CodeMirror preview</header>
-          <div className="preview-debug-pane-body">{renderPane("codemirror")}</div>
+          <div className="preview-debug-pane-body">{renderPane()}</div>
         </article>
       </section>
     </main>

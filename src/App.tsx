@@ -15,7 +15,6 @@ import { PullChoiceDialog } from "./components/PullChoiceDialog";
 import { ResizeHandle } from "./components/ResizeHandle";
 import { WindowControls } from "./components/WindowControls";
 import type { TreeGitFileActions } from "./components/TreeContextMenu";
-import { FilePreview } from "./components/editor/FilePreview";
 import { CodeMirrorFilePreview } from "./components/editor/CodeMirrorFilePreview";
 import { PreviewDebugPage } from "./components/editor/PreviewDebugPage";
 import {
@@ -811,8 +810,7 @@ export function App() {
             ) : null}
 
             <section className="diff-panel rail-editor-panel">
-              {previewMode === "file" ? (
-                appSettings.useCodeMirrorEditor ? (
+             {previewMode === "file" ? (
                   <CodeMirrorFilePreview
                     blameError={
                       fileBlameQuery.isError
@@ -848,45 +846,6 @@ export function App() {
                     onSave={() => void saveActiveFile()}
                     onSetConflictDraftContent={setConflictDraftContent}
                   />
-                ) : (
-                  <FilePreview
-                    blameError={
-                      fileBlameQuery.isError
-                        ? String(fileBlameQuery.error.message)
-                        : null
-                    }
-                    blameLines={currentFileBlame}
-                    blameLoading={Boolean(
-                      selectedProjectPath &&
-                        previewMode === "file" &&
-                        fileBlameQuery.isFetching,
-                    )}
-                    draft={activeEditorDraft}
-                    editorSessionKey={activePreviewTabId}
-                    error={
-                      fileContentQuery.isError
-                        ? String(fileContentQuery.error.message)
-                        : null
-                    }
-                    file={currentFileContent}
-                    editorFontSize={appSettings.fontSize}
-                    editorLineHeightRatio={appSettings.lineHeight}
-                    gitMarkers={editorGitMarkers}
-                    loading={Boolean(
-                      selectedProjectPath &&
-                        fileContentQuery.isFetching &&
-                        !currentFileContent,
-                    )}
-                    saveError={saveError}
-                    saving={savingActiveFile}
-                    selectedPath={selectedProjectPath}
-                    target={previewTarget}
-                    onChangeDraft={updateEditorDraft}
-                    onDiscardConflict={discardConflictToDisk}
-                    onSave={() => void saveActiveFile()}
-                    onSetConflictDraftContent={setConflictDraftContent}
-                  />
-                )
               ) : payload && !selectedChangePath ? (
                 <div className="empty-state">
                   <div className="empty-title">Select a changed file</div>

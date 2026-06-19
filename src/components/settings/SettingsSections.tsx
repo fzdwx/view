@@ -91,29 +91,6 @@ function EditorSettings({
           />
         </div>
       </section>
-      <section className="font-card">
-        <header className="font-card-heading">
-          <h3>CodeMirror editor</h3>
-          <p>
-            Use the CodeMirror 6 editor for file preview and editing. Turn this
-            off to fall back to the legacy textarea editor.
-          </p>
-        </header>
-        <label className="settings-toggle-row">
-          <span className="settings-toggle-label">Use CodeMirror editor</span>
-          <input
-            type="checkbox"
-            className="settings-toggle"
-            checked={settings.useCodeMirrorEditor}
-            onChange={(event) =>
-              onChange({
-                ...settings,
-                useCodeMirrorEditor: event.target.checked,
-              })
-            }
-          />
-        </label>
-      </section>
     </div>
   );
 }

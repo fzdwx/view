@@ -20,7 +20,6 @@ export interface AppSettings {
   lineHeight: number;
   appZoom: number;
   shortcuts: Record<ShortcutAction, string>;
-  useCodeMirrorEditor: boolean;
 }
 
 export interface ShortcutRow {
@@ -64,7 +63,6 @@ export const defaultAppSettings: AppSettings = {
     findFiles: "Mod+Shift+O",
     findInFiles: "Mod+Shift+F",
   },
-  useCodeMirrorEditor: true,
 };
 
 export const shortcutRows: readonly ShortcutRow[] = [
@@ -200,10 +198,6 @@ function normalizeAppSettings(value: unknown): AppSettings {
           : defaultAppSettings.shortcuts[row.action],
       };
     }, { ...defaultAppSettings.shortcuts }),
-    useCodeMirrorEditor:
-      typeof record.useCodeMirrorEditor === "boolean"
-        ? record.useCodeMirrorEditor
-        : defaultAppSettings.useCodeMirrorEditor,
   };
 }
 
