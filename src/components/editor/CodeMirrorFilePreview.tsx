@@ -60,6 +60,7 @@ export function CodeMirrorFilePreview({
   editorSessionKey,
   error,
   file,
+  gitConflictStatus,
   gitMarkers,
   loading,
   saveError,
@@ -78,6 +79,7 @@ export function CodeMirrorFilePreview({
   editorSessionKey: string | null;
   error: string | null;
   file: FileContent | null;
+  gitConflictStatus?: boolean | null;
   gitMarkers: EditorGitMarker[];
   loading: boolean;
   saveError: string | null;
@@ -876,7 +878,10 @@ export function CodeMirrorFilePreview({
     );
   }
 
-  const gitConflict = !conflict && hasGitConflictMarkers(content);
+  const gitConflict =
+    !conflict &&
+    (gitConflictStatus === true ||
+      (gitConflictStatus == null && hasGitConflictMarkers(content)));
   if (gitConflict) {
     return (
       <GitConflictEditor

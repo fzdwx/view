@@ -132,6 +132,7 @@ export function App() {
     selectedBranch,
     selectedBranchRef,
     selectedCommit,
+    selectedProjectFile,
     selectedProjectStatus,
   } = useRepositoryProjectData({
     activeBranchRef,
@@ -831,6 +832,7 @@ export function App() {
                         : null
                     }
                     file={currentFileContent}
+                    gitConflictStatus={selectedProjectFile?.conflict ?? null}
                     gitMarkers={editorGitMarkers}
                     loading={Boolean(
                       selectedProjectPath &&

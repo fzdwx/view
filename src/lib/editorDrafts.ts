@@ -65,13 +65,53 @@ export function gitConflictToMarkerFile(
 }
 
 export function hasGitConflictMarkers(content: string): boolean {
-  return (
-    content.includes("<<<<<<<") &&
-    content.includes("=======") &&
-    content.includes(">>>>>>>")
-  );
+  const lines = content.split(/\r?\n/);
+  let index = 0;
+
+  while (index < lines.length) {
+    if (!isConflictStartLine(lines[index])) {
+      index += 1;
+      continue;
+    }
+
+    index += 1;
+    while (
+      index < lines.length &&
+      !isConflictSeparatorLine(lines[index]) &&
+      !isConflictStartLine(lines[index])
+    ) {
+      index += 1;
+    }
+
+    if (index >= lines.length || !isConflictSeparatorLine(lines[index])) {
+      continue;
+    }
+
+    index += 1;
+    while (index < lines.length && !isConflictEndLine(lines[index])) {
+      index += 1;
+    }
+
+    if (index < lines.length && isConflictEndLine(lines[index])) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function ensureTrailingNewline(value: string): string {
   return value.endsWith("\n") ? value : `${value}\n`;
+}
+
+function isConflictStartLine(line: string): boolean {
+  return line.startsWith("<<<<<<< ") && !line.slice(8).includes("<<<<<<<");
+}
+
+function isConflictSeparatorLine(line: string): boolean {
+  return line === "=======";
+}
+
+function isConflictEndLine(line: string): boolean {
+  return line.startsWith(">>>>>>> ") && !line.slice(8).includes(">>>>>>>");
 }
