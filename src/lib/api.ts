@@ -216,16 +216,6 @@ export async function loadRepository(
   });
 }
 
-export async function getDiff(
-  path: string,
-  commit?: string | null,
-): Promise<string> {
-  return invoke<string>("get_diff", {
-    path,
-    commit: commit ?? null,
-  });
-}
-
 export async function getFileDiff(
   path: string,
   filePath: string,
@@ -567,6 +557,8 @@ function editorTextMatchesInBrowser(
   let searchFrom = 0;
 
   while (searchFrom <= lowered.length) {
+    // String substring search with an offset; a Set/Map cannot replace it.
+    // oxlint-disable-next-line react-doctor/js-set-map-lookups
     const lowerStart = lowered.indexOf(needle, searchFrom);
     if (lowerStart < 0) {
       break;

@@ -66,15 +66,15 @@ export function usePreviewTabs({
       return new Set<string>();
     }
 
-    return new Set(
-      previewTabs
-        .filter(
-          (tab) =>
-            tab.mode === "file" &&
-            isDraftDirty(editorDrafts[editorDraftKey(activeProjectPath, tab.path)]),
-        )
-        .map((tab) => tab.id),
-    );
+    return previewTabs.reduce<Set<string>>((ids, tab) => {
+      if (
+        tab.mode === "file" &&
+        isDraftDirty(editorDrafts[editorDraftKey(activeProjectPath, tab.path)])
+      ) {
+        ids.add(tab.id);
+      }
+      return ids;
+    }, new Set());
   }, [activeProjectPath, editorDrafts, previewTabs]);
 
   const activatePreviewTab = useCallback(
@@ -217,11 +217,12 @@ export function usePreviewTabs({
 
   const removePreviewTabsForPath = useCallback(
     (path: string) => {
-      const removedTabIds = new Set(
-        previewTabs
-          .filter((tab) => tab.mode === "file" && tab.path === path)
-          .map((tab) => tab.id),
-      );
+      const removedTabIds = previewTabs.reduce<Set<string>>((ids, tab) => {
+        if (tab.mode === "file" && tab.path === path) {
+          ids.add(tab.id);
+        }
+        return ids;
+      }, new Set());
       if (removedTabIds.size === 0) {
         return;
       }

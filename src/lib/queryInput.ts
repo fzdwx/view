@@ -1,4 +1,4 @@
-export class QueryInputError extends Error {
+class QueryInputError extends Error {
   readonly inputName: string;
 
   constructor(inputName: string) {

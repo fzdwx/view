@@ -60,11 +60,12 @@ export function CommitForm({
           ) : null}
         </div>
       </header>
-      <label className="commit-message-field">
+      <label className="commit-message-field" aria-label="Commit message">
         <textarea
           value={gitWriteActions.commitMessage}
           disabled={gitWriteActions.commitPending}
           placeholder="Commit message"
+          aria-label="Commit message"
           onChange={handleMessageChange}
         />
       </label>

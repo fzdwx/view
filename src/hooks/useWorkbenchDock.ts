@@ -131,14 +131,18 @@ export function useWorkbenchDock(): WorkbenchDockController {
     };
   }, []);
 
+  const clearDockDragRef = useRef(clearDockDrag);
+  clearDockDragRef.current = clearDockDrag;
+
   useEffect(() => {
-    window.addEventListener("dragend", clearDockDrag);
-    window.addEventListener("drop", clearDockDrag);
+    const handler = () => clearDockDragRef.current();
+    window.addEventListener("dragend", handler);
+    window.addEventListener("drop", handler);
     return () => {
-      window.removeEventListener("dragend", clearDockDrag);
-      window.removeEventListener("drop", clearDockDrag);
+      window.removeEventListener("dragend", handler);
+      window.removeEventListener("drop", handler);
     };
-  }, [clearDockDrag]);
+  }, []);
 
   const resizePanel = useCallback(
     (key: keyof PanelSizes, delta: number, min: number, max: number) => {
@@ -292,16 +296,14 @@ function reconcileRailActiveItems(
 
   for (const side of railSides) {
     for (const slot of railSlots) {
-      const items = railLayout[side][slot];
+      const itemSet = new Set(railLayout[side][slot]);
       const currentItem = currentActiveItems[side][slot];
       nextActiveItems[side][slot] =
-        currentItem && items.includes(currentItem)
-          ? currentItem
-          : null;
+        currentItem && itemSet.has(currentItem) ? currentItem : null;
     }
   }
 
-  if (railLayout[preferred.side][preferred.slot].includes(preferred.item)) {
+  if (new Set(railLayout[preferred.side][preferred.slot]).has(preferred.item)) {
     nextActiveItems[preferred.side][preferred.slot] = preferred.item;
   }
 

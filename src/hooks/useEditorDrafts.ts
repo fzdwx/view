@@ -60,11 +60,21 @@ export function useEditorDrafts({
   const [savePendingKeys, setSavePendingKeys] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveErrorEntry, setSaveErrorEntry] = useState<{
+    forEditorKey: string | null;
+    message: string | null;
+  }>({ forEditorKey: null, message: null });
   const editorKey =
     activeProjectPath && selectedProjectPath
       ? editorDraftKey(activeProjectPath, selectedProjectPath)
       : null;
+  const saveError =
+    saveErrorEntry.forEditorKey === editorKey ? saveErrorEntry.message : null;
+  const setSaveError = useCallback(
+    (message: string | null) =>
+      setSaveErrorEntry({ forEditorKey: editorKey, message }),
+    [editorKey],
+  );
   const activeEditorDraft = editorKey ? editorDrafts[editorKey] ?? null : null;
   const dirtyDraftCount = useMemo(
     () => countDirtyDrafts(editorDrafts),
@@ -72,7 +82,10 @@ export function useEditorDrafts({
   );
   const savingActiveFile = Boolean(editorKey && savePendingKeys.has(editorKey));
 
+  // editorDrafts accumulates per-file unsaved content; it's keyed state
+  // (grows as files are edited) and can't be derived from currentFileContent.
   useEffect(() => {
+    /* oxlint-disable react-doctor/no-derived-state */
     if (!editorKey || !currentFileContent) {
       return;
     }
@@ -99,11 +112,8 @@ export function useEditorDrafts({
         },
       };
     });
+    /* oxlint-enable react-doctor/no-derived-state */
   }, [currentFileContent, editorKey]);
-
-  useEffect(() => {
-    setSaveError(null);
-  }, [editorKey]);
 
   useEffect(() => {
     if (dirtyDraftCount === 0) {
@@ -209,7 +219,7 @@ export function useEditorDrafts({
       });
       setSaveError(null);
     },
-    [currentFileContent, editorKey],
+    [currentFileContent, editorKey, setSaveError],
   );
 
   const setConflictDraftContent = useCallback(
@@ -234,7 +244,7 @@ export function useEditorDrafts({
       });
       setSaveError(null);
     },
-    [editorKey],
+    [editorKey, setSaveError],
   );
 
   const saveActiveFile = useCallback(async () => {
@@ -329,6 +339,7 @@ export function useEditorDrafts({
     onFileSaved,
     savePendingKeys,
     selectedProjectPath,
+    setSaveError,
   ]);
 
   const discardConflictToDisk = useCallback(() => {
@@ -352,7 +363,7 @@ export function useEditorDrafts({
       };
     });
     setSaveError(null);
-  }, [editorKey]);
+  }, [editorKey, setSaveError]);
 
   const confirmDiscardProjectDrafts = useCallback(
     (projectPath: string, action: string): boolean => {

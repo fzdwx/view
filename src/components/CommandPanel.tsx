@@ -35,6 +35,7 @@ export function CommandPanel({
   onOpenResult(result: FileSearchResult): void;
   onSelectIndex(index: number): void;
 }) {
+  const overlayRef = useRef<HTMLDialogElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const resultRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const hasQuery = query.trim().length > 0;
@@ -58,11 +59,27 @@ export function CommandPanel({
     return () => window.cancelAnimationFrame(frame);
   }, [open]);
 
+  useEffect(() => {
+    const dialog = overlayRef.current;
+    if (!dialog) {
+      return;
+    }
+    if (dialog.open) {
+      return;
+    }
+    dialog.showModal();
+    return () => {
+      if (dialog.open) {
+        dialog.close();
+      }
+    };
+  }, []);
+
   if (!open) {
     return null;
   }
 
-  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+  function handleKeyDown(event: KeyboardEvent<HTMLDialogElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
       onClose();
@@ -95,25 +112,32 @@ export function CommandPanel({
   }
 
   return (
-    <div className="command-overlay" data-command-panel onMouseDown={onClose}>
-      <section
-        className="command-panel"
-        aria-label="Command panel"
-        onKeyDown={handleKeyDown}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    // <dialog> is inherently interactive; react-doctor doesn't recognize native dialog interactivity.
+    // oxlint-disable-next-line react-doctor/no-noninteractive-element-interactions
+    <dialog
+      className="command-overlay"
+      data-command-panel
+      aria-label="Command panel"
+      ref={overlayRef}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+      onKeyDown={handleKeyDown}
+    >
+      <section className="command-panel">
         <div className="command-input-row">
           <Search size={17} />
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={(event) => onChangeQuery(event.target.value)}
-            placeholder={
-              mode === "content"
-                ? "Search file contents…"
-                : "Search files by name or path…"
-            }
-          />
+         <input
+           ref={inputRef}
+           value={query}
+            aria-label={mode === "content" ? "Search file contents" : "Search files by name or path"}
+           onChange={(event) => onChangeQuery(event.target.value)}
+           placeholder={
+             mode === "content"
+               ? "Search file contents…"
+               : "Search files by name or path…"
+           }
+         />
           {loading ? <Loader2 className="spin" size={16} /> : null}
         </div>
         <div className="command-context">
@@ -157,8 +181,9 @@ export function CommandPanel({
               const hasLineMatch = Boolean(result.lineNumber && result.lineText);
 
               return (
-                <button
-                  key={`${result.path}:${result.lineNumber ?? "file"}`}
+               <button
+                 key={`${result.path}:${result.lineNumber ?? "file"}`}
+                  type="button"
                   ref={(el) => {
                     resultRefs.current[index] = el;
                   }}
@@ -187,7 +212,7 @@ export function CommandPanel({
                         <div className="command-result-context">
                           {result.contextBefore.map((line, i) => (
                             <small
-                              key={`before-${i}`}
+                              key={`before-${(result.lineNumber ?? 0) - result.contextBefore.length + i}`}
                               className="command-result-context-line"
                             >
                               <span className="command-result-line-number">
@@ -206,7 +231,7 @@ export function CommandPanel({
                           </small>
                           {result.contextAfter.map((line, i) => (
                             <small
-                              key={`after-${i}`}
+                              key={`after-${(result.lineNumber ?? 0) + 1 + i}`}
                               className="command-result-context-line"
                             >
                               <span className="command-result-line-number">
@@ -234,7 +259,7 @@ export function CommandPanel({
           )}
         </div>
       </section>
-    </div>
+    </dialog>
   );
 }
 
@@ -276,18 +301,17 @@ function highlightMatch(text: string, query: string): ReactNode {
 
   const segments: ReactNode[] = [];
   let lastEnd = 0;
-  let key = 0;
 
-  for (const idx of indices) {
-    if (idx > lastEnd) {
-      segments.push(text.slice(lastEnd, idx));
+  for (const matchOffset of indices) {
+    if (matchOffset > lastEnd) {
+      segments.push(text.slice(lastEnd, matchOffset));
     }
     segments.push(
-      <mark key={key++} className="command-match">
-        {text[idx]}
+      <mark key={matchOffset} className="command-match">
+        {text[matchOffset]}
       </mark>,
     );
-    lastEnd = idx + 1;
+    lastEnd = matchOffset + 1;
   }
 
   if (lastEnd < text.length) {
@@ -306,14 +330,13 @@ function highlightRanges(text: string, ranges: [number, number][]): ReactNode {
 
   const segments: ReactNode[] = [];
   let lastEnd = 0;
-  let key = 0;
 
   for (const [start, end] of ranges) {
     if (start > lastEnd) {
       segments.push(text.slice(lastEnd, start));
     }
     segments.push(
-      <mark key={key++} className="command-match">
+      <mark key={start} className="command-match">
         {text.slice(start, end)}
       </mark>,
     );

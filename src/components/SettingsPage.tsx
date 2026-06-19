@@ -32,14 +32,14 @@ export function SettingsPage({
   onReset,
 }: SettingsPageProps) {
   const [activeSection, setActiveSection] =
-    useState<SettingsSectionId>("fonts");
-  const fontsQuery = useQuery({
+   useState<SettingsSectionId>("fonts");
+  const { data: fontsData, isLoading: fontsLoading } = useQuery({
     queryKey: ["system-fonts"],
     queryFn: listSystemFonts,
     enabled: isTauriRuntime(),
     staleTime: Number.POSITIVE_INFINITY,
   });
-  const fonts = fontsQuery.data ?? fallbackFonts;
+  const fonts = fontsData ?? fallbackFonts;
   const uiFonts = useMemo(
     () => withSelectedFont(fonts, settings.uiFontFamily),
     [fonts, settings.uiFontFamily],
@@ -81,7 +81,7 @@ export function SettingsPage({
 
           <SettingsSections
             activeSection={activeSection}
-            fontsLoading={fontsQuery.isLoading}
+            fontsLoading={fontsLoading}
             monoFonts={monoFonts}
             settings={settings}
             uiFonts={uiFonts}

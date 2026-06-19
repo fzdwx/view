@@ -17,7 +17,11 @@ export function useSelectedPathGuard<T extends PathEntry>({
   selectedPath,
   onClear,
 }: UseSelectedPathGuardOptions<T>): void {
+  // items arrive from outside (query results), so staleness of selectedPath
+  // can't be observed from the handler that set it; this sync effect is the
+  // only place that can react when the selected file leaves the list.
   useEffect(() => {
+    /* oxlint-disable react-doctor/no-event-handler */
     if (placeholder || !selectedPath) {
       return;
     }
@@ -32,5 +36,6 @@ export function useSelectedPathGuard<T extends PathEntry>({
     if (!stillExists) {
       onClear();
     }
+    /* oxlint-enable react-doctor/no-event-handler */
   }, [items, onClear, placeholder, selectedPath]);
 }

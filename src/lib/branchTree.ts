@@ -48,6 +48,17 @@ export function filterRefs<T extends { readonly name: string; readonly refName: 
 export function buildRefTree(refs: readonly RefLeaf[]): RefNode[] {
   const root: RefNode[] = [];
 
+  const folderIndex = new WeakMap<RefNode[], Map<string, RefNode>>();
+
+  const getFolderByName = (siblings: RefNode[], part: string) => {
+    let byName = folderIndex.get(siblings);
+    if (!byName) {
+      byName = new Map();
+      folderIndex.set(siblings, byName);
+    }
+    return byName.get(part);
+  };
+
   for (const ref of refs) {
     const parts = ref.name.split("/").filter(Boolean);
     let siblings = root;
@@ -67,7 +78,7 @@ export function buildRefTree(refs: readonly RefLeaf[]): RefNode[] {
         return;
       }
 
-      let folder = siblings.find((node) => !node.leaf && node.name === part);
+      let folder = getFolderByName(siblings, part);
       if (!folder) {
         folder = {
           key: keyPath,
@@ -75,6 +86,7 @@ export function buildRefTree(refs: readonly RefLeaf[]): RefNode[] {
           children: [],
         };
         siblings.push(folder);
+        folderIndex.get(siblings)?.set(part, folder);
       }
       siblings = folder.children;
     });

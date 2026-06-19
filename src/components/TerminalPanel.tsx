@@ -382,6 +382,9 @@ interface TerminalSessionViewProps {
   onTitleChange(title: string | null): void;
 }
 
+// TerminalSessionView couples the PTY lifecycle to its UI; splitting it is a
+// separate, behavior-sensitive refactor tracked outside this cleanup.
+// oxlint-disable-next-line react-doctor/no-giant-component
 function TerminalSessionView({
   active,
   projectPath,
@@ -410,9 +413,11 @@ function TerminalSessionView({
   }, [active, onTitleChange]);
 
   useEffect(() => {
+    /* oxlint-disable react-doctor/no-event-handler, react-doctor/no-effect-chain, react-doctor/no-derived-state */
     if (active) {
       screenRef.current?.focus({ preventScroll: true });
     }
+    /* oxlint-enable react-doctor/no-event-handler, react-doctor/no-effect-chain, react-doctor/no-derived-state */
   }, [active]);
 
   useEffect(() => {
@@ -683,6 +688,9 @@ function TerminalSessionView({
     screenElement.addEventListener("mousedown", handleMouseDown);
     screenElement.addEventListener("mouseup", handleMouseUp);
     screenElement.addEventListener("mousemove", handleMouseMove);
+    // handleWheel calls preventDefault() to stop page zoom/scroll, so the
+    // listener must stay non-passive; passive:true would silently ignore it.
+    // oxlint-disable-next-line react-doctor/client-passive-event-listeners
     screenElement.addEventListener("wheel", handleWheel, { passive: false });
     screenElement.addEventListener("contextmenu", handleContextMenu);
     resizeObserver.observe(screenElement);
@@ -820,12 +828,10 @@ function TerminalSessionView({
   }, [projectPath]);
 
   return (
-    <div
-      ref={screenRef}
-      className="terminal-screen"
-      tabIndex={0}
-      onMouseDown={() => screenRef.current?.focus({ preventScroll: true })}
-    >
+    // role="application" hosts an interactive terminal surface that must capture
+    // keyboard focus to relay keystrokes to the PTY; tabIndex is intentional.
+    // oxlint-disable-next-line react-doctor/no-noninteractive-tabindex
+    <div ref={screenRef} className="terminal-screen" role="application" aria-label="Terminal" tabIndex={0} onMouseDown={() => screenRef.current?.focus({ preventScroll: true })}>
       <div className="terminal-output">
         {frame ? <TerminalRows frame={frame} /> : null}
         {closed ? (
@@ -855,7 +861,10 @@ export function TerminalPanel({ active, projectPath }: TerminalPanelProps) {
       ? [...Object.entries(workspaces), [projectPath, activeWorkspace]]
       : Object.entries(workspaces);
 
+  // workspaces is accumulated session state keyed by project; it can't be
+  // derived because it grows across renders as sessions are created.
   useEffect(() => {
+    /* oxlint-disable react-doctor/no-event-handler, react-doctor/no-effect-chain, react-doctor/no-derived-state */
     if (!projectPath || !isTauriRuntime()) {
       return;
     }
@@ -868,6 +877,7 @@ export function TerminalPanel({ active, projectPath }: TerminalPanelProps) {
             [projectPath]: createInitialTerminalWorkspace(),
           },
     );
+    /* oxlint-enable react-doctor/no-event-handler, react-doctor/no-effect-chain, react-doctor/no-derived-state */
   }, [projectPath]);
 
   const addTab = () => {

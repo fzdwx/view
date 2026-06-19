@@ -52,6 +52,9 @@ interface TreeContextMenuActionOptions {
   readonly onDeleteFile?: (path: string) => void;
 }
 
+// Pure helper co-located with the component for its callers; Fast Refresh is
+// not a concern for this non-component export.
+// oxlint-disable-next-line react-doctor/only-export-components
 export function hasTreeContextMenuActions({
   canStartRename = false,
   gitFileActions,

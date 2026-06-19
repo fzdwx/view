@@ -86,8 +86,13 @@ export async function openSettingsWindow(): Promise<void> {
     const existing = await WebviewWindow.getByLabel(settingsWindowLabel);
 
     if (existing) {
+      // Order matters for the same window (unminimize -> show -> focus), so these
+      // run sequentially rather than Promise.all.
+      // oxlint-disable-next-line react-doctor/async-parallel
       await existing.unminimize();
+      // oxlint-disable-next-line react-doctor/async-parallel
       await existing.show();
+      // oxlint-disable-next-line react-doctor/async-parallel
       await existing.setFocus();
       return;
     }

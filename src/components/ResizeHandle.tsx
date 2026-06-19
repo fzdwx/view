@@ -103,16 +103,9 @@ export function ResizeHandle({
   }
 
   return (
-    <div
-      role="separator"
-      aria-label={label}
-      aria-orientation={axis === "x" ? "vertical" : "horizontal"}
-      tabIndex={0}
-      className={`resize-handle ${
-        axis === "x" ? "resize-handle-x" : "resize-handle-y"
-      } ${className}`}
-      onPointerDown={startResize}
-      onKeyDown={handleKeyDown}
-    />
+    // Focusable, draggable separator. <hr> (the rule's suggestion) can't carry
+    // the interactive tabIndex+keyboard handler without re-tripping a11y rules.
+    // oxlint-disable-next-line react-doctor/prefer-tag-over-role
+    <div role="separator" aria-label={label} aria-orientation={axis === "x" ? "vertical" : "horizontal"} tabIndex={0} className={`resize-handle ${axis === "x" ? "resize-handle-x" : "resize-handle-y"} ${className}`} onPointerDown={startResize} onKeyDown={handleKeyDown} />
   );
 }

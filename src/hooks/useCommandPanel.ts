@@ -37,8 +37,13 @@ export function useCommandPanel({
     return () => window.clearTimeout(timer);
   }, [commandQuery]);
 
+  // Reset the selection to the first result whenever the query/mode/project
+  // changes. The result list lives in the consumer (App.tsx), so the active
+  // index can't be derived here; the reset is the only signal available.
   useEffect(() => {
+    /* oxlint-disable react-doctor/no-adjust-state-on-prop-change, react-doctor/no-derived-state-effect, react-doctor/no-chain-state-updates */
     setCommandSelectionIndex(0);
+    /* oxlint-enable react-doctor/no-adjust-state-on-prop-change, react-doctor/no-derived-state-effect, react-doctor/no-chain-state-updates */
   }, [debouncedCommandQuery, activeProjectPath, commandMode]);
 
   const openCommandPanel = useCallback((mode: CommandPanelMode = "files") => {

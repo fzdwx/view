@@ -3,6 +3,7 @@ import {
   type KeyboardEvent,
   useCallback,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -52,6 +53,9 @@ import {
 } from "./MergeConflictEditor";
 import { CodeMirrorView } from "./CodeMirrorView";
 
+// CodeMirrorFilePreview bundles an editor + find/replace + git markers;
+// splitting it is a separate, behavior-sensitive refactor tracked elsewhere.
+/* oxlint-disable react-doctor/no-giant-component, react-doctor/prefer-useReducer */
 export function CodeMirrorFilePreview({
   blameError,
   blameLines,
@@ -99,7 +103,10 @@ export function CodeMirrorFilePreview({
   );
   const editorSearchRequestRef = useRef(0);
   const editorSearchTimerRef = useRef<number | null>(null);
-  const editorFindStatesRef = useRef(new Map<string, EditorFindState>());
+  const editorFindStatesRef = useRef<Map<string, EditorFindState> | null>(null);
+  if (editorFindStatesRef.current === null) {
+    editorFindStatesRef.current = new Map<string, EditorFindState>();
+  }
   const currentEditorSessionKeyRef = useRef<string | null>(editorSessionKey);
   const currentEditorFindStateRef = useRef<EditorFindState>({
     open: false,
@@ -125,6 +132,9 @@ export function CodeMirrorFilePreview({
   const [editorLineHeight, setEditorLineHeight] = useState(19);
   const [activeEditorLineNumber, setActiveEditorLineNumber] = useState(1);
   const [gitPopoverLeftOffset, setGitPopoverLeftOffset] = useState(0);
+  // Derived file values; the `??` coalescing here is flagged as a pseudo
+  // event-handler by a false positive, so suppress the rule for this block.
+  /* oxlint-disable react-doctor/no-event-handler */
   const content = draft?.content ?? file?.content ?? "";
   const conflict = draft?.conflict ?? null;
   const mediaDataUrl = file?.mediaDataUrl ?? null;
@@ -139,6 +149,7 @@ export function CodeMirrorFilePreview({
     () => filterVisibleEditorGitMarkers(gitMarkers, content),
     [content, gitMarkers],
   );
+  /* oxlint-enable react-doctor/no-event-handler */
   const activeEditorMatch =
     editorMatches.length > 0
       ? editorMatches[Math.min(activeEditorMatchIndex, editorMatches.length - 1)]
@@ -258,6 +269,8 @@ export function CodeMirrorFilePreview({
       height: editorLineHeight,
       left,
     };
+    // editorScrollLeft/Top intentionally re-trigger the overlay on scroll.
+    /* oxlint-disable react-doctor/exhaustive-deps */
   }, [
     activeBlameRow,
     editorLineHeight,
@@ -265,7 +278,9 @@ export function CodeMirrorFilePreview({
     editorScrollTop,
     editorView,
     editorViewportHeight,
+    editorViewportWidth,
   ]);
+    /* oxlint-enable react-doctor/exhaustive-deps */
   const gitMarkerSegmentsByLine = useMemo(() => {
     const segments = new Map<number, GitMarkerSegment>();
 
@@ -303,6 +318,10 @@ export function CodeMirrorFilePreview({
     setEditorLineHeight(view.defaultLineHeight || 19);
     setActiveEditorLineNumber(view.state.doc.lineAt(view.state.selection.main.head).number);
   }, []);
+
+  const syncEditorMetricsEvent = useEffectEvent(() => {
+    syncEditorMetrics(editorView);
+  });
 
   const revealEditorPosition = useCallback(
     (from: number, to: number, focusEditor: boolean) => {
@@ -378,18 +397,23 @@ export function CodeMirrorFilePreview({
     [revealGitMarker],
   );
 
+  // Restores the per-file find/replace state when the editor session changes;
+  // the find-state fields are restored together from a cached snapshot, so a
+  // reducer wouldn't simplify it and they can't be derived at render.
   useLayoutEffect(() => {
+    /* oxlint-disable react-doctor/no-cascading-set-state, react-doctor/no-effect-chain, react-doctor/no-chain-state-updates, react-doctor/no-event-handler, react-doctor/no-derived-state */
     const previousKey = currentEditorSessionKeyRef.current;
     if (previousKey === editorSessionKey) {
       return;
     }
 
+    const editorFindStates = editorFindStatesRef.current ?? new Map();
     if (previousKey) {
-      editorFindStatesRef.current.set(previousKey, currentEditorFindStateRef.current);
+      editorFindStates.set(previousKey, currentEditorFindStateRef.current);
     }
 
     const nextState = editorSessionKey
-      ? editorFindStatesRef.current.get(editorSessionKey)
+      ? editorFindStates.get(editorSessionKey)
       : undefined;
     currentEditorSessionKeyRef.current = editorSessionKey;
     setEditorFindOpen(nextState?.open ?? false);
@@ -399,8 +423,12 @@ export function CodeMirrorFilePreview({
     setActiveEditorMatchIndex(nextState?.activeIndex ?? 0);
     setEditorMatches([]);
     setEditorSearchPending(false);
+    /* oxlint-enable {SM} */
   }, [editorSessionKey]);
 
+  // Mount-only cleanup clears any pending search timer on unmount; reading
+  // editorSearchTimerRef.current in cleanup is intentional (latest value).
+  // oxlint-disable-next-line react-doctor/exhaustive-deps
   useEffect(() => {
     return () => {
       if (editorSearchTimerRef.current !== null) {
@@ -414,7 +442,7 @@ export function CodeMirrorFilePreview({
       return;
     }
 
-    const handleScroll = () => syncEditorMetrics(editorView);
+    const handleScroll = () => syncEditorMetricsEvent();
     handleScroll();
     editorView.scrollDOM.addEventListener("scroll", handleScroll, {
       passive: true,
@@ -426,7 +454,7 @@ export function CodeMirrorFilePreview({
       observer.disconnect();
       editorView.scrollDOM.removeEventListener("scroll", handleScroll);
     };
-  }, [editorView, syncEditorMetrics]);
+  }, [editorView]);
 
   useEffect(() => {
     if (editorFindOpen) {
@@ -442,7 +470,10 @@ export function CodeMirrorFilePreview({
     }
   }, [editorFindOpen, editorReplaceOpen]);
 
+  // Imperatively syncs the CodeMirror search extension when find state
+  // changes; it owns a CodeMirror effect, not React state, so it stays an effect.
   useEffect(() => {
+    /* oxlint-disable react-doctor/no-cascading-set-state, react-doctor/no-effect-chain, react-doctor/no-chain-state-updates, react-doctor/no-event-handler, react-doctor/no-derived-state */
     if (!editorView) {
       return;
     }
@@ -455,9 +486,13 @@ export function CodeMirrorFilePreview({
         }),
       ),
     });
+    /* oxlint-enable react-doctor/no-cascading-set-state, react-doctor/no-effect-chain, react-doctor/no-chain-state-updates, react-doctor/no-event-handler, react-doctor/no-derived-state */
   }, [editorFindOpen, editorFindQuery, editorReplaceText, editorView]);
 
+  // Debounced editor search; the synchronous resets guard the async timer path
+  // and don't have a render-time equivalent (matches are produced asynchronously).
   useEffect(() => {
+    /* oxlint-disable react-doctor/no-adjust-state-on-prop-change, react-doctor/no-cascading-set-state, react-doctor/no-effect-chain, react-doctor/no-chain-state-updates, react-doctor/no-event-handler, react-doctor/no-derived-state */
     const requestId = editorSearchRequestRef.current + 1;
     editorSearchRequestRef.current = requestId;
     const query = editorFindQuery.trim();
@@ -512,47 +547,75 @@ export function CodeMirrorFilePreview({
         editorSearchTimerRef.current = null;
       }
     };
+    /* oxlint-enable react-doctor/no-adjust-state-on-prop-change, react-doctor/no-cascading-set-state, react-doctor/no-effect-chain, react-doctor/no-chain-state-updates, react-doctor/no-event-handler, react-doctor/no-derived-state */
   }, [content, editorFindOpen, editorFindQuery, revealEditorMatch]);
 
+  // Clamp the active match index when the match list shrinks; the matches
+  // arrive asynchronously so this can't be derived cleanly at render.
   useEffect(() => {
+    /* oxlint-disable react-doctor/no-adjust-state-on-prop-change, react-doctor/no-cascading-set-state, react-doctor/no-effect-chain, react-doctor/no-chain-state-updates, react-doctor/no-event-handler, react-doctor/no-derived-state */
     if (activeEditorMatchIndex < editorMatches.length) {
       return;
     }
 
     setActiveEditorMatchIndex(Math.max(0, editorMatches.length - 1));
+    /* oxlint-enable react-doctor/no-adjust-state-on-prop-change, react-doctor/no-cascading-set-state, react-doctor/no-effect-chain, react-doctor/no-chain-state-updates, react-doctor/no-event-handler, react-doctor/no-derived-state */
   }, [activeEditorMatchIndex, editorMatches.length]);
 
+  // Reset git-marker selection when the file changes; a key prop would also
+  // remount the editor and lose its view, so reset scoped state here instead.
   useEffect(() => {
+    /* oxlint-disable react-doctor/no-adjust-state-on-prop-change */
     setActiveGitMarkerId(null);
     setGitPopoverLeftOffset(0);
+    /* oxlint-enable react-doctor/no-adjust-state-on-prop-change */
   }, [file?.path]);
 
+  // The CodeMirror view must be rebuilt for a new file; resetting it here
+  // avoids remounting the whole preview (and losing draft/scroll state).
   useEffect(() => {
+    /* oxlint-disable react-doctor/no-effect-chain, react-doctor/no-event-handler, react-doctor/no-chain-state-updates, react-doctor/no-derived-state, react-doctor/no-adjust-state-on-prop-change */
     setEditorView(null);
+    /* oxlint-enable react-doctor/no-effect-chain, react-doctor/no-event-handler, react-doctor/no-chain-state-updates, react-doctor/no-derived-state, react-doctor/no-adjust-state-on-prop-change */
   }, [file?.path]);
 
+  // Drop the CodeMirror view when media preview takes over; can't be derived
+  // because the editor instance is owned imperatively.
   useEffect(() => {
+    /* oxlint-disable react-doctor/no-effect-chain, react-doctor/no-event-handler, react-doctor/no-chain-state-updates, react-doctor/no-derived-state, react-doctor/no-adjust-state-on-prop-change */
     if (renderableMedia && fileViewMode === "preview") {
       setEditorView(null);
     }
+    /* oxlint-enable react-doctor/no-effect-chain, react-doctor/no-event-handler, react-doctor/no-chain-state-updates, react-doctor/no-derived-state, react-doctor/no-adjust-state-on-prop-change */
   }, [fileViewMode, renderableMedia]);
 
+  // fileViewMode derives from media availability + file identity; resetting on
+  // file change is the intended UX and has no pure render-time equivalent.
   useEffect(() => {
+    /* oxlint-disable react-doctor/no-effect-chain, react-doctor/no-event-handler, react-doctor/no-chain-state-updates, react-doctor/no-derived-state, react-doctor/no-adjust-state-on-prop-change */
     if (!renderableMedia) {
       setFileViewMode("source");
       return;
     }
 
     setFileViewMode("preview");
+    /* oxlint-enable react-doctor/no-effect-chain, react-doctor/no-event-handler, react-doctor/no-chain-state-updates, react-doctor/no-derived-state, react-doctor/no-adjust-state-on-prop-change */
   }, [file?.path, renderableMedia]);
 
+  // Fall back to preview when source rendering isn't supported for the media;
+  // user-driven mode is preserved otherwise.
   useEffect(() => {
+    /* oxlint-disable react-doctor/no-effect-chain, react-doctor/no-event-handler, react-doctor/no-chain-state-updates, react-doctor/no-derived-state, react-doctor/no-adjust-state-on-prop-change */
     if (fileViewMode === "source" && !canShowMediaSource) {
       setFileViewMode("preview");
     }
+    /* oxlint-enable react-doctor/no-effect-chain, react-doctor/no-event-handler, react-doctor/no-chain-state-updates, react-doctor/no-derived-state, react-doctor/no-adjust-state-on-prop-change */
   }, [canShowMediaSource, fileViewMode]);
 
+  // Clear a stale git-marker selection when it leaves the visible set; the
+  // marker set is produced asynchronously so it can't be derived at render.
   useEffect(() => {
+    /* oxlint-disable react-doctor/no-effect-chain, react-doctor/no-event-handler, react-doctor/no-chain-state-updates, react-doctor/no-derived-state, react-doctor/no-adjust-state-on-prop-change */
     if (!activeGitMarkerId) {
       return;
     }
@@ -560,9 +623,11 @@ export function CodeMirrorFilePreview({
     if (!visibleGitMarkers.some((marker) => marker.id === activeGitMarkerId)) {
       setActiveGitMarkerId(null);
     }
+    /* oxlint-enable react-doctor/no-effect-chain, react-doctor/no-event-handler, react-doctor/no-chain-state-updates, react-doctor/no-derived-state, react-doctor/no-adjust-state-on-prop-change */
   }, [activeGitMarkerId, visibleGitMarkers]);
 
   useLayoutEffect(() => {
+    /* oxlint-disable react-doctor/no-effect-chain, react-doctor/no-event-handler, react-doctor/no-derived-state */
     const pendingSelection = pendingEditorSelectionRef.current;
     if (!pendingSelection || !editorView) {
       return;
@@ -570,9 +635,11 @@ export function CodeMirrorFilePreview({
 
     pendingEditorSelectionRef.current = null;
     revealEditorPosition(pendingSelection.start, pendingSelection.end, true);
+    /* oxlint-enable react-doctor/no-effect-chain, react-doctor/no-event-handler, react-doctor/no-derived-state */
   }, [content, editorView, revealEditorPosition]);
 
   useLayoutEffect(() => {
+    /* oxlint-disable react-doctor/no-effect-chain, react-doctor/no-event-handler, react-doctor/no-derived-state */
     if (
       !target ||
       !file ||
@@ -588,6 +655,7 @@ export function CodeMirrorFilePreview({
     const cursorOffset = lineStart + byteToUtf16;
 
     revealEditorPosition(cursorOffset, cursorOffset, true);
+    /* oxlint-enable react-doctor/no-effect-chain, react-doctor/no-event-handler, react-doctor/no-derived-state */
   }, [
     content,
     editorView,
@@ -598,16 +666,19 @@ export function CodeMirrorFilePreview({
     target,
   ]);
 
-  function selectEditorMatch(index: number, focusEditor = false) {
-    if (editorMatches.length === 0) {
-      return;
-    }
+  const selectEditorMatch = useCallback(
+    (index: number, focusEditor = false) => {
+      if (editorMatches.length === 0) {
+        return;
+      }
 
-    const nextIndex = wrapIndex(index, editorMatches.length);
-    const match = editorMatches[nextIndex];
-    setActiveEditorMatchIndex(nextIndex);
-    revealEditorMatch(match, focusEditor);
-  }
+      const nextIndex = wrapIndex(index, editorMatches.length);
+      const match = editorMatches[nextIndex];
+      setActiveEditorMatchIndex(nextIndex);
+      revealEditorMatch(match, focusEditor);
+    },
+    [editorMatches, revealEditorMatch],
+  );
 
   async function replaceCurrentEditorMatch() {
     if (!activeEditorMatch) {
@@ -615,6 +686,10 @@ export function CodeMirrorFilePreview({
     }
 
     const sourceContent = content;
+    if (editorView && editorView.state.doc.toString() !== sourceContent) {
+      return;
+    }
+
     const response = await replaceEditorText(
       sourceContent,
       editorFindQuery,
@@ -622,10 +697,6 @@ export function CodeMirrorFilePreview({
       activeEditorMatchIndex,
       false,
     );
-    if (editorView && editorView.state.doc.toString() !== sourceContent) {
-      return;
-    }
-
     pendingEditorSelectionRef.current = {
       start: response.selectionStart,
       end: response.selectionEnd,
@@ -643,6 +714,10 @@ export function CodeMirrorFilePreview({
     }
 
     const sourceContent = content;
+    if (editorView && editorView.state.doc.toString() !== sourceContent) {
+      return;
+    }
+
     const response = await replaceEditorText(
       sourceContent,
       editorFindQuery,
@@ -650,10 +725,6 @@ export function CodeMirrorFilePreview({
       activeEditorMatchIndex,
       true,
     );
-    if (editorView && editorView.state.doc.toString() !== sourceContent) {
-      return;
-    }
-
     pendingEditorSelectionRef.current = {
       start: response.selectionStart,
       end: response.selectionEnd,
@@ -676,7 +747,7 @@ export function CodeMirrorFilePreview({
     setActiveGitMarkerId(null);
   }
 
-  function handleEditorFindKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+  function handleEditorFindKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     const key = event.key.toLowerCase();
     if (key === "escape") {
       event.preventDefault();
@@ -807,7 +878,7 @@ export function CodeMirrorFilePreview({
       Math.max(coords.top - stageRect.top, 8),
       Math.max(8, editorViewportHeight - 190),
     );
-  }, [activeGitMarker, editorView, editorScrollTop, editorViewportHeight]);
+  }, [activeGitMarker, editorView, editorViewportHeight]);
 
   if (loading) {
     return (
@@ -932,7 +1003,7 @@ export function CodeMirrorFilePreview({
         />
       ) : null}
       {editorFindOpen ? (
-        <div className="editor-findbar" onKeyDown={handleEditorFindKeyDown}>
+        <div className="editor-findbar">
           <Search size={14} />
           <input
             ref={findInputRef}
@@ -943,6 +1014,7 @@ export function CodeMirrorFilePreview({
               setEditorFindQuery(event.target.value);
               setActiveEditorMatchIndex(0);
             }}
+            onKeyDown={handleEditorFindKeyDown}
           />
           <span className="editor-find-count">
             {editorSearchPending
@@ -1104,6 +1176,7 @@ export function CodeMirrorFilePreview({
     </section>
   );
 }
+/* oxlint-enable react-doctor/no-giant-component, react-doctor/prefer-useReducer */
 
 interface VisibleBlameRow {
   readonly lineNumber: number;

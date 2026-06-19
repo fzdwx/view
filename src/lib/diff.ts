@@ -1,5 +1,5 @@
 import { parsePatchFiles, type FileDiffMetadata } from "@pierre/diffs";
-import type { GitStatus, TreeFile } from "./api";
+
 
 export interface ParsedRepositoryDiff {
   error: string | null;
@@ -22,13 +22,6 @@ export function parseRepositoryDiff(diff: string): ParsedRepositoryDiff {
       files: [],
     };
   }
-}
-
-export function toDiffTreeFiles(files: FileDiffMetadata[]): TreeFile[] {
-  return files.map((file) => ({
-    path: file.name,
-    status: changeTypeToStatus(file.type),
-  }));
 }
 
 export function filterDiffFiles(
@@ -56,19 +49,4 @@ export function countDiffStats(files: readonly FileDiffMetadata[]) {
     },
     { additions: 0, deletions: 0, files: 0 },
   );
-}
-
-function changeTypeToStatus(changeType: FileDiffMetadata["type"]): GitStatus {
-  switch (changeType) {
-    case "new":
-      return "added";
-    case "deleted":
-      return "deleted";
-    case "rename-changed":
-    case "rename-pure":
-      return "renamed";
-    case "change":
-    default:
-      return "modified";
-  }
 }

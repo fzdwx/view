@@ -30,6 +30,7 @@ export function TabContextMenu({
     <div
       className="branch-context-menu"
       role="menu"
+      tabIndex={-1}
       style={menuStyle}
       onClick={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}

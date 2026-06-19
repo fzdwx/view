@@ -131,7 +131,14 @@ export function useRepositoryProjectData({
 }: RepositoryProjectDataOptions): RepositoryProjectData {
   const [debouncedCommitFilter, setDebouncedCommitFilter] = useState("");
   const [debouncedReflogFilter, setDebouncedReflogFilter] = useState("");
-  const [knownCommits, setKnownCommits] = useState<CommitInfo[]>([]);
+  const [knownCommitsEntry, setKnownCommitsEntry] = useState<{
+    forProject: string | null;
+    commits: CommitInfo[];
+  }>({ forProject: null, commits: [] });
+  const knownCommits =
+    knownCommitsEntry.forProject === activeProjectPath
+      ? knownCommitsEntry.commits
+      : [];
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -149,10 +156,10 @@ export function useRepositoryProjectData({
     return () => window.clearTimeout(timer);
   }, [reflogFilter]);
 
-  useEffect(() => {
-    setKnownCommits([]);
-  }, [activeProjectPath]);
-
+  // The whole query object is returned to consumers (App.tsx) that read many
+  // fields (data/isFetching/isError/refetch/isPlaceholderData), so it must be
+  // held as one value per the rule's own false-positive guidance.
+  // oxlint-disable-next-line react-doctor/query-destructure-result
   const repositoryQuery = useQuery({
     queryKey: ["repository", activeProjectPath, activeCommit],
     queryFn: () =>
@@ -166,6 +173,10 @@ export function useRepositoryProjectData({
     retry: false,
   });
 
+  // The whole query object is returned to consumers (App.tsx) that read many
+  // fields (data/isFetching/isError/refetch/isPlaceholderData), so it must be
+  // held as one value per the rule's own false-positive guidance.
+  // oxlint-disable-next-line react-doctor/query-destructure-result
   const commitsQuery = useQuery({
     queryKey: [
       "commits",
@@ -184,6 +195,10 @@ export function useRepositoryProjectData({
     retry: false,
   });
 
+  // The whole query object is returned to consumers (App.tsx) that read many
+  // fields (data/isFetching/isError/refetch/isPlaceholderData), so it must be
+  // held as one value per the rule's own false-positive guidance.
+  // oxlint-disable-next-line react-doctor/query-destructure-result
   const reflogQuery = useQuery({
     queryKey: ["reflog", activeProjectPath, debouncedReflogFilter],
     queryFn: () =>
@@ -196,6 +211,10 @@ export function useRepositoryProjectData({
     retry: false,
   });
 
+  // The whole query object is returned to consumers (App.tsx) that read many
+  // fields (data/isFetching/isError/refetch/isPlaceholderData), so it must be
+  // held as one value per the rule's own false-positive guidance.
+  // oxlint-disable-next-line react-doctor/query-destructure-result
   const projectFilesQuery = useQuery({
     queryKey: ["project-files", activeProjectPath],
     queryFn: () =>
@@ -205,6 +224,10 @@ export function useRepositoryProjectData({
     retry: false,
   });
 
+  // The whole query object is returned to consumers (App.tsx) that read many
+  // fields (data/isFetching/isError/refetch/isPlaceholderData), so it must be
+  // held as one value per the rule's own false-positive guidance.
+  // oxlint-disable-next-line react-doctor/query-destructure-result
   const fileContentQuery = useQuery({
     queryKey: ["file-content", activeProjectPath, selectedProjectPath],
     queryFn: async () => {
@@ -229,6 +252,10 @@ export function useRepositoryProjectData({
   });
 
   const searchFn = commandMode === "content" ? searchFileContents : searchFileNames;
+  // The whole query object is returned to consumers (App.tsx) that read many
+  // fields (data/isFetching/isError/refetch/isPlaceholderData), so it must be
+  // held as one value per the rule's own false-positive guidance.
+  // oxlint-disable-next-line react-doctor/query-destructure-result
   const fileSearchQuery = useQuery({
     queryKey: ["file-search", commandMode, activeProjectPath, debouncedCommandQuery],
     queryFn: () =>
@@ -261,26 +288,45 @@ export function useRepositoryProjectData({
   const filteredCommits = commitsQuery.data ?? payload?.commits ?? [];
   const reflogEntries = reflogQuery.data ?? [];
   const reflogCommits = useMemo(
-    () => reflogEntries.map(reflogEntryToCommitInfo),
-    [reflogEntries],
+    () => (reflogQuery.data ?? []).map(reflogEntryToCommitInfo),
+    [reflogQuery.data],
   );
   const liveCommits = useMemo(
-    () => mergeCommitLists(filteredCommits, reflogCommits, payload?.commits ?? []),
-    [filteredCommits, payload?.commits, reflogCommits],
+    () =>
+      mergeCommitLists(
+        commitsQuery.data ?? payload?.commits ?? [],
+        reflogCommits,
+        payload?.commits ?? [],
+      ),
+    [commitsQuery.data, payload?.commits, reflogCommits],
   );
+  // knownCommitsEntry is an accumulated commit cache keyed by project; it
+  // grows across renders and can't be derived from liveCommits alone.
   useEffect(() => {
+    /* oxlint-disable react-doctor/no-derived-state */
     if (liveCommits.length === 0) {
       return;
     }
 
-    setKnownCommits((current) => {
+    setKnownCommitsEntry((entry) => {
+      const current =
+        entry.forProject === activeProjectPath ? entry.commits : [];
       const merged = mergeCommitLists(liveCommits, current);
-      return merged.length === current.length ? current : merged;
+      return merged.length === current.length
+        ? { forProject: activeProjectPath, commits: current }
+        : { forProject: activeProjectPath, commits: merged };
     });
-  }, [liveCommits]);
+    /* oxlint-enable react-doctor/no-derived-state */
+  }, [activeProjectPath, liveCommits]);
   const commits = useMemo(
-    () => mergeCommitLists(liveCommits, knownCommits),
-    [knownCommits, liveCommits],
+    () =>
+      mergeCommitLists(
+        liveCommits,
+        knownCommitsEntry.forProject === activeProjectPath
+          ? knownCommitsEntry.commits
+          : [],
+      ),
+    [activeProjectPath, knownCommitsEntry, liveCommits],
   );
   const currentBranchRef =
     payload?.summary.branches.find((branch) => branch.current)?.refName ?? null;
@@ -369,6 +415,10 @@ export function useRepositoryPreviewData({
       previewMode === "file" &&
       fileContentReady,
   );
+  // The whole query object is returned to consumers (App.tsx) that read many
+  // fields (data/isFetching/isError/refetch/isPlaceholderData), so it must be
+  // held as one value per the rule's own false-positive guidance.
+  // oxlint-disable-next-line react-doctor/query-destructure-result
   const fileBlameQuery = useQuery({
     queryKey: ["file-blame", activeProjectPath, selectedProjectPath],
     queryFn: async () => {
@@ -389,6 +439,10 @@ export function useRepositoryPreviewData({
     retry: false,
   });
 
+  // The whole query object is returned to consumers (App.tsx) that read many
+  // fields (data/isFetching/isError/refetch/isPlaceholderData), so it must be
+  // held as one value per the rule's own false-positive guidance.
+  // oxlint-disable-next-line react-doctor/query-destructure-result
   const fileDiffQuery = useQuery({
     queryKey: [
       "file-diff",
@@ -418,6 +472,10 @@ export function useRepositoryPreviewData({
     retry: false,
   });
 
+  // The whole query object is returned to consumers (App.tsx) that read many
+  // fields (data/isFetching/isError/refetch/isPlaceholderData), so it must be
+  // held as one value per the rule's own false-positive guidance.
+  // oxlint-disable-next-line react-doctor/query-destructure-result
   const fileWorktreeDiffQuery = useQuery({
     queryKey: [
       "file-worktree-diff",

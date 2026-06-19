@@ -25,9 +25,3 @@ export function fileNameFromPath(path: string): string {
 export function parentPathFromPath(path: string): string {
   return path.split("/").filter(Boolean).slice(0, -1).join("/");
 }
-
-export function fileExtension(path: string): string {
-  const fileName = fileNameFromPath(path);
-  const extension = fileName.includes(".") ? fileName.split(".").pop() : null;
-  return extension ? extension.slice(0, 4).toLowerCase() : "";
-}

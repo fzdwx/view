@@ -8,16 +8,24 @@ import pierreDarkTheme from "@pierre/theme/pierre-dark";
  * Used to drive CodeMirror syntax highlighting from the same token palette as
  * the shiki diff view and the tree, so editor and diff readouts stay in sync.
  */
-function pierreTokenColor(scope: string): string | null {
-  for (const tokenColor of pierreDarkTheme.tokenColors) {
-    const scopes = Array.isArray(tokenColor.scope)
-      ? tokenColor.scope
-      : [tokenColor.scope];
-    if (scopes.includes(scope)) {
-      return tokenColor.settings.foreground ?? null;
+const pierreTokenColorByScope = new Map<string, string | null>();
+for (const tokenColor of pierreDarkTheme.tokenColors) {
+  const scopeValue = tokenColor.scope;
+  const scopes = Array.isArray(scopeValue)
+    ? scopeValue
+    : scopeValue
+      ? [scopeValue]
+      : [];
+  const foreground = tokenColor.settings.foreground ?? null;
+  for (const scope of scopes) {
+    if (!pierreTokenColorByScope.has(scope)) {
+      pierreTokenColorByScope.set(scope, foreground);
     }
   }
-  return null;
+}
+
+function pierreTokenColor(scope: string): string | null {
+  return pierreTokenColorByScope.get(scope) ?? null;
 }
 
 /**
@@ -83,7 +91,7 @@ export const pierreCodeMirrorTheme = EditorView.theme({
  * editor shares one palette with the rest of the workbench instead of
  * approximating it with hardcoded colors.
  */
-export const pierreCodeMirrorHighlightStyle = HighlightStyle.define([
+const pierreCodeMirrorHighlightStyle = HighlightStyle.define([
   { tag: t.comment, color: pierreTokenColor("comment") ?? "var(--muted)", fontStyle: "italic" },
   { tag: t.keyword, color: pierreTokenColor("keyword") ?? "#ff678d" },
   { tag: [t.atom, t.bool, t.special(t.variableName)], color: pierreTokenColor("constant.language") ?? "#68cdf2" },

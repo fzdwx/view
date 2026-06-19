@@ -2,10 +2,10 @@ export function matchesShortcut(
   event: globalThis.KeyboardEvent,
   shortcut: string,
 ): boolean {
-  const parts = shortcut
-    .split("+")
-    .map((part) => part.trim().toLowerCase())
-    .filter(Boolean);
+  const parts = shortcut.split("+").flatMap((part) => {
+    const normalized = part.trim().toLowerCase();
+    return normalized ? [normalized] : [];
+  });
   if (parts.length === 0) {
     return false;
   }

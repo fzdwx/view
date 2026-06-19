@@ -63,8 +63,13 @@ export function SettingsSelect({
 
   useEffect(() => {
     if (!open) {
+      // Reset transient menu state on close; the menu can close from several
+      // paths (outside pointer, option select, escape) so a single reset is
+      // simpler than duplicating it across each close site.
+      /* oxlint-disable react-doctor/no-cascading-set-state */
       setSearchQuery("");
       setMenuStyle({});
+      /* oxlint-enable react-doctor/no-cascading-set-state */
       return;
     }
 
@@ -86,23 +91,29 @@ export function SettingsSelect({
     updateLargeMenuPlacement();
   }, [updateLargeMenuPlacement, visibleOptions.length]);
 
+  const updateLargeMenuPlacementRef = useRef(updateLargeMenuPlacement);
+  updateLargeMenuPlacementRef.current = updateLargeMenuPlacement;
+
   useEffect(() => {
     if (!open || menuSize !== "large") {
       return;
     }
 
-    window.addEventListener("resize", updateLargeMenuPlacement);
-    window.addEventListener("scroll", updateLargeMenuPlacement, true);
+    const handler = () => updateLargeMenuPlacementRef.current();
+    window.addEventListener("resize", handler);
+    window.addEventListener("scroll", handler, true);
     return () => {
-      window.removeEventListener("resize", updateLargeMenuPlacement);
-      window.removeEventListener("scroll", updateLargeMenuPlacement, true);
+      window.removeEventListener("resize", handler);
+      window.removeEventListener("scroll", handler, true);
     };
-  }, [menuSize, open, updateLargeMenuPlacement]);
+  }, [menuSize, open]);
 
   useEffect(() => {
+    /* oxlint-disable react-doctor/no-event-handler */
     if (open && searchable) {
       searchInputRef.current?.focus();
     }
+    /* oxlint-enable react-doctor/no-event-handler */
   }, [open, searchable]);
 
   function handleTriggerKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
@@ -146,6 +157,36 @@ export function SettingsSelect({
     triggerRef.current?.focus();
   }
 
+  const optionsList = (
+    // Custom searchable dropdown backed by <button> options; a native <datalist>
+    // (the rule's suggestion) can't host button rows here.
+    // oxlint-disable-next-line react-doctor/prefer-tag-over-role
+    <div className="settings-select-options" role="listbox" aria-label={ariaLabel}>
+      {visibleOptions.length > 0 ? (
+        visibleOptions.map((option) => (
+          <button
+            key={`${option.value}-${option.label}`}
+            type="button"
+            className={
+              option.value === value
+                ? "settings-select-option active"
+                : "settings-select-option"
+            }
+            role="option"
+            aria-disabled={option.disabled ? true : undefined}
+            aria-selected={option.value === value}
+            disabled={option.disabled}
+            onClick={() => selectOption(option)}
+          >
+            {option.label}
+          </button>
+        ))
+      ) : (
+        <div className="settings-select-empty">No fonts found</div>
+      )}
+    </div>
+  );
+
   return (
     <div
       className={
@@ -187,34 +228,7 @@ export function SettingsSelect({
               />
             </div>
           ) : null}
-          <div
-            className="settings-select-options"
-            role="listbox"
-            aria-label={ariaLabel}
-          >
-            {visibleOptions.length > 0 ? (
-              visibleOptions.map((option) => (
-                <button
-                  key={`${option.value}-${option.label}`}
-                  type="button"
-                  className={
-                    option.value === value
-                      ? "settings-select-option active"
-                      : "settings-select-option"
-                  }
-                  role="option"
-                  aria-disabled={option.disabled ? true : undefined}
-                  aria-selected={option.value === value}
-                  disabled={option.disabled}
-                  onClick={() => selectOption(option)}
-                >
-                  {option.label}
-                </button>
-              ))
-            ) : (
-              <div className="settings-select-empty">No fonts found</div>
-            )}
-          </div>
+          {optionsList}
         </div>
       ) : null}
     </div>

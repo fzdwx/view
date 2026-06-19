@@ -104,6 +104,9 @@ const previewTarget: PreviewTarget = {
   requestId: 1,
 };
 
+// PreviewDebugPage is a debug surface with independent scenario/draft state;
+// collapsing it into a reducer is out of scope for this cleanup.
+/* oxlint-disable react-doctor/prefer-useReducer */
 export function PreviewDebugPage({
   shellStyle,
 }: {
@@ -248,30 +251,6 @@ export function PreviewDebugPage({
     setSaveCount((count) => count + 1);
   }
 
-  function renderPane() {
-    return (
-      <CodeMirrorFilePreview
-        blameError={blameError}
-        blameLines={blameLines}
-        blameLoading={blameLoading}
-        draft={draft}
-        editorSessionKey={`fixture-${scenario}`}
-        error={forceError ? "Fixture error: file preview failed to load." : null}
-        file={file}
-        gitMarkers={gitMarkers}
-        loading={loading}
-        saveError={saveError}
-        saving={false}
-        selectedPath={file?.path ?? null}
-        target={target}
-        onChangeDraft={setDraftContent}
-        onDiscardConflict={() => applyScenario("text")}
-        onSave={handleSave}
-        onSetConflictDraftContent={setDraftContent}
-      />
-    );
-  }
-
   return (
     <main className="preview-debug-page" style={shellStyle}>
       <section className="preview-debug-toolbar">
@@ -367,12 +346,33 @@ export function PreviewDebugPage({
       <section className="preview-debug-body">
         <article className="preview-debug-pane">
           <header>CodeMirror preview</header>
-          <div className="preview-debug-pane-body">{renderPane()}</div>
+          <div className="preview-debug-pane-body">
+            <CodeMirrorFilePreview
+              blameError={blameError}
+              blameLines={blameLines}
+              blameLoading={blameLoading}
+              draft={draft}
+              editorSessionKey={`fixture-${scenario}`}
+              error={forceError ? "Fixture error: file preview failed to load." : null}
+              file={file}
+              gitMarkers={gitMarkers}
+              loading={loading}
+              saveError={saveError}
+              saving={false}
+              selectedPath={file?.path ?? null}
+              target={target}
+              onChangeDraft={setDraftContent}
+              onDiscardConflict={() => applyScenario("text")}
+              onSave={handleSave}
+              onSetConflictDraftContent={setDraftContent}
+            />
+          </div>
         </article>
       </section>
     </main>
   );
 }
+/* oxlint-enable react-doctor/prefer-useReducer */
 
 function createBlameLine(
   lineNumber: number,

@@ -49,12 +49,12 @@ export function buildCommitGraph(commits: CommitInfo[]): CommitGraphRow[] {
       index,
       colorKey: laneColorKeys[index] ?? lanes[index],
     }));
-    const beforeLanes = beforeLaneEntries
-      .map((laneEntry) => ({
-        index: laneEntry.index,
-        colorKey: laneEntry.colorKey,
-      }))
-      .filter((beforeLane) => laneExisted || beforeLane.index !== lane);
+    const beforeLanes = beforeLaneEntries.flatMap((laneEntry) => {
+      if (!laneExisted && laneEntry.index === lane) {
+        return [];
+      }
+      return [{ index: laneEntry.index, colorKey: laneEntry.colorKey }];
+    });
     const visibleParents = commit.parents.filter((parent) =>
       visibleHashes.has(parent),
     );
@@ -125,17 +125,12 @@ export function buildCommitGraph(commits: CommitInfo[]): CommitGraphRow[] {
 
     lanes.splice(0, lanes.length, ...nextLanes);
     laneColorKeys.splice(0, laneColorKeys.length, ...nextLaneColorKeys);
-    const afterLanes = lanes
-      .map((hash, index) => ({
-        hash,
-        index,
-        colorKey: laneColorKeys[index] ?? lanes[index],
-      }))
-      .filter((afterLane) => !shiftedLaneKeys.has(afterLane.hash))
-      .map((afterLane) => ({
-        index: afterLane.index,
-        colorKey: afterLane.colorKey,
-      }));
+    const afterLanes = lanes.flatMap((hash, index) => {
+      if (shiftedLaneKeys.has(hash)) {
+        return [];
+      }
+      return [{ index, colorKey: laneColorKeys[index] ?? lanes[index] }];
+    });
 
     return {
       commit,

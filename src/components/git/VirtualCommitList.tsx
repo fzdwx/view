@@ -339,6 +339,7 @@ function CommitListHeader({
     <div className="commit-list-header">
       <span className="commit-list-worktree-cell">
         <button
+          type="button"
           className={activeCommit ? "commit-worktree-button" : "commit-worktree-button active"}
           title="Show working tree"
           aria-label="Show working tree"
@@ -350,6 +351,7 @@ function CommitListHeader({
       <div className="commit-header-search">
         <span className="history-view-toggle" role="tablist" aria-label="History source">
           <button
+            type="button"
             className={isReflogMode ? "history-view-tab" : "history-view-tab active"}
             role="tab"
             aria-selected={!isReflogMode}
@@ -358,6 +360,7 @@ function CommitListHeader({
             Commits
           </button>
           <button
+            type="button"
             className={isReflogMode ? "history-view-tab active" : "history-view-tab"}
             role="tab"
             aria-selected={isReflogMode}
@@ -407,26 +410,17 @@ function ReflogRow({
   active: boolean;
   entry: ReflogEntry;
   onClick(): void;
-  onContextMenu(event: ReactMouseEvent<HTMLDivElement>): void;
+  onContextMenu(event: ReactMouseEvent<HTMLButtonElement>): void;
 }) {
-  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      onClick();
-    }
-  }
-
   const subject = reflogPrimaryText(entry);
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
+    <button
+      type="button"
       title={`${subject} (${entry.shortHash})`}
       className={active ? "reflog-row active" : "reflog-row"}
       onClick={onClick}
       onContextMenu={onContextMenu}
-      onKeyDown={handleKeyDown}
     >
       <span className="reflog-selector">{entry.selector}</span>
       <span className="commit-subject reflog-subject">
@@ -435,7 +429,7 @@ function ReflogRow({
       <span className="commit-author">{entry.author}</span>
       <span className="commit-date">{formatDate(entry.date)}</span>
       <span className="commit-hash">{entry.shortHash}</span>
-    </div>
+    </button>
   );
 }
 
@@ -463,6 +457,7 @@ function ReflogContextMenu({
     <div
       className="branch-context-menu"
       role="menu"
+      tabIndex={-1}
       style={menuStyle}
       onClick={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
@@ -518,21 +513,12 @@ function CommitRow({
 }) {
   const { commit } = row;
 
-  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      onClick();
-    }
-  }
-
   return (
-    <div
-      role="button"
-      tabIndex={0}
+    <button
+      type="button"
       title={`${commit.subject} (${commit.shortHash})`}
       className={active ? "commit-row active" : "commit-row"}
       onClick={onClick}
-      onKeyDown={handleKeyDown}
     >
       <span className="commit-graph-cell">
         <CommitGraph row={row} />
@@ -543,7 +529,7 @@ function CommitRow({
       <span className="commit-author">{commit.author}</span>
       <span className="commit-date">{formatDate(commit.date)}</span>
       <span className="commit-hash">{commit.shortHash}</span>
-    </div>
+    </button>
   );
 }
 

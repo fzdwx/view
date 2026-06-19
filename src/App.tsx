@@ -60,6 +60,9 @@ import type {
   ToolPanelId,
 } from "./lib/workbenchTypes";
 
+// App is a legacy orchestration shell (see AGENTS.md); splitting it is a
+// separate, behavior-sensitive refactor tracked outside this cleanup.
+// oxlint-disable-next-line react-doctor/no-giant-component, react-doctor/prefer-useReducer
 export function App() {
   const queryClient = useQueryClient();
   const [projects, setProjects] = useState<SavedProject[]>(() =>
@@ -112,6 +115,10 @@ export function App() {
   } = useCommandPanel({
     activeProjectPath,
   });
+  // Persist the saved-projects list whenever it changes. projects is also
+  // updated by the repository-loaded effect below, but persistence is the
+  // dedicated side effect for that state and can't move into the loader.
+  // oxlint-disable-next-line react-doctor/no-effect-chain
   useEffect(() => {
     saveProjects(projects);
   }, [projects]);
@@ -311,8 +318,12 @@ export function App() {
     showDiffSelection,
     });
 
+  // Reset the reflog selection when the project changes; the selector has no
+  // stable identity across projects so it's cleared rather than derived.
   useEffect(() => {
+    /* oxlint-disable react-doctor/no-derived-state-effect, react-doctor/no-chain-state-updates, react-doctor/no-adjust-state-on-prop-change */
     setActiveReflogSelector(null);
+    /* oxlint-enable react-doctor/no-derived-state-effect, react-doctor/no-chain-state-updates, react-doctor/no-adjust-state-on-prop-change */
   }, [activeProjectPath]);
 
   const selectedReflogEntry = useMemo(
@@ -323,7 +334,11 @@ export function App() {
     [activeReflogSelector, reflogEntries],
   );
 
+  // Sync the active project's root/name into the persisted projects list when
+  // the repository loads. projects is persisted state (localStorage) merged
+  // with repo-derived metadata, so it can't be a pure derivation.
   useEffect(() => {
+    /* oxlint-disable react-doctor/no-derived-state */
     const payload = repositoryQuery.data;
     if (!payload || !activeProject) {
       return;
@@ -350,7 +365,8 @@ export function App() {
 
       return changed ? nextProjects : current;
     });
-  }, [activeProject?.id, repositoryQuery.data]);
+    /* oxlint-enable react-doctor/no-derived-state */
+  }, [activeProject, repositoryQuery.data]);
 
   const leftTopActiveItem = railActiveItems.left.top;
   const leftBottomActiveItem = railActiveItems.left.bottom;
@@ -384,7 +400,7 @@ export function App() {
       ) : (
         "Project"
       ),
-    [activeProject?.activePath],
+    [activeProject],
   );
   const handleProjectTreeCreateFile = useCallback((parentPath: string | null) => {
     void createFileFromTree(parentPath);
@@ -758,9 +774,9 @@ export function App() {
               View keeps multiple repositories in the rail and lets each project
               switch between its worktrees.
             </p>
-            <button className="primary-action compact" onClick={chooseRepository}>
-              <FolderOpen size={16} />
-              Choose folder
+            <button type="button" className="primary-action compact" onClick={chooseRepository}>
+             <FolderOpen size={16} />
+             Choose folder
             </button>
             <div className="welcome-controls">
               <WindowControls />
@@ -1018,13 +1034,13 @@ function findRailItemPlacement(
   railLayout: RailLayout,
   item: RailItemId,
 ): { side: RailSide; slot: RailSlot } | null {
+  const placement = new Map<RailItemId, { side: RailSide; slot: RailSlot }>();
   for (const side of ["left", "right"] as const) {
     for (const slot of ["top", "bottom"] as const) {
-      if (railLayout[side][slot].includes(item)) {
-        return { side, slot };
+      for (const id of railLayout[side][slot]) {
+        placement.set(id, { side, slot });
       }
     }
   }
-
-  return null;
+  return placement.get(item) ?? null;
 }

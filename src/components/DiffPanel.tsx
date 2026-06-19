@@ -142,14 +142,13 @@ function ImageDiffRow({
   const isDeleted = file.type === "deleted";
   const oldRef = commit ? `${commit}^` : "HEAD";
 
-  const newBlobQuery = useQuery({
+  const { isLoading: newBlobLoading, isError: newBlobError, data: newBlob } = useQuery({
     queryKey: ["file-blob", projectPath, file.name, commit],
     queryFn: () => getFileBlob(projectPath, file.name, commit),
     enabled: !isDeleted,
     retry: false,
   });
-
-  const oldBlobQuery = useQuery({
+  const { isLoading: oldBlobLoading, isError: oldBlobError, data: oldBlob } = useQuery({
     queryKey: ["file-blob", projectPath, file.prevName ?? file.name, oldRef],
     queryFn: () =>
       getFileBlob(projectPath, file.prevName ?? file.name, oldRef),
@@ -171,24 +170,28 @@ function ImageDiffRow({
         }
       >
         {!isNew ? (
-          <ImageDiffSide
-            label="Before"
-            query={oldBlobQuery}
+         <ImageDiffSide
+           label="Before"
+            isLoading={oldBlobLoading}
+            isError={oldBlobError}
+            data={oldBlob}
             skipped={isNew}
             skippedLabel="Added"
-          />
-        ) : null}
-        {!isNew && !isDeleted ? (
-          <div className="image-diff-divider" />
-        ) : null}
-        {!isDeleted ? (
-          <ImageDiffSide
-            label="After"
-            query={newBlobQuery}
+         />
+       ) : null}
+       {!isNew && !isDeleted ? (
+         <div className="image-diff-divider" />
+       ) : null}
+       {!isDeleted ? (
+         <ImageDiffSide
+           label="After"
+            isLoading={newBlobLoading}
+            isError={newBlobError}
+            data={newBlob}
             skipped={isDeleted}
             skippedLabel="Deleted"
-          />
-        ) : null}
+         />
+       ) : null}
       </div>
     </div>
   );
@@ -196,12 +199,16 @@ function ImageDiffRow({
 
 function ImageDiffSide({
   label,
-  query,
+  isLoading,
+  isError,
+  data,
   skipped,
   skippedLabel,
 }: {
   label: string;
-  query: ReturnType<typeof useQuery<FileContent>>;
+  isLoading: boolean;
+  isError: boolean;
+  data: FileContent | undefined;
   skipped: boolean;
   skippedLabel: string;
 }) {
@@ -211,16 +218,16 @@ function ImageDiffSide({
       <div className="image-diff-side-body">
         {skipped ? (
           <div className="image-diff-placeholder">{skippedLabel}</div>
-        ) : query.isLoading ? (
+        ) : isLoading ? (
           <Loader2 className="spin" size={20} />
-        ) : query.isError ? (
+        ) : isError ? (
           <div className="image-diff-placeholder">Failed to load</div>
-        ) : query.data?.tooLarge ? (
+        ) : data?.tooLarge ? (
           <div className="image-diff-placeholder">Image too large</div>
-        ) : query.data?.mediaDataUrl ? (
+        ) : data?.mediaDataUrl ? (
           <img
             className="image-diff-image"
-            src={query.data.mediaDataUrl}
+            src={data.mediaDataUrl}
             alt={label}
           />
         ) : (

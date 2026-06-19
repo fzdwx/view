@@ -17,18 +17,21 @@ export function ProjectSwitcherPopover({
   onSelectProject(project: SavedProject): void;
 }) {
   return (
+    // Anchor-positioned popover, not a centered modal: a native <dialog> opened with
+    // showModal() would add a backdrop and centering that breaks popover placement.
+    // oxlint-disable-next-line react-doctor/prefer-html-dialog, react-doctor/prefer-tag-over-role
     <div className="project-switcher-popover" role="dialog" aria-label="Switch project">
       <div className="project-switcher-head">
         <div>
           <div className="project-switcher-title">Projects</div>
           <div className="project-switcher-count">{projects.length} saved</div>
         </div>
-        <button className="icon-button" aria-label="Close projects" onClick={onClose}>
-          <X size={14} />
+        <button type="button" className="icon-button" aria-label="Close projects" onClick={onClose}>
+         <X size={14} />
         </button>
       </div>
-      <button className="primary-action rail-action" onClick={onChooseRepository}>
-        <Plus size={16} />
+      <button type="button" className="primary-action rail-action" onClick={onChooseRepository}>
+       <Plus size={16} />
         Open repository
       </button>
       <div className="project-list project-switcher-list">
@@ -64,12 +67,12 @@ function ProjectItem({
 }) {
   return (
     <div className={active ? "project-item active" : "project-item"}>
-      <button className="project-button" onClick={onSelect}>
-        <span className="project-name">{project.name}</span>
+      <button type="button" className="project-button" onClick={onSelect}>
+       <span className="project-name">{project.name}</span>
         <span className="project-path">{project.activePath}</span>
       </button>
-      <button className="project-remove" onClick={onRemove} aria-label="Remove">
-        <X size={14} />
+      <button type="button" className="project-remove" onClick={onRemove} aria-label="Remove">
+       <X size={14} />
       </button>
     </div>
   );

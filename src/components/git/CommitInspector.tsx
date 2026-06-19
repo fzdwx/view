@@ -41,9 +41,13 @@ export function CommitInspector({
   onResizeDetails(delta: number): void;
   onSelectPath(path: string): void;
 }) {
-  const [draftDetailHeight, setDraftDetailHeight] = useState<number | null>(null);
+  const [draftDetail, setDraftDetail] = useState<{
+    forDetail: number;
+    value: number;
+  } | null>(null);
   const isHorizontal = orientation === "horizontal";
-  const effectiveDetailHeight = draftDetailHeight ?? detailHeight;
+  const effectiveDetailHeight =
+    draftDetail?.forDetail === detailHeight ? draftDetail.value : detailHeight;
   const panelStyle = useMemo(
     () =>
       isHorizontal
@@ -53,13 +57,14 @@ export function CommitInspector({
   );
   const handleResizePreview = useCallback(
     (delta: number) => {
-      setDraftDetailHeight((current) =>
-        clamp(
-          (current ?? detailHeight) + delta,
-          minCommitDetailHeight,
-          maxCommitDetailHeight,
-        ),
-      );
+      setDraftDetail((current) => {
+        const base =
+          current?.forDetail === detailHeight ? current.value : detailHeight;
+        return {
+          forDetail: detailHeight,
+          value: clamp(base + delta, minCommitDetailHeight, maxCommitDetailHeight),
+        };
+      });
     },
     [detailHeight],
   );
@@ -70,14 +75,10 @@ export function CommitInspector({
       }
 
       onResizeDetails(totalDelta);
-      setDraftDetailHeight(null);
+      setDraftDetail(null);
     },
     [onResizeDetails],
   );
-
-  useEffect(() => {
-    setDraftDetailHeight(null);
-  }, [detailHeight]);
 
   return (
     <aside

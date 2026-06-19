@@ -18,7 +18,7 @@ const previewStateQueryRoots = [
   "file-diff",
 ] as const;
 
-export async function refreshProjectFileStateQueries(
+async function refreshProjectFileStateQueries(
   queryClient: QueryClient,
   projectPath: string,
 ): Promise<void> {

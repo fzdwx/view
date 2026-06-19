@@ -6,15 +6,18 @@ const COMMIT_GRAPH_MID_Y = 14;
 const COMMIT_GRAPH_LANE_GAP = 13;
 const COMMIT_GRAPH_LEFT_INSET = 10.5;
 
+const laneX = (lane: number) =>
+  lane * COMMIT_GRAPH_LANE_GAP + COMMIT_GRAPH_LEFT_INSET;
+
+const graphColor = (colorKey: string) =>
+  ({
+    "--commit-graph-color": commitGraphColor(colorKey),
+  }) as CSSProperties;
+
 export function CommitGraph({ row }: { row: CommitGraphRow }) {
   const width = getCommitGraphWidth(row.laneCount);
   const height = COMMIT_GRAPH_ROW_HEIGHT;
-  const laneX = (lane: number) =>
-    lane * COMMIT_GRAPH_LANE_GAP + COMMIT_GRAPH_LEFT_INSET;
   const dotX = laneX(row.lane);
-  const graphColor = (colorKey: string) => ({
-    "--commit-graph-color": commitGraphColor(colorKey),
-  } as CSSProperties);
   const dotRadius = row.commit.parents.length > 1 ? 3.12 : 2.9;
   const dotGap = dotRadius + 0.08;
   const parentCurves = row.parentLanes.filter(
@@ -116,6 +119,9 @@ export function CommitGraph({ row }: { row: CommitGraphRow }) {
   );
 }
 
+// Pure helper co-located with the component for its callers; Fast Refresh is
+// not a concern for this non-component export.
+// oxlint-disable-next-line react-doctor/only-export-components
 export function getCommitGraphWidth(laneCount: number) {
   return Math.ceil(
     Math.max(
