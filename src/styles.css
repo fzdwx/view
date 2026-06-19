@@ -4096,19 +4096,19 @@ body.is-resizing-y * {
 .editor-active-blame {
   position: absolute;
   right: 18px;
-  z-index: 3;
+  z-index: 5;
   display: flex;
-  max-width: min(40ch, calc(100% - 132px));
+  max-width: min(60ch, calc(100% - 92px));
   align-items: center;
   overflow: hidden;
   padding: 0 0 0 28px;
   background: linear-gradient(
     90deg,
     transparent 0%,
-    color-mix(in oklch, var(--surface-0) 18%, transparent) 14%,
-    var(--surface-0) 34%
+    color-mix(in oklch, var(--surface-0) 34%, transparent) 14%,
+    color-mix(in oklch, var(--surface-0) 96%, var(--surface-1)) 34%
   );
-  color: color-mix(in oklch, var(--ink) 64%, var(--surface-0));
+  color: color-mix(in oklch, var(--ink) 78%, var(--surface-0));
   font-family: var(--mono);
   font-size: max(11px, calc(var(--editor-font-size, 12px) - 1px));
   font-variant-numeric: tabular-nums;

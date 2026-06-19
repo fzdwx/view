@@ -161,6 +161,10 @@ export function CodeMirrorFilePreview({
     () => new Map(blameLines.map((line) => [line.lineNumber, line])),
     [blameLines],
   );
+  const blameLineNumbers = useMemo(
+    () => blameLines.map((line) => line.lineNumber),
+    [blameLines],
+  );
   const showBlameAnnotations =
     blameLoading || blameLines.length > 0 || Boolean(blameError);
   const showGitGutter = visibleGitMarkers.length > 0;
@@ -187,7 +191,17 @@ export function CodeMirrorFilePreview({
       };
     }
 
-    const blameLine = blameLineByLine.get(activeEditorLineNumber);
+    let blameLine = blameLineByLine.get(activeEditorLineNumber);
+    if (!blameLine && blameLineNumbers.length > 0) {
+      for (let index = blameLineNumbers.length - 1; index >= 0; index -= 1) {
+        const candidateLineNumber = blameLineNumbers[index];
+        if (candidateLineNumber <= activeEditorLineNumber) {
+          blameLine = blameLineByLine.get(candidateLineNumber);
+          break;
+        }
+      }
+      blameLine ??= blameLineByLine.get(blameLineNumbers[0]);
+    }
     if (!blameLine) {
       return null;
     }
@@ -202,6 +216,7 @@ export function CodeMirrorFilePreview({
     activeEditorLineNumber,
     blameError,
     blameLineByLine,
+    blameLineNumbers,
     blameLines.length,
     blameLoading,
     showBlameAnnotations,
@@ -216,19 +231,30 @@ export function CodeMirrorFilePreview({
       editorView.state.doc.lines,
     );
     const line = editorView.state.doc.line(lineNumber);
-    const coords = editorView.coordsAtPos(line.from);
-    if (!coords) {
-      return null;
+    const startCoords = editorView.coordsAtPos(line.from);
+    const endCoords = editorView.coordsAtPos(line.to) ?? startCoords;
+    if (!startCoords || !endCoords) {
+      return {
+        top: 8,
+        height: editorLineHeight,
+        left: 132,
+      };
     }
 
     const stageRect = stageRef.current.getBoundingClientRect();
+    const left = clamp(
+      endCoords.right - stageRect.left + 28,
+      132,
+      Math.max(132, editorViewportWidth - 238),
+    );
     return {
       top: clamp(
-        coords.top - stageRect.top,
+        startCoords.top - stageRect.top,
         0,
         Math.max(0, editorViewportHeight - editorLineHeight),
       ),
       height: editorLineHeight,
+      left,
     };
   }, [
     activeBlameRow,
@@ -1031,6 +1057,7 @@ export function CodeMirrorFilePreview({
               {
                 top: `${activeBlameOverlay.top}px`,
                 height: `${activeBlameOverlay.height}px`,
+                left: `${activeBlameOverlay.left}px`,
               } as CSSProperties
             }
             title={activeBlameRow.title}
@@ -1092,13 +1119,13 @@ function formatBlameLineText(line: FileBlameLine): string {
   }
 
   const shortHash = line.shortHash ?? "unknown";
+  const author = line.author.trim() || "Unknown author";
   const summary = line.summary.trim();
   if (summary.length > 0) {
-    return `${shortHash} ${summary}`;
+    return `${shortHash} ${author}: ${summary}`;
   }
 
-  const author = line.author.trim();
-  return author.length > 0 ? `${shortHash} ${author}` : shortHash;
+  return `${shortHash} ${author}`;
 }
 
 function formatBlameLineTitle(line: FileBlameLine): string {
