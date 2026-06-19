@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import type { FileDiffMetadata } from "@pierre/diffs";
@@ -37,7 +38,7 @@ function isBinaryFile(file: FileDiffMetadata): boolean {
   return file.hunks.length === 0 && file.splitLineCount === 0;
 }
 
-export function DiffPanel({
+export const DiffPanel = memo(function DiffPanel({
   error,
   files,
   title,
@@ -127,7 +128,9 @@ export function DiffPanel({
       </Virtualizer>
     </section>
   );
-}
+});
+
+DiffPanel.displayName = "DiffPanel";
 
 function ImageDiffRow({
   file,

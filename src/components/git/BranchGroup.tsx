@@ -54,10 +54,11 @@ export function BranchGroup({
 
   return (
     <div className="branch-group">
-      <button
-        className="branch-group-title"
+     <button
+       className="branch-group-title"
+        type="button"
         aria-expanded={!collapsed || filtering}
-        onClick={() => setCollapsed((current) => !current)}
+       onClick={() => setCollapsed((current) => !current)}
       >
         {collapsed && !filtering ? (
           <ChevronRight size={14} />
@@ -109,10 +110,11 @@ function RefTreeNode({
 }) {
   if (node.leaf) {
     return (
-      <button
-        className={
-          node.leaf.refName === activeRef ? "branch-row active" : "branch-row"
-        }
+     <button
+       className={
+         node.leaf.refName === activeRef ? "branch-row active" : "branch-row"
+       }
+        type="button"
         style={{ "--branch-depth": depth } as CSSProperties}
         onClick={() => node.leaf && onSelect(node.leaf.refName)}
         onContextMenu={(event) => {
@@ -132,8 +134,9 @@ function RefTreeNode({
 
   return (
     <div className="branch-folder">
-      <button
-        className="branch-folder-row"
+     <button
+       className="branch-folder-row"
+        type="button"
         style={{ "--branch-depth": depth } as CSSProperties}
         aria-expanded={!collapsed}
         onClick={() => onToggleFolder(node.key)}

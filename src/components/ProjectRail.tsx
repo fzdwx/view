@@ -49,6 +49,7 @@ export function ProjectRail({
     <aside className="project-rail" aria-label="Projects">
       <div className="project-switcher-anchor">
         <button
+          type="button"
           className={
             projectSwitcherOpen
               ? "activity-button rail-project-button active"
@@ -96,6 +97,7 @@ export function ProjectRail({
         onDropRailItem={onDropRailItem}
       />
       <button
+        type="button"
         className="activity-button rail-project-button"
         aria-label="Settings"
         title="Settings"

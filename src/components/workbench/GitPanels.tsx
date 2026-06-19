@@ -1,4 +1,11 @@
-import { memo, type CSSProperties, type ReactNode } from "react";
+import {
+  memo,
+  type ReactNode,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+} from "react";
 import type {
   BranchInfo,
   CommitInfo,
@@ -11,6 +18,7 @@ import {
   buildGitPanelGridStyle,
   isGitPanelId,
 } from "../../lib/workbenchLayout";
+import { clamp } from "../../lib/numeric";
 import type { GitPanelId, PanelSizes, ToolDock } from "../../lib/workbenchTypes";
 import { LoadingRows } from "../LoadingRows";
 import type { TreeGitFileActions } from "../TreeContextMenu";
@@ -91,15 +99,101 @@ export const GitPanels = memo(function GitPanels({
   onReattachPanel,
   resizePanel,
 }: GitPanelsProps) {
-  const gitLogStyle: CSSProperties = buildGitPanelGridStyle(
-    toolDock,
-    dockedPanelOrder,
-    branchSize,
-    detailsSize,
+  const branchMin = toolDock === "bottom" ? 180 : 120;
+  const detailsMin = toolDock === "bottom" ? 200 : 120;
+  const panelRef = useRef<HTMLElement | null>(null);
+  const panelSizesRef = useRef({
+    branch: branchSize,
+    details: detailsSize,
+  });
+  const previewSizesRef = useRef<Partial<Record<GitPanelSizeVarKey, number>>>({});
+  panelSizesRef.current.branch = branchSize;
+  panelSizesRef.current.details = detailsSize;
+
+  useLayoutEffect(() => {
+    syncGitPanelSizeVars(panelRef.current, branchSize, detailsSize);
+  }, [branchSize, detailsSize]);
+
+  const handleResizeBranchPreview = useCallback(
+    (delta: number) => {
+      const currentSize =
+        previewSizesRef.current.branch ?? panelSizesRef.current.branch;
+      const nextSize = clamp(currentSize + delta, branchMin, 460);
+      if (nextSize === currentSize) {
+        return;
+      }
+
+      previewSizesRef.current.branch = nextSize;
+      applyGitPanelSizeVar(panelRef.current, "branch", nextSize);
+    },
+    [branchMin],
+  );
+  const handleResizeBranchCommit = useCallback(
+    (totalDelta: number) => {
+      const previewSize = previewSizesRef.current.branch;
+      delete previewSizesRef.current.branch;
+
+      const baseSize = panelSizesRef.current.branch;
+      const nextSize =
+        typeof previewSize === "number"
+          ? previewSize
+          : clamp(baseSize + totalDelta, branchMin, 460);
+      const delta = nextSize - baseSize;
+
+      applyGitPanelSizeVar(panelRef.current, "branch", nextSize);
+      if (delta !== 0) {
+        resizePanel("branch", delta, branchMin, 460);
+      }
+    },
+    [branchMin, resizePanel],
+  );
+  const handleResizeDetailsPreview = useCallback(
+    (delta: number) => {
+      const currentSize =
+        previewSizesRef.current.details ?? panelSizesRef.current.details;
+      const nextSize = clamp(currentSize - delta, detailsMin, 460);
+      if (nextSize === currentSize) {
+        return;
+      }
+
+      previewSizesRef.current.details = nextSize;
+      applyGitPanelSizeVar(panelRef.current, "details", nextSize);
+    },
+    [detailsMin],
+  );
+  const handleResizeDetailsCommit = useCallback(
+    (totalDelta: number) => {
+      const previewSize = previewSizesRef.current.details;
+      delete previewSizesRef.current.details;
+
+      const baseSize = panelSizesRef.current.details;
+      const nextSize =
+        typeof previewSize === "number"
+          ? previewSize
+          : clamp(baseSize - totalDelta, detailsMin, 460);
+      const delta = nextSize - baseSize;
+
+      applyGitPanelSizeVar(panelRef.current, "details", nextSize);
+      if (delta !== 0) {
+        resizePanel("details", delta, detailsMin, 460);
+      }
+    },
+    [detailsMin, resizePanel],
+  );
+
+  const gitLogStyle = useMemo(
+    () =>
+      buildGitPanelGridStyle(
+        toolDock,
+        dockedPanelOrder,
+        branchSize,
+        detailsSize,
+      ),
+    [branchSize, detailsSize, dockedPanelOrder, toolDock],
   );
 
   return (
-    <section className="git-log-panel" style={gitLogStyle}>
+    <section className="git-log-panel" ref={panelRef} style={gitLogStyle}>
       {dockedPanelOrder.length === 0 ? (
         <EmptyGitPanelDropTarget
           draggedGitPanel={draggedGitPanel}
@@ -112,12 +206,10 @@ export const GitPanels = memo(function GitPanels({
           index={index}
           panelCount={dockedPanelOrder.length}
           dock={toolDock}
-          onResizeFirst={(delta) =>
-            resizePanel("branch", delta, toolDock === "bottom" ? 180 : 120, 460)
-          }
-          onResizeSecond={(delta) =>
-            resizePanel("details", -delta, toolDock === "bottom" ? 200 : 120, 460)
-          }
+          onResizeFirst={handleResizeBranchPreview}
+          onResizeFirstEnd={handleResizeBranchCommit}
+          onResizeSecond={handleResizeDetailsPreview}
+          onResizeSecondEnd={handleResizeDetailsCommit}
         >
           <GitPanelSlot
             panelId={panelId}
@@ -139,6 +231,42 @@ export const GitPanels = memo(function GitPanels({
 });
 
 GitPanels.displayName = "GitPanels";
+
+type GitPanelSizeVarKey = "branch" | "details";
+
+function syncGitPanelSizeVars(
+  element: HTMLElement | null,
+  branchSize: number,
+  detailsSize: number,
+): void {
+  if (!element) {
+    return;
+  }
+
+  applyGitPanelSizeVar(element, "branch", branchSize);
+  applyGitPanelSizeVar(element, "details", detailsSize);
+}
+
+function applyGitPanelSizeVar(
+  element: HTMLElement | null,
+  key: GitPanelSizeVarKey,
+  value: number,
+): void {
+  if (!element) {
+    return;
+  }
+
+  element.style.setProperty(gitPanelSizeVarName(key), `${value}px`);
+}
+
+function gitPanelSizeVarName(key: GitPanelSizeVarKey): string {
+  switch (key) {
+    case "branch":
+      return "--git-panel-first-size";
+    case "details":
+      return "--git-panel-last-size";
+  }
+}
 
 export const GitPanelBody = memo(function GitPanelBody({
   activeCommit,

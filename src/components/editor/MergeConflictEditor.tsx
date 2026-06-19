@@ -38,9 +38,9 @@ export function GitConflictEditor({
           <small>{file.path}</small>
         </div>
         <div className="editor-actions">
-          <button className="primary-action editor-save" disabled={saving} onClick={onSave}>
-            {saving ? <Loader2 className="spin" size={14} /> : <Save size={14} />}
-            Save resolved
+          <button type="button" className="primary-action editor-save" disabled={saving} onClick={onSave}>
+           {saving ? <Loader2 className="spin" size={14} /> : <Save size={14} />}
+           Save resolved
           </button>
         </div>
       </div>
@@ -87,23 +87,25 @@ export function DiskConflictEditor({
         </div>
         <div className="editor-actions">
           <button
+            type="button"
             className="ghost-button"
             onClick={() => onSetConflictDraftContent(conflict.currentContent)}
           >
             Use disk
           </button>
           <button
+            type="button"
             className="ghost-button"
             onClick={() => onSetConflictDraftContent(conflict.proposedContent)}
           >
             Use mine
           </button>
-          <button className="ghost-button" onClick={onDiscardConflict}>
-            Reload disk
+          <button type="button" className="ghost-button" onClick={onDiscardConflict}>
+           Reload disk
           </button>
-          <button className="primary-action editor-save" disabled={saving} onClick={onSave}>
-            {saving ? <Loader2 className="spin" size={14} /> : <Save size={14} />}
-            Save merge
+          <button type="button" className="primary-action editor-save" disabled={saving} onClick={onSave}>
+           {saving ? <Loader2 className="spin" size={14} /> : <Save size={14} />}
+           Save merge
           </button>
         </div>
       </div>

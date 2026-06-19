@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import { CommitInspector } from "../git/CommitInspector";
 import { TerminalPanel } from "../TerminalPanel";
 import {
@@ -40,7 +40,7 @@ export interface WorkbenchRailSlotStackProps {
   ) => void;
 }
 
-export function WorkbenchRailSlotStack({
+export const WorkbenchRailSlotStack = memo(function WorkbenchRailSlotStack({
   activeItem,
   activeProjectPath,
   branchSize,
@@ -157,4 +157,6 @@ export function WorkbenchRailSlotStack({
       </div>
     </section>
   );
-}
+});
+
+WorkbenchRailSlotStack.displayName = "WorkbenchRailSlotStack";

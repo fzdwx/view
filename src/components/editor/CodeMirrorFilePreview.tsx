@@ -1,6 +1,7 @@
 import {
   type CSSProperties,
   type KeyboardEvent,
+  memo,
   useCallback,
   useEffect,
   useEffectEvent,
@@ -56,7 +57,7 @@ import { CodeMirrorView } from "./CodeMirrorView";
 // CodeMirrorFilePreview bundles an editor + find/replace + git markers;
 // splitting it is a separate, behavior-sensitive refactor tracked elsewhere.
 /* oxlint-disable react-doctor/no-giant-component, react-doctor/prefer-useReducer */
-export function CodeMirrorFilePreview({
+export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
   blameError,
   blameLines,
   blameLoading,
@@ -1175,7 +1176,9 @@ export function CodeMirrorFilePreview({
       {saveError ? <div className="editor-error">{saveError}</div> : null}
     </section>
   );
-}
+});
+
+CodeMirrorFilePreview.displayName = "CodeMirrorFilePreview";
 /* oxlint-enable react-doctor/no-giant-component, react-doctor/prefer-useReducer */
 
 interface VisibleBlameRow {

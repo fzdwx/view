@@ -113,12 +113,13 @@ export function BranchTree({
 
       <div className="branch-scroll">
         {showCurrentBranch ? (
-          <button
-            className={
-              currentBranch.refName === activeRef
-                ? "branch-head-row active"
-                : "branch-head-row"
-            }
+         <button
+           className={
+             currentBranch.refName === activeRef
+               ? "branch-head-row active"
+               : "branch-head-row"
+           }
+            type="button"
             onClick={() => onSelect(currentBranch.refName)}
             onContextMenu={(event) => openBranchMenu(event, currentBranch)}
           >

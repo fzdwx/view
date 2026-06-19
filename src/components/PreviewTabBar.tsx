@@ -172,6 +172,7 @@ export function PreviewTabBar({
                 onContextMenu={(e) => handleContextMenu(e, tab)}
               >
                 <button
+                  type="button"
                   className="preview-tab-select"
                   role="tab"
                   aria-selected={isActive}
@@ -201,6 +202,7 @@ export function PreviewTabBar({
                   ) : null}
                 </button>
                 <button
+                  type="button"
                   className={
                     isDirty
                       ? "preview-tab-close preview-tab-close-dirty"

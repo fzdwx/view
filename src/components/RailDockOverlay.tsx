@@ -10,17 +10,17 @@ export interface RailDockOverlayProps {
   ) => void;
 }
 
+function handleDragOver(event: DragEvent<HTMLDivElement>) {
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "move";
+}
+
 export function RailDockOverlay({
   draggedRailItem,
   onDropRailItem,
 }: RailDockOverlayProps) {
   if (!draggedRailItem) {
     return null;
-  }
-
-  function handleDragOver(event: DragEvent<HTMLDivElement>) {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
   }
 
   function makeDropHandler(side: "left" | "right", slot: RailSlot) {

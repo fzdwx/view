@@ -22,8 +22,9 @@ export function TagGroup({
         <span>Tags</span>
       </div>
       {tags.map((tag) => (
-        <button
-          key={tag.refName}
+       <button
+         key={tag.refName}
+          type="button"
           className={tag.refName === activeRef ? "branch-row active" : "branch-row"}
           style={{ "--branch-depth": 0 } as CSSProperties}
           onClick={() => onSelect(tag.refName)}

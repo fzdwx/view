@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type CSSProperties,
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   FolderOpen,
@@ -20,7 +29,10 @@ import { PreviewDebugPage } from "./components/editor/PreviewDebugPage";
 import {
   type GitPanelDataProps,
 } from "./components/workbench/GitPanels";
-import { ProjectFileTreePanel } from "./components/workbench/ProjectFileTreePanel";
+import {
+  ProjectFileTreePanel,
+  type ProjectFileTreePanelProps,
+} from "./components/workbench/ProjectFileTreePanel";
 import { WorkbenchRailSlotStack } from "./components/workbench/WorkbenchRailSlotStack";
 import { useAppKeyboardShortcuts } from "./hooks/useAppKeyboardShortcuts";
 import { useAppSettingsState } from "./hooks/useAppSettingsState";
@@ -47,6 +59,7 @@ import {
   projectNameFromPath,
   saveProjects,
 } from "./lib/projects";
+import { clamp } from "./lib/numeric";
 import { projectRootFromPayload } from "./lib/repositoryPayload";
 import {
   buildRailBottomPanelsStyle,
@@ -57,8 +70,24 @@ import type {
   RailLayout,
   RailSlot,
   RailSide,
+  PanelSizes,
   ToolPanelId,
 } from "./lib/workbenchTypes";
+
+type RailPanelSizeKey = "leftTop" | "rightTop" | "bottom" | "bottomLeft";
+
+type RailGridStyle = CSSProperties & {
+  readonly "--rail-left-top-width": string;
+  readonly "--rail-right-top-width": string;
+  readonly "--rail-bottom-height": string;
+  readonly "--rail-bottom-left-width": string;
+};
+
+const MemoProjectFileTreePanel = memo(function MemoProjectFileTreePanel(
+  props: ProjectFileTreePanelProps,
+) {
+  return <ProjectFileTreePanel {...props} />;
+});
 
 // App is a legacy orchestration shell (see AGENTS.md); splitting it is a
 // separate, behavior-sensitive refactor tracked outside this cleanup.
@@ -97,6 +126,12 @@ export function App() {
     startGitPanelDrag,
     startRailItemDrag,
   } = useWorkbenchDock();
+  const contentGridRef = useRef<HTMLDivElement | null>(null);
+  const panelSizesRef = useRef(panelSizes);
+  const railPanelPreviewRef = useRef<Partial<Record<RailPanelSizeKey, number>>>(
+    {},
+  );
+  panelSizesRef.current = panelSizes;
 
   const activeProject = projects.find(
     (project: SavedProject) => project.id === activeProjectId,
@@ -377,19 +412,32 @@ export function App() {
   const hasRightTopPanel = rightTopActiveItem !== null;
   const hasRightBottomPanel = rightBottomActiveItem !== null;
   const hasBottomPanels = hasLeftBottomPanel || hasRightBottomPanel;
-  const contentGridStyle = buildRailWorkbenchGridStyle(
-    hasLeftTopPanel,
-    hasRightTopPanel,
-    hasBottomPanels,
-    panelSizes.leftTop,
-    panelSizes.rightTop,
-    panelSizes.bottom,
+  const contentGridStyle = useMemo<RailGridStyle>(
+    () => ({
+      ...buildRailWorkbenchGridStyle(
+        hasLeftTopPanel,
+        hasRightTopPanel,
+        hasBottomPanels,
+      ),
+      "--rail-left-top-width": `${panelSizes.leftTop}px`,
+      "--rail-right-top-width": `${panelSizes.rightTop}px`,
+      "--rail-bottom-height": `${panelSizes.bottom}px`,
+      "--rail-bottom-left-width": `${panelSizes.bottomLeft}px`,
+    }),
+    [
+      hasBottomPanels,
+      hasLeftTopPanel,
+      hasRightTopPanel,
+      panelSizes.bottom,
+      panelSizes.bottomLeft,
+      panelSizes.leftTop,
+      panelSizes.rightTop,
+    ],
   );
   const bottomPanelsStyle = hasBottomPanels
     ? buildRailBottomPanelsStyle(
         hasLeftBottomPanel,
         hasRightBottomPanel,
-        panelSizes.bottomLeft,
       )
     : undefined;
   const dockedGitPanelOrder = gitPanelOrder;
@@ -665,7 +713,7 @@ export function App() {
   );
 
   const projectTreeContent = (
-    <ProjectFileTreePanel
+    <MemoProjectFileTreePanel
       files={projectFilesQuery.data}
       selectedPath={selectedProjectPath}
       title={projectTreeTitle}
@@ -675,6 +723,94 @@ export function App() {
       onRenameFile={handleProjectTreeRenameFile}
       onSelectPath={handleProjectTreeSelectPath}
     />
+  );
+
+  useLayoutEffect(() => {
+    syncRailPanelSizeVars(contentGridRef.current, panelSizes);
+  }, [panelSizes]);
+
+  const previewRailPanelResize = useCallback(
+    (key: RailPanelSizeKey, delta: number, min: number, max: number) => {
+      const currentSize =
+        railPanelPreviewRef.current[key] ?? panelSizesRef.current[key];
+      const nextSize = clamp(currentSize + delta, min, max);
+      if (nextSize === currentSize) {
+        return;
+      }
+
+      railPanelPreviewRef.current[key] = nextSize;
+      applyRailPanelSizeVar(contentGridRef.current, key, nextSize);
+    },
+    [],
+  );
+
+  const commitRailPanelResize = useCallback(
+    (key: RailPanelSizeKey, totalDelta: number, min: number, max: number) => {
+      const previewSize = railPanelPreviewRef.current[key];
+      delete railPanelPreviewRef.current[key];
+
+      const baseSize = panelSizesRef.current[key];
+      const nextSize =
+        typeof previewSize === "number"
+          ? previewSize
+          : clamp(baseSize + totalDelta, min, max);
+      const delta = nextSize - baseSize;
+
+      applyRailPanelSizeVar(contentGridRef.current, key, nextSize);
+      if (delta !== 0) {
+        resizePanel(key, delta, min, max);
+      }
+    },
+    [resizePanel],
+  );
+
+  const handleResizeLeftTop = useCallback(
+    (delta: number) => {
+      previewRailPanelResize("leftTop", delta, 220, 560);
+    },
+    [previewRailPanelResize],
+  );
+  const handleResizeLeftTopEnd = useCallback(
+    (delta: number) => {
+      commitRailPanelResize("leftTop", delta, 220, 560);
+    },
+    [commitRailPanelResize],
+  );
+  const handleResizeRightTop = useCallback(
+    (delta: number) => {
+      previewRailPanelResize("rightTop", -delta, 220, 560);
+    },
+    [previewRailPanelResize],
+  );
+  const handleResizeRightTopEnd = useCallback(
+    (delta: number) => {
+      commitRailPanelResize("rightTop", -delta, 220, 560);
+    },
+    [commitRailPanelResize],
+  );
+  const handleResizeBottom = useCallback(
+    (delta: number) => {
+      previewRailPanelResize("bottom", -delta, 180, 560);
+    },
+    [previewRailPanelResize],
+  );
+  const handleResizeBottomEnd = useCallback(
+    (delta: number) => {
+      commitRailPanelResize("bottom", -delta, 180, 560);
+    },
+    [commitRailPanelResize],
+  );
+  const handleResizeBottomLeft = useCallback(
+    (delta: number) => {
+      previewRailPanelResize("bottomLeft", delta, 260, 1400);
+    },
+    [previewRailPanelResize],
+  );
+  const handleResizeBottomLeftEnd = useCallback(
+    (delta: number) => {
+      commitRailPanelResize("bottomLeft", delta, 260, 1400);
+    },
+    [commitRailPanelResize],
   );
 
   const isRailItemActive = useCallback(
@@ -794,6 +930,7 @@ export function App() {
         ) : (
           <div
             className="content-grid"
+            ref={contentGridRef}
             style={contentGridStyle}
           >
             {hasLeftTopPanel ? (
@@ -821,7 +958,8 @@ export function App() {
                   axis="x"
                   className="rail-left-top-splitter"
                   label="Resize left rail slot"
-                  onResize={(delta) => resizePanel("leftTop", delta, 220, 560)}
+                  onResize={handleResizeLeftTop}
+                  onResizeEnd={handleResizeLeftTopEnd}
                 />
               </>
             ) : null}
@@ -861,7 +999,7 @@ export function App() {
                     target={previewTarget}
                     onChangeDraft={updateEditorDraft}
                     onDiscardConflict={discardConflictToDisk}
-                    onSave={() => void saveActiveFile()}
+                    onSave={saveActivePreviewFile}
                     onSetConflictDraftContent={setConflictDraftContent}
                   />
               ) : payload && !selectedChangePath ? (
@@ -900,7 +1038,8 @@ export function App() {
                   axis="x"
                   className="rail-right-top-splitter"
                   label="Resize right rail slot"
-                  onResize={(delta) => resizePanel("rightTop", -delta, 220, 560)}
+                  onResize={handleResizeRightTop}
+                  onResizeEnd={handleResizeRightTopEnd}
                 />
                 <WorkbenchRailSlotStack
                   activeItem={rightTopActiveItem}
@@ -929,7 +1068,8 @@ export function App() {
                   axis="y"
                   className="rail-bottom-splitter"
                   label="Resize bottom rail slot"
-                  onResize={(delta) => resizePanel("bottom", -delta, 180, 560)}
+                  onResize={handleResizeBottom}
+                  onResizeEnd={handleResizeBottomEnd}
                 />
                 <section
                   className="rail-bottom-panels"
@@ -961,9 +1101,8 @@ export function App() {
                       axis="x"
                       className="rail-bottom-inner-splitter"
                       label="Resize bottom rail panels"
-                      onResize={(delta) =>
-                        resizePanel("bottomLeft", delta, 260, 1400)
-                      }
+                      onResize={handleResizeBottomLeft}
+                      onResizeEnd={handleResizeBottomLeftEnd}
                     />
                   ) : null}
                   {hasRightBottomPanel ? (
@@ -1043,4 +1182,43 @@ function findRailItemPlacement(
     }
   }
   return placement.get(item) ?? null;
+}
+
+function syncRailPanelSizeVars(
+  element: HTMLDivElement | null,
+  panelSizes: PanelSizes,
+): void {
+  if (!element) {
+    return;
+  }
+
+  applyRailPanelSizeVar(element, "leftTop", panelSizes.leftTop);
+  applyRailPanelSizeVar(element, "rightTop", panelSizes.rightTop);
+  applyRailPanelSizeVar(element, "bottom", panelSizes.bottom);
+  applyRailPanelSizeVar(element, "bottomLeft", panelSizes.bottomLeft);
+}
+
+function applyRailPanelSizeVar(
+  element: HTMLDivElement | null,
+  key: RailPanelSizeKey,
+  value: number,
+): void {
+  if (!element) {
+    return;
+  }
+
+  element.style.setProperty(railPanelSizeVarName(key), `${value}px`);
+}
+
+function railPanelSizeVarName(key: RailPanelSizeKey): string {
+  switch (key) {
+    case "leftTop":
+      return "--rail-left-top-width";
+    case "rightTop":
+      return "--rail-right-top-width";
+    case "bottom":
+      return "--rail-bottom-height";
+    case "bottomLeft":
+      return "--rail-bottom-left-width";
+  }
 }

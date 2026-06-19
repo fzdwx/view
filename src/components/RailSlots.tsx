@@ -85,7 +85,8 @@ function RailButton({
   const definition = railItemDefinitions[item];
   const Icon = definition.icon;
   return (
-    <button
+   <button
+      type="button"
       className={
         active
           ? "activity-button rail-project-button active"

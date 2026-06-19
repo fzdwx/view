@@ -8,6 +8,9 @@ export function buildGitPanelGridStyle(
   firstSize: number,
   lastSize: number,
 ): CSSProperties {
+  const firstSizeVar = `var(--git-panel-first-size, ${firstSize}px)`;
+  const lastSizeVar = `var(--git-panel-last-size, ${lastSize}px)`;
+
   if (order.length === 0) {
     return {
       gridTemplateColumns: "minmax(0, 1fr)",
@@ -29,13 +32,13 @@ export function buildGitPanelGridStyle(
     if (dock !== "bottom") {
       return {
         gridTemplateColumns: "minmax(0, 1fr)",
-        gridTemplateRows: `${firstSize}px 6px minmax(0, 1fr)`,
+        gridTemplateRows: `${firstSizeVar} 6px minmax(0, 1fr)`,
         gridTemplateAreas: `"${first}" "git-splitter-1" "${second}"`,
       };
     }
 
     return {
-      gridTemplateColumns: `${firstSize}px 6px minmax(0, 1fr)`,
+      gridTemplateColumns: `${firstSizeVar} 6px minmax(0, 1fr)`,
       gridTemplateAreas: `"${first} git-splitter-1 ${second}"`,
     };
   }
@@ -44,13 +47,13 @@ export function buildGitPanelGridStyle(
   if (dock !== "bottom") {
     return {
       gridTemplateColumns: "minmax(0, 1fr)",
-      gridTemplateRows: `${firstSize}px 6px minmax(0, 1fr) 6px ${lastSize}px`,
+      gridTemplateRows: `${firstSizeVar} 6px minmax(0, 1fr) 6px ${lastSizeVar}`,
       gridTemplateAreas: `"${first}" "git-splitter-1" "${second}" "git-splitter-2" "${third}"`,
     };
   }
 
   return {
-    gridTemplateColumns: `${firstSize}px 6px minmax(0, 1fr) 6px ${lastSize}px`,
+    gridTemplateColumns: `${firstSizeVar} 6px minmax(0, 1fr) 6px ${lastSizeVar}`,
     gridTemplateAreas: `"${first} git-splitter-1 ${second} git-splitter-2 ${third}"`,
   };
 }
@@ -59,15 +62,12 @@ export function buildRailWorkbenchGridStyle(
   hasLeftTopPanel: boolean,
   hasRightTopPanel: boolean,
   hasBottomPanels: boolean,
-  leftTopWidth: number,
-  rightTopWidth: number,
-  bottomHeight: number,
 ): CSSProperties {
   const columns: string[] = [];
   const topAreas: string[] = [];
 
   if (hasLeftTopPanel) {
-    columns.push(`${leftTopWidth}px`, "6px");
+    columns.push("var(--rail-left-top-width)", "6px");
     topAreas.push("left-top", "left-top-splitter");
   }
 
@@ -75,7 +75,7 @@ export function buildRailWorkbenchGridStyle(
   topAreas.push("center");
 
   if (hasRightTopPanel) {
-    columns.push("6px", `${rightTopWidth}px`);
+    columns.push("6px", "var(--rail-right-top-width)");
     topAreas.push("right-top-splitter", "right-top");
   }
 
@@ -90,7 +90,7 @@ export function buildRailWorkbenchGridStyle(
   return {
     gridTemplateColumns: columns.join(" "),
     gridTemplateRows: hasBottomPanels
-      ? `minmax(0, 1fr) 6px ${bottomHeight}px`
+      ? "minmax(0, 1fr) 6px var(--rail-bottom-height)"
       : "minmax(0, 1fr)",
     gridTemplateAreas: templateAreas.join(" "),
   };
@@ -99,11 +99,10 @@ export function buildRailWorkbenchGridStyle(
 export function buildRailBottomPanelsStyle(
   hasLeftBottomPanel: boolean,
   hasRightBottomPanel: boolean,
-  leftBottomWidth: number,
 ): CSSProperties {
   if (hasLeftBottomPanel && hasRightBottomPanel) {
     return {
-      gridTemplateColumns: `${leftBottomWidth}px 10px minmax(0, 1fr)`,
+      gridTemplateColumns: "var(--rail-bottom-left-width) 10px minmax(0, 1fr)",
       gridTemplateAreas: '"left-bottom bottom-inner-splitter right-bottom"',
     };
   }

@@ -8,14 +8,18 @@ export function FragmentWithSplitter({
   index,
   panelCount,
   onResizeFirst,
+  onResizeFirstEnd,
   onResizeSecond,
+  onResizeSecondEnd,
 }: {
   children: ReactNode;
   dock: ToolDock;
   index: number;
   panelCount: number;
   onResizeFirst(delta: number): void;
+  onResizeFirstEnd(totalDelta: number): void;
   onResizeSecond(delta: number): void;
+  onResizeSecondEnd(totalDelta: number): void;
 }) {
   return (
     <>
@@ -26,6 +30,7 @@ export function FragmentWithSplitter({
           className={`git-panel-splitter-${index + 1}`}
           label="Resize Git panel"
           onResize={index === 0 ? onResizeFirst : onResizeSecond}
+          onResizeEnd={index === 0 ? onResizeFirstEnd : onResizeSecondEnd}
         />
       ) : null}
     </>
