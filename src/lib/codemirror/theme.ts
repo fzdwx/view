@@ -1,6 +1,24 @@
 import { EditorView } from "@uiw/react-codemirror";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
+import pierreDarkTheme from "@pierre/theme/pierre-dark";
+
+/**
+ * Resolves a TextMate scope from the pierre-dark theme to its foreground color.
+ * Used to drive CodeMirror syntax highlighting from the same token palette as
+ * the shiki diff view and the tree, so editor and diff readouts stay in sync.
+ */
+function pierreTokenColor(scope: string): string | null {
+  for (const tokenColor of pierreDarkTheme.tokenColors) {
+    const scopes = Array.isArray(tokenColor.scope)
+      ? tokenColor.scope
+      : [tokenColor.scope];
+    if (scopes.includes(scope)) {
+      return tokenColor.settings.foreground ?? null;
+    }
+  }
+  return null;
+}
 
 /**
  * Pierre dark theme for CodeMirror, mapped to the app's existing CSS tokens
@@ -60,21 +78,24 @@ export const pierreCodeMirrorTheme = EditorView.theme({
 });
 
 /**
- * Syntax highlight colors. These approximate the pierre-dark shiki palette used
- * by the diff view so editor and diff readouts feel consistent.
+ * Syntax highlight colors. Mapped from the pierre-dark theme token palette
+ * (the same source the shiki diff view, tree, and merge editor use) so the
+ * editor shares one palette with the rest of the workbench instead of
+ * approximating it with hardcoded colors.
  */
 export const pierreCodeMirrorHighlightStyle = HighlightStyle.define([
-  { tag: t.comment, color: "var(--muted)", fontStyle: "italic" },
-  { tag: t.keyword, color: "#c586c0" },
-  { tag: [t.atom, t.bool, t.special(t.variableName)], color: "#569cd6" },
-  { tag: [t.number, t.literal], color: "#b5cea8" },
-  { tag: t.string, color: "#ce9178" },
-  { tag: [t.variableName, t.propertyName], color: "#9cdcfe" },
-  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: "#dcdcaa" },
-  { tag: t.typeName, color: "#4ec9b0" },
-  { tag: t.tagName, color: "#569cd6" },
-  { tag: t.attributeName, color: "#9cdcfe" },
-  { tag: [t.meta, t.documentMeta], color: "var(--muted)" },
+  { tag: t.comment, color: pierreTokenColor("comment") ?? "var(--muted)", fontStyle: "italic" },
+  { tag: t.keyword, color: pierreTokenColor("keyword") ?? "#ff678d" },
+  { tag: [t.atom, t.bool, t.special(t.variableName)], color: pierreTokenColor("constant.language") ?? "#68cdf2" },
+  { tag: [t.number, t.literal], color: pierreTokenColor("constant.numeric") ?? "#68cdf2" },
+  { tag: t.string, color: pierreTokenColor("string") ?? "#5ecc71" },
+  { tag: [t.variableName, t.propertyName], color: pierreTokenColor("variable") ?? "#ffa359" },
+  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: pierreTokenColor("entity.name.function") ?? "#9d6afb" },
+  { tag: t.typeName, color: pierreTokenColor("entity.name.type") ?? "#d568ea" },
+  { tag: t.tagName, color: pierreTokenColor("entity.name.tag") ?? "#ff855e" },
+  { tag: t.attributeName, color: pierreTokenColor("entity.other.attribute-name") ?? "#60d199" },
+  { tag: t.operator, color: pierreTokenColor("keyword.operator") ?? "#636363" },
+  { tag: [t.meta, t.documentMeta], color: pierreTokenColor("comment") ?? "var(--muted)" },
   { tag: t.strong, fontWeight: "700" },
   { tag: t.emphasis, fontStyle: "italic" },
 ]);
