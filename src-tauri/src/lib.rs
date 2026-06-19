@@ -51,6 +51,7 @@ const FILE_SEARCH_SCAN_TIMEOUT: Duration = Duration::from_secs(10);
 const TERMINAL_WS_IDLE_SLEEP_MS: u64 = 1;
 const TERMINAL_WS_PENDING_OUTPUT_LIMIT: usize = 64;
 const TERMINAL_WS_OUTPUT_BURST_LIMIT: usize = 8;
+const ZERO_OID: &str = "0000000000000000000000000000000000000000";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -181,6 +182,18 @@ struct FileContent {
     too_large: bool,
     media_type: Option<String>,
     media_data_url: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileBlameLine {
+    line_number: usize,
+    commit_hash: Option<String>,
+    short_hash: Option<String>,
+    author: String,
+    author_time: Option<i64>,
+    summary: String,
+    committed: bool,
 }
 
 #[derive(Serialize)]
@@ -457,6 +470,12 @@ fn get_project_files(path: String) -> Result<Vec<TreeFile>, String> {
 fn get_file_content(path: String, file_path: String) -> Result<FileContent, String> {
     let root = repository_root(&path)?;
     read_file_content(&root, &file_path)
+}
+
+#[tauri::command]
+fn get_file_blame(path: String, file_path: String) -> Result<Vec<FileBlameLine>, String> {
+    let root = repository_root(&path)?;
+    git_file_blame(&root, &file_path)
 }
 
 #[tauri::command]
@@ -929,6 +948,126 @@ fn git_reflog(root: &Path, filter: Option<&str>) -> Result<Vec<ReflogEntry>, Str
     } else {
         Ok(entries.take(120).collect())
     }
+}
+
+#[derive(Default)]
+struct PendingFileBlameLine {
+    line_number: usize,
+    commit_hash: String,
+    author: String,
+    author_time: Option<i64>,
+    summary: String,
+}
+
+impl PendingFileBlameLine {
+    fn into_file_blame_line(self) -> FileBlameLine {
+        if self.commit_hash == ZERO_OID {
+            return FileBlameLine {
+                line_number: self.line_number,
+                commit_hash: None,
+                short_hash: None,
+                author: "Not Committed Yet".to_string(),
+                author_time: None,
+                summary: "Uncommitted changes".to_string(),
+                committed: false,
+            };
+        }
+
+        let summary = if self.summary.trim().is_empty() {
+            "No commit summary".to_string()
+        } else {
+            self.summary
+        };
+        let author = if self.author.trim().is_empty() {
+            "Unknown author".to_string()
+        } else {
+            self.author
+        };
+
+        FileBlameLine {
+            line_number: self.line_number,
+            commit_hash: Some(self.commit_hash.clone()),
+            short_hash: Some(self.commit_hash.chars().take(8).collect::<String>()),
+            author,
+            author_time: self.author_time,
+            summary,
+            committed: true,
+        }
+    }
+}
+
+fn git_file_blame(root: &Path, file_path: &str) -> Result<Vec<FileBlameLine>, String> {
+    let output = match git(root, &["blame", "--line-porcelain", "--", file_path]) {
+        Ok(output) => output,
+        Err(error) if is_missing_blame_target_error(&error) => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+
+    Ok(parse_file_blame(&output))
+}
+
+fn parse_file_blame(output: &str) -> Vec<FileBlameLine> {
+    let mut blame_lines = Vec::new();
+    let mut current: Option<PendingFileBlameLine> = None;
+
+    for line in output.lines() {
+        if let Some((commit_hash, line_number)) = parse_blame_header(line) {
+            current = Some(PendingFileBlameLine {
+                line_number,
+                commit_hash,
+                ..Default::default()
+            });
+            continue;
+        }
+
+        let Some(entry) = current.as_mut() else {
+            continue;
+        };
+
+        if let Some(author) = line.strip_prefix("author ") {
+            entry.author = author.to_string();
+            continue;
+        }
+
+        if let Some(author_time) = line.strip_prefix("author-time ") {
+            entry.author_time = author_time.parse::<i64>().ok();
+            continue;
+        }
+
+        if let Some(summary) = line.strip_prefix("summary ") {
+            entry.summary = summary.to_string();
+            continue;
+        }
+
+        if line.starts_with('\t') {
+            if let Some(entry) = current.take() {
+                blame_lines.push(entry.into_file_blame_line());
+            }
+        }
+    }
+
+    blame_lines
+}
+
+fn parse_blame_header(line: &str) -> Option<(String, usize)> {
+    let mut parts = line.split_whitespace();
+    let commit_hash = parts.next()?;
+    if commit_hash.len() != 40 || !commit_hash.chars().all(|character| character.is_ascii_hexdigit()) {
+        return None;
+    }
+
+    parts.next()?.parse::<usize>().ok()?;
+    let line_number = parts.next()?.parse::<usize>().ok()?;
+
+    Some((commit_hash.to_string(), line_number))
+}
+
+fn is_missing_blame_target_error(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("no such path")
+        || lower.contains("no such file")
+        || lower.contains("cannot stat path")
+        || lower.contains("is outside repository")
 }
 
 fn tokenize_commit_filter(filter: &str) -> Vec<String> {
@@ -3838,6 +3977,7 @@ pub fn run() {
             get_project_files,
             get_file_blob,
             get_file_content,
+            get_file_blame,
             save_file_content,
             create_project_file,
             rename_project_file,

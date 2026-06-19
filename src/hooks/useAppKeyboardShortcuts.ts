@@ -74,7 +74,11 @@ export function useAppKeyboardShortcuts({
       }
 
       if (matchesShortcut(event, shortcuts.saveFile)) {
-        if (!editableTarget || event.target instanceof HTMLTextAreaElement) {
+        if (
+          !editableTarget ||
+          event.target instanceof HTMLTextAreaElement ||
+          isCodeMirrorShortcutTarget(event.target)
+        ) {
           event.preventDefault();
           if (previewMode === "file" && hasActiveEditorDraft) {
             onSaveActiveFile();
@@ -186,4 +190,8 @@ function isEditableShortcutTarget(target: EventTarget | null): boolean {
     (target.matches("input, textarea, [contenteditable='true']") ||
       Boolean(target.closest("[data-command-panel]")))
   );
+}
+
+function isCodeMirrorShortcutTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && Boolean(target.closest(".cm-editor"));
 }

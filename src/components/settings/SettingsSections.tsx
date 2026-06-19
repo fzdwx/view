@@ -46,6 +46,45 @@ export function SettingsSections({
       {activeSection === "shortcuts" ? (
         <ShortcutSettings settings={settings} onChange={onShortcutChange} />
       ) : null}
+      {activeSection === "editor" ? (
+        <EditorSettings settings={settings} onChange={onChange} />
+      ) : null}
+    </div>
+  );
+}
+
+function EditorSettings({
+  settings,
+  onChange,
+}: {
+  readonly settings: AppSettings;
+  readonly onChange: (settings: AppSettings) => void;
+}) {
+  return (
+    <div className="font-cards">
+      <section className="font-card">
+        <header className="font-card-heading">
+          <h3>CodeMirror editor</h3>
+          <p>
+            Use the CodeMirror 6 editor for file preview and editing. Turn this
+            off to fall back to the legacy textarea editor.
+          </p>
+        </header>
+        <label className="settings-toggle-row">
+          <span className="settings-toggle-label">Use CodeMirror editor</span>
+          <input
+            type="checkbox"
+            className="settings-toggle"
+            checked={settings.useCodeMirrorEditor}
+            onChange={(event) =>
+              onChange({
+                ...settings,
+                useCodeMirrorEditor: event.target.checked,
+              })
+            }
+          />
+        </label>
+      </section>
     </div>
   );
 }

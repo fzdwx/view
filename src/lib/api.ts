@@ -110,6 +110,16 @@ export interface FileContent {
   mediaDataUrl: string | null;
 }
 
+export interface FileBlameLine {
+  lineNumber: number;
+  commitHash: string | null;
+  shortHash: string | null;
+  author: string;
+  authorTime: number | null;
+  summary: string;
+  committed: boolean;
+}
+
 export interface SaveConflict {
   path: string;
   baseContent: string;
@@ -261,6 +271,13 @@ export async function getFileContent(
   return invoke<FileContent>("get_file_content", { path, filePath });
 }
 
+export async function getFileBlame(
+  path: string,
+  filePath: string,
+): Promise<FileBlameLine[]> {
+  return invoke<FileBlameLine[]>("get_file_blame", { path, filePath });
+}
+
 export async function getFileBlob(
   path: string,
   filePath: string,
@@ -335,6 +352,12 @@ export async function searchEditorText(
   content: string,
   query: string,
 ): Promise<EditorSearchResponse> {
+  if (!isTauriRuntime()) {
+    return {
+      matches: editorTextMatchesInBrowser(content, query),
+    };
+  }
+
   return invoke<EditorSearchResponse>("search_editor_text", {
     content,
     query,
@@ -348,6 +371,16 @@ export async function replaceEditorText(
   activeIndex: number,
   replaceAll: boolean,
 ): Promise<EditorReplaceResponse> {
+  if (!isTauriRuntime()) {
+    return replaceEditorTextInBrowser(
+      content,
+      query,
+      replacement,
+      activeIndex,
+      replaceAll,
+    );
+  }
+
   return invoke<EditorReplaceResponse>("replace_editor_text", {
     content,
     query,
@@ -467,6 +500,144 @@ export async function listSystemFonts(): Promise<SystemFont[]> {
   return invoke<SystemFont[]>("list_system_fonts");
 }
 
+function replaceEditorTextInBrowser(
+  content: string,
+  query: string,
+  replacement: string,
+  activeIndex: number,
+  replaceAll: boolean,
+): EditorReplaceResponse {
+  const matches = editorTextMatchesInBrowser(content, query);
+  if (matches.length === 0) {
+    return {
+      content,
+      matches: [],
+      selectionStart: 0,
+      selectionEnd: 0,
+    };
+  }
+
+  if (replaceAll) {
+    let nextContent = "";
+    let cursor = 0;
+
+    for (const match of matches) {
+      nextContent += content.slice(cursor, match.start);
+      nextContent += replacement;
+      cursor = match.end;
+    }
+
+    nextContent += content.slice(cursor);
+    return {
+      content: nextContent,
+      matches: editorTextMatchesInBrowser(nextContent, query),
+      selectionStart: 0,
+      selectionEnd: 0,
+    };
+  }
+
+  const activeMatch = matches[Math.min(activeIndex, matches.length - 1)];
+  const nextContent =
+    content.slice(0, activeMatch.start) +
+    replacement +
+    content.slice(activeMatch.end);
+  const selectionStart = activeMatch.start;
+  const selectionEnd = selectionStart + replacement.length;
+
+  return {
+    content: nextContent,
+    matches: editorTextMatchesInBrowser(nextContent, query),
+    selectionStart,
+    selectionEnd,
+  };
+}
+
+function editorTextMatchesInBrowser(
+  content: string,
+  query: string,
+): EditorTextMatch[] {
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) {
+    return [];
+  }
+
+  const { lowered, utf16Indices } = lowercaseWithUtf16Indices(content);
+  const needle = trimmedQuery.toLowerCase();
+  const matches: EditorTextMatch[] = [];
+  let searchFrom = 0;
+
+  while (searchFrom <= lowered.length) {
+    const lowerStart = lowered.indexOf(needle, searchFrom);
+    if (lowerStart < 0) {
+      break;
+    }
+
+    const lowerEnd = lowerStart + needle.length;
+    const start = utf16Indices[lowerStart];
+    let end = lowerEnd < utf16Indices.length ? utf16Indices[lowerEnd] : content.length;
+
+    if (end === start) {
+      for (const character of content.slice(start)) {
+        end = start + character.length;
+        break;
+      }
+    }
+
+    if (end > start) {
+      const { lineNumber, lineText } = lineForUtf16Offset(content, start);
+      matches.push({
+        start,
+        end,
+        lineNumber,
+        lineText,
+      });
+    }
+
+    searchFrom = lowerStart + Math.max(needle.length, 1);
+  }
+
+  return matches;
+}
+
+function lowercaseWithUtf16Indices(content: string): {
+  lowered: string;
+  utf16Indices: number[];
+} {
+  let lowered = "";
+  const utf16Indices: number[] = [];
+  let utf16Offset = 0;
+
+  for (const character of content) {
+    const loweredCharacter = character.toLowerCase();
+    lowered += loweredCharacter;
+    for (let index = 0; index < loweredCharacter.length; index += 1) {
+      utf16Indices.push(utf16Offset);
+    }
+    utf16Offset += character.length;
+  }
+
+  return { lowered, utf16Indices };
+}
+
+function lineForUtf16Offset(
+  content: string,
+  start: number,
+): {
+  lineNumber: number;
+  lineText: string;
+} {
+  const prefix = content.slice(0, start);
+  const lineNumber = prefix.split("\n").length;
+  const lineStart = prefix.lastIndexOf("\n") + 1;
+  const nextLineBreak = content.indexOf("\n", start);
+  const lineEnd = nextLineBreak >= 0 ? nextLineBreak : content.length;
+
+  return {
+    lineNumber,
+    lineText: content.slice(lineStart, lineEnd).replace(/\r$/, ""),
+  };
+}
+
 export function isTauriRuntime(): boolean {
-  return "__TAURI_INTERNALS__" in window;
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }

@@ -11,11 +11,13 @@ import {
 import { Loader2, Search, X } from "lucide-react";
 import {
   type EditorTextMatch,
+  type FileBlameLine,
   type FileContent,
   replaceEditorText,
   searchEditorText,
 } from "../../lib/api";
 import { parseCssPixels } from "../../lib/cssPixels";
+import { formatDate } from "../../lib/dateFormat";
 import { hasGitConflictMarkers } from "../../lib/editorDrafts";
 import {
   filterVisibleEditorGitMarkers,
@@ -47,6 +49,9 @@ import {
 } from "./MergeConflictEditor";
 
 export function FilePreview({
+  blameError,
+  blameLines,
+  blameLoading,
   draft,
   editorSessionKey,
   error,
@@ -64,6 +69,9 @@ export function FilePreview({
   onSave,
   onSetConflictDraftContent,
 }: {
+  blameError: string | null;
+  blameLines: FileBlameLine[];
+  blameLoading: boolean;
   draft: EditorDraft | null;
   editorSessionKey: string | null;
   error: string | null;
@@ -177,6 +185,82 @@ export function FilePreview({
         String(index + 1),
       ).join("\n"),
     [lines.length],
+  );
+  const blameRows = useMemo<VisibleBlameRow[]>(() => {
+    if (blameLoading && blameLines.length === 0) {
+      return [
+        {
+          lineNumber: 1,
+          text: "Loading blame...",
+          title: "Loading blame...",
+          tone: "status",
+        },
+      ];
+    }
+
+    if (blameError && blameLines.length === 0) {
+      return [
+        {
+          lineNumber: 1,
+          text: "Blame unavailable",
+          title: `Blame unavailable\n${blameError}`,
+          tone: "status",
+        },
+      ];
+    }
+
+    const rows: VisibleBlameRow[] = [];
+    let previousFingerprint = "";
+
+    for (const blameLine of blameLines) {
+      const fingerprint = [
+        blameLine.commitHash ?? "working-tree",
+        blameLine.author,
+        blameLine.summary,
+      ].join("\x1f");
+
+      if (fingerprint === previousFingerprint) {
+        continue;
+      }
+
+      previousFingerprint = fingerprint;
+      rows.push({
+        lineNumber: blameLine.lineNumber,
+        text: formatBlameLineText(blameLine),
+        title: formatBlameLineTitle(blameLine),
+        tone: blameLine.committed ? "default" : "uncommitted",
+      });
+    }
+
+    return rows;
+  }, [blameError, blameLines, blameLoading]);
+  const showBlameGutter =
+    blameLoading || blameRows.length > 0 || Boolean(blameError);
+  const visibleBlameRange = useMemo(() => {
+    const safeLineHeight = Math.max(editorLineHeight, 1);
+    const visibleTop = Math.max(0, editorScrollTop - editorPaddingTop);
+    const visibleBottom = visibleTop + Math.max(editorViewportHeight, safeLineHeight);
+    const start = Math.max(1, Math.floor(visibleTop / safeLineHeight) - 3 + 1);
+    const end = Math.max(
+      start,
+      Math.ceil(visibleBottom / safeLineHeight) + 4,
+    );
+
+    return { start, end };
+  }, [
+    editorLineHeight,
+    editorPaddingTop,
+    editorScrollTop,
+    editorViewportHeight,
+  ]);
+  const visibleBlameRows = useMemo(
+    () =>
+      blameRows.filter(
+        (row) =>
+          row.lineNumber >= visibleBlameRange.start &&
+          row.lineNumber <= visibleBlameRange.end,
+      ),
+    [blameRows, visibleBlameRange.end, visibleBlameRange.start],
   );
   useLayoutEffect(() => {
     const previousKey = currentEditorSessionKeyRef.current;
@@ -892,10 +976,7 @@ export function FilePreview({
         file={file}
         saveError={saveError}
         saving={saving}
-        textareaRef={textareaRef}
         onChangeDraft={onChangeDraft}
-        onEditorKeyDown={handleEditorKeyDown}
-        onEditorScroll={handleEditorScroll}
         onSave={onSave}
       />
     );
@@ -909,11 +990,8 @@ export function FilePreview({
         file={file}
         saveError={saveError}
         saving={saving}
-        textareaRef={textareaRef}
         onChangeDraft={onChangeDraft}
         onDiscardConflict={onDiscardConflict}
-        onEditorKeyDown={handleEditorKeyDown}
-        onEditorScroll={handleEditorScroll}
         onSave={onSave}
         onSetConflictDraftContent={onSetConflictDraftContent}
       />
@@ -927,6 +1005,9 @@ export function FilePreview({
   ]
     .filter(Boolean)
     .join(" ");
+  const editorStageClassName = showBlameGutter
+    ? "file-editor-stage has-blame"
+    : "file-editor-stage";
 
   return (
     <section
@@ -1040,7 +1121,7 @@ export function FilePreview({
       ) : null}
       <div
         ref={stageRef}
-        className="file-editor-stage"
+        className={editorStageClassName}
         style={
           {
             "--editor-scroll-top": `${editorScrollTop}px`,
@@ -1049,6 +1130,29 @@ export function FilePreview({
           } as CSSProperties
         }
       >
+        {showBlameGutter ? (
+          <div className="editor-blame-gutter" aria-hidden="true">
+            {visibleBlameRows.map((row) => (
+              <div
+                key={`${row.lineNumber}-${row.text}`}
+                className={`editor-blame-line ${row.tone}`}
+                title={row.title}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  textareaRef.current?.focus({ preventScroll: true });
+                }}
+                style={
+                  {
+                    top: `calc(var(--editor-padding-top) + ${(row.lineNumber - 1) * editorLineHeight}px - var(--editor-scroll-top))`,
+                    height: `${editorLineHeight}px`,
+                  } as CSSProperties
+                }
+              >
+                {row.text}
+              </div>
+            ))}
+          </div>
+        ) : null}
         <textarea
           ref={lineNumberTextareaRef}
           className="editor-line-number-gutter"
@@ -1156,4 +1260,40 @@ export function FilePreview({
       {saveError ? <div className="editor-error">{saveError}</div> : null}
     </section>
   );
+}
+
+interface VisibleBlameRow {
+  readonly lineNumber: number;
+  readonly text: string;
+  readonly title: string;
+  readonly tone: "default" | "status" | "uncommitted";
+}
+
+function formatBlameLineText(line: FileBlameLine): string {
+  if (!line.committed) {
+    return "Working tree";
+  }
+
+  const shortHash = line.shortHash ?? "unknown";
+  const summary = line.summary.trim();
+  if (summary.length > 0) {
+    return `${shortHash} ${summary}`;
+  }
+
+  const author = line.author.trim();
+  return author.length > 0 ? `${shortHash} ${author}` : shortHash;
+}
+
+function formatBlameLineTitle(line: FileBlameLine): string {
+  const hashLabel = line.commitHash ?? "Working tree";
+  const authorLabel = line.author.trim() || "Unknown author";
+  const dateLabel =
+    typeof line.authorTime === "number"
+      ? formatDate(new Date(line.authorTime * 1000).toISOString())
+      : "Unknown date";
+  const summaryLabel =
+    line.summary.trim() ||
+    (line.committed ? "No commit summary" : "Uncommitted changes");
+
+  return [hashLabel, authorLabel, dateLabel, summaryLabel].join("\n");
 }

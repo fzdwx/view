@@ -1,4 +1,3 @@
-import type { KeyboardEvent, RefObject, UIEvent } from "react";
 import { AlertTriangle, Loader2, Save } from "lucide-react";
 import { UnresolvedFile } from "@pierre/diffs/react";
 import type { FileContent } from "../../lib/api";
@@ -7,12 +6,10 @@ import {
   gitConflictToMarkerFile,
 } from "../../lib/editorDrafts";
 import type { EditorDraft } from "../../lib/editorTypes";
+import { CodeMirrorView } from "./CodeMirrorView";
 
-type EditorTextareaHandlers = {
-  readonly textareaRef: RefObject<HTMLTextAreaElement | null>;
+type EditorDraftHandlers = {
   readonly onChangeDraft: (content: string) => void;
-  readonly onEditorKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
-  readonly onEditorScroll: (event: UIEvent<HTMLTextAreaElement>) => void;
 };
 
 type SaveState = {
@@ -26,15 +23,12 @@ export function GitConflictEditor({
   file,
   saveError,
   saving,
-  textareaRef,
   onChangeDraft,
-  onEditorKeyDown,
-  onEditorScroll,
   onSave,
 }: {
   content: string;
   file: FileContent;
-} & EditorTextareaHandlers & SaveState) {
+} & EditorDraftHandlers & SaveState) {
   return (
     <section className="merge-page" aria-label={`Resolve ${file.path}`}>
       <div className="editor-toolbar conflict-toolbar">
@@ -59,10 +53,8 @@ export function GitConflictEditor({
       </div>
       <MergeTextarea
         content={content}
-        textareaRef={textareaRef}
+        filePath={file.path}
         onChangeDraft={onChangeDraft}
-        onEditorKeyDown={onEditorKeyDown}
-        onEditorScroll={onEditorScroll}
       />
       {saveError ? <div className="editor-error">{saveError}</div> : null}
     </section>
@@ -75,11 +67,8 @@ export function DiskConflictEditor({
   file,
   saveError,
   saving,
-  textareaRef,
   onChangeDraft,
   onDiscardConflict,
-  onEditorKeyDown,
-  onEditorScroll,
   onSave,
   onSetConflictDraftContent,
 }: {
@@ -88,7 +77,7 @@ export function DiskConflictEditor({
   file: FileContent;
   onDiscardConflict(): void;
   onSetConflictDraftContent(content: string): void;
-} & EditorTextareaHandlers & SaveState) {
+} & EditorDraftHandlers & SaveState) {
   return (
     <section className="merge-page" aria-label={`Merge ${file.path}`}>
       <div className="editor-toolbar conflict-toolbar">
@@ -127,10 +116,8 @@ export function DiskConflictEditor({
       </div>
       <MergeTextarea
         content={content}
-        textareaRef={textareaRef}
+        filePath={file.path}
         onChangeDraft={onChangeDraft}
-        onEditorKeyDown={onEditorKeyDown}
-        onEditorScroll={onEditorScroll}
       />
       {saveError ? <div className="editor-error">{saveError}</div> : null}
     </section>
@@ -139,22 +126,20 @@ export function DiskConflictEditor({
 
 function MergeTextarea({
   content,
-  textareaRef,
   onChangeDraft,
-  onEditorKeyDown,
-  onEditorScroll,
+  filePath,
 }: {
   readonly content: string;
-} & EditorTextareaHandlers) {
+  readonly filePath: string;
+} & EditorDraftHandlers) {
   return (
-    <textarea
-      ref={textareaRef}
-      className="file-editor merge-editor"
-      spellCheck={false}
-      defaultValue={content}
-      onKeyDown={onEditorKeyDown}
-      onScroll={onEditorScroll}
-      onChange={(event) => onChangeDraft(event.target.value)}
+    <CodeMirrorView
+      className="merge-editor code-mirror-file-editor"
+      path={filePath}
+      value={content}
+      readOnly={false}
+      editable
+      onChange={onChangeDraft}
     />
   );
 }

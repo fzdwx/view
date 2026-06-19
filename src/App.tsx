@@ -16,6 +16,8 @@ import { ResizeHandle } from "./components/ResizeHandle";
 import { WindowControls } from "./components/WindowControls";
 import type { TreeGitFileActions } from "./components/TreeContextMenu";
 import { FilePreview } from "./components/editor/FilePreview";
+import { CodeMirrorFilePreview } from "./components/editor/CodeMirrorFilePreview";
+import { PreviewDebugPage } from "./components/editor/PreviewDebugPage";
 import {
   type GitPanelDataProps,
 } from "./components/workbench/GitPanels";
@@ -231,9 +233,11 @@ export function App() {
     repositoryPayload: payload,
   });
   const {
+    currentFileBlame,
     currentFileDiff,
     diffStats,
     editorGitMarkers,
+    fileBlameQuery,
     fileDiffQuery,
     fileWorktreeDiffQuery,
     parsedDiff,
@@ -241,6 +245,7 @@ export function App() {
   } = useRepositoryPreviewData({
     activeCommit,
     activeProjectPath,
+    fileContentReady: currentFileContent !== null,
     previewMode,
     selectedChangePath,
     selectedProjectPath,
@@ -677,6 +682,14 @@ export function App() {
     gridTemplateColumns: "48px minmax(0, 1fr) 48px",
     gridTemplateRows: "35px minmax(0, 1fr)",
   };
+  const previewDebugEnabled =
+    import.meta.env.DEV &&
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("preview-debug") === "1";
+
+  if (previewDebugEnabled) {
+    return <PreviewDebugPage shellStyle={appShellStyle} />;
+  }
 
   return (
     <main className="app-shell" style={shellStyle}>
@@ -799,32 +812,81 @@ export function App() {
 
             <section className="diff-panel rail-editor-panel">
               {previewMode === "file" ? (
-                <FilePreview
-                  draft={activeEditorDraft}
-                  editorSessionKey={activePreviewTabId}
-                  error={
-                    fileContentQuery.isError
-                      ? String(fileContentQuery.error.message)
-                      : null
-                  }
-                  file={currentFileContent}
-                  editorFontSize={appSettings.fontSize}
-                  editorLineHeightRatio={appSettings.lineHeight}
-                  gitMarkers={editorGitMarkers}
-                  loading={Boolean(
-                    selectedProjectPath &&
-                      fileContentQuery.isFetching &&
-                      !currentFileContent,
-                  )}
-                  saveError={saveError}
-                  saving={savingActiveFile}
-                  selectedPath={selectedProjectPath}
-                  target={previewTarget}
-                  onChangeDraft={updateEditorDraft}
-                  onDiscardConflict={discardConflictToDisk}
-                  onSave={() => void saveActiveFile()}
-                  onSetConflictDraftContent={setConflictDraftContent}
-                />
+                appSettings.useCodeMirrorEditor ? (
+                  <CodeMirrorFilePreview
+                    blameError={
+                      fileBlameQuery.isError
+                        ? String(fileBlameQuery.error.message)
+                        : null
+                    }
+                    blameLines={currentFileBlame}
+                    blameLoading={Boolean(
+                      selectedProjectPath &&
+                        previewMode === "file" &&
+                        fileBlameQuery.isFetching,
+                    )}
+                    draft={activeEditorDraft}
+                    editorSessionKey={activePreviewTabId}
+                    error={
+                      fileContentQuery.isError
+                        ? String(fileContentQuery.error.message)
+                        : null
+                    }
+                    file={currentFileContent}
+                    gitMarkers={editorGitMarkers}
+                    loading={Boolean(
+                      selectedProjectPath &&
+                        fileContentQuery.isFetching &&
+                        !currentFileContent,
+                    )}
+                    saveError={saveError}
+                    saving={savingActiveFile}
+                    selectedPath={selectedProjectPath}
+                    target={previewTarget}
+                    onChangeDraft={updateEditorDraft}
+                    onDiscardConflict={discardConflictToDisk}
+                    onSave={() => void saveActiveFile()}
+                    onSetConflictDraftContent={setConflictDraftContent}
+                  />
+                ) : (
+                  <FilePreview
+                    blameError={
+                      fileBlameQuery.isError
+                        ? String(fileBlameQuery.error.message)
+                        : null
+                    }
+                    blameLines={currentFileBlame}
+                    blameLoading={Boolean(
+                      selectedProjectPath &&
+                        previewMode === "file" &&
+                        fileBlameQuery.isFetching,
+                    )}
+                    draft={activeEditorDraft}
+                    editorSessionKey={activePreviewTabId}
+                    error={
+                      fileContentQuery.isError
+                        ? String(fileContentQuery.error.message)
+                        : null
+                    }
+                    file={currentFileContent}
+                    editorFontSize={appSettings.fontSize}
+                    editorLineHeightRatio={appSettings.lineHeight}
+                    gitMarkers={editorGitMarkers}
+                    loading={Boolean(
+                      selectedProjectPath &&
+                        fileContentQuery.isFetching &&
+                        !currentFileContent,
+                    )}
+                    saveError={saveError}
+                    saving={savingActiveFile}
+                    selectedPath={selectedProjectPath}
+                    target={previewTarget}
+                    onChangeDraft={updateEditorDraft}
+                    onDiscardConflict={discardConflictToDisk}
+                    onSave={() => void saveActiveFile()}
+                    onSetConflictDraftContent={setConflictDraftContent}
+                  />
+                )
               ) : payload && !selectedChangePath ? (
                 <div className="empty-state">
                   <div className="empty-title">Select a changed file</div>

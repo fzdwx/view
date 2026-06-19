@@ -6,6 +6,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import {
   type CommitInfo,
+  type FileBlameLine,
   type FileContent,
   type FileSearchResult,
   type GitStatus,
@@ -13,6 +14,7 @@ import {
   type RepositoryPayload,
   type TreeFile,
   getCommits,
+  getFileBlame,
   getFileContent,
   getFileDiff,
   getProjectFiles,
@@ -54,6 +56,12 @@ export interface LoadedWorktreeFileDiff {
   readonly diff: string;
 }
 
+export interface LoadedFileBlame {
+  readonly rootPath: string;
+  readonly filePath: string;
+  readonly lines: FileBlameLine[];
+}
+
 export interface RepositoryProjectDataOptions {
   readonly activeBranchRef: string | null;
   readonly activeCommit: string | null;
@@ -90,6 +98,7 @@ export interface RepositoryProjectData {
 export interface RepositoryPreviewDataOptions {
   readonly activeCommit: string | null;
   readonly activeProjectPath: string | null;
+  readonly fileContentReady: boolean;
   readonly previewMode: PreviewMode;
   readonly selectedChangePath: string | null;
   readonly selectedProjectPath: string | null;
@@ -97,10 +106,12 @@ export interface RepositoryPreviewDataOptions {
 }
 
 export interface RepositoryPreviewData {
+  readonly currentFileBlame: FileBlameLine[];
   readonly currentFileDiff: LoadedFileDiff | null;
   readonly currentWorktreeFileDiff: string;
   readonly diffStats: ReturnType<typeof countDiffStats>;
   readonly editorGitMarkers: EditorGitMarker[];
+  readonly fileBlameQuery: UseQueryResult<LoadedFileBlame, Error>;
   readonly fileDiffQuery: UseQueryResult<LoadedFileDiff, Error>;
   readonly fileWorktreeDiffQuery: UseQueryResult<LoadedWorktreeFileDiff, Error>;
   readonly parsedDiff: ParsedRepositoryDiff;
@@ -346,11 +357,38 @@ function reflogEntryToCommitInfo(entry: ReflogEntry): CommitInfo {
 export function useRepositoryPreviewData({
   activeCommit,
   activeProjectPath,
+  fileContentReady,
   previewMode,
   selectedChangePath,
   selectedProjectPath,
   selectedProjectStatus,
 }: RepositoryPreviewDataOptions): RepositoryPreviewData {
+  const canLoadFilePreviewMetadata = Boolean(
+    activeProjectPath &&
+      selectedProjectPath &&
+      previewMode === "file" &&
+      fileContentReady,
+  );
+  const fileBlameQuery = useQuery({
+    queryKey: ["file-blame", activeProjectPath, selectedProjectPath],
+    queryFn: async () => {
+      const rootPath = requireQueryInput(activeProjectPath, "file blame path");
+      const filePath = requireQueryInput(
+        selectedProjectPath,
+        "file blame file path",
+      );
+
+      return {
+        rootPath,
+        filePath,
+        lines: await getFileBlame(rootPath, filePath),
+      };
+    },
+    enabled: canLoadFilePreviewMetadata,
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+
   const fileDiffQuery = useQuery({
     queryKey: [
       "file-diff",
@@ -408,13 +446,11 @@ export function useRepositoryPreviewData({
         diff: await getFileDiff(rootPath, filePath, null),
       };
     },
-    enabled: Boolean(
-      activeProjectPath &&
-        selectedProjectPath &&
-        previewMode === "file" &&
-        selectedProjectStatus &&
-        isChangedFileStatus(selectedProjectStatus),
-    ),
+    enabled:
+      canLoadFilePreviewMetadata &&
+      Boolean(
+        selectedProjectStatus && isChangedFileStatus(selectedProjectStatus),
+      ),
     placeholderData: keepPreviousData,
     retry: false,
   });
@@ -425,6 +461,11 @@ export function useRepositoryPreviewData({
     fileDiffQuery.data?.filePath === selectedChangePath
       ? fileDiffQuery.data
       : null;
+  const currentFileBlame =
+    fileBlameQuery.data?.rootPath === activeProjectPath &&
+    fileBlameQuery.data?.filePath === selectedProjectPath
+      ? fileBlameQuery.data.lines
+      : [];
   const currentWorktreeFileDiff =
     fileWorktreeDiffQuery.data?.rootPath === activeProjectPath &&
     fileWorktreeDiffQuery.data?.filePath === selectedProjectPath &&
@@ -449,10 +490,12 @@ export function useRepositoryPreviewData({
   );
 
   return {
+    currentFileBlame,
     currentFileDiff,
     currentWorktreeFileDiff,
     diffStats,
     editorGitMarkers,
+    fileBlameQuery,
     fileDiffQuery,
     fileWorktreeDiffQuery,
     parsedDiff,

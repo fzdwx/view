@@ -28,6 +28,7 @@ const settingsTree: ReadonlyArray<
     children: [
       { id: "fonts", label: "Fonts" },
       { id: "shortcuts", label: "Keyboard" },
+      { id: "editor", label: "Editor" },
     ],
   },
 ];
