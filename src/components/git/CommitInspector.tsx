@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { GitBranch } from "lucide-react";
-import type { CommitInfo, RepositoryPayload } from "../../lib/api";
+import { GitBranch, RotateCcw } from "lucide-react";
+import type { CommitInfo, ReflogEntry, RepositoryPayload } from "../../lib/api";
 import { formatDate } from "../../lib/dateFormat";
 import { clamp } from "../../lib/numeric";
 import { ResizeHandle } from "../ResizeHandle";
@@ -19,7 +19,9 @@ export function CommitInspector({
   files,
   gitFileActions,
   gitWriteActions,
+  historyMode = "commits",
   orientation = "vertical",
+  selectedReflogEntry = null,
   selectedPath,
   showCommitForm = false,
   onResizeDetails,
@@ -31,7 +33,9 @@ export function CommitInspector({
   files: RepositoryPayload["files"];
   gitFileActions?: TreeGitFileActions;
   gitWriteActions: GitWriteActions;
+  historyMode?: "commits" | "reflog";
   orientation?: "vertical" | "horizontal";
+  selectedReflogEntry?: ReflogEntry | null;
   selectedPath: string | null;
   showCommitForm?: boolean;
   onResizeDetails(delta: number): void;
@@ -105,6 +109,8 @@ export function CommitInspector({
         commit={commit}
         files={files}
         gitWriteActions={gitWriteActions}
+        historyMode={historyMode}
+        selectedReflogEntry={selectedReflogEntry}
         showCommitForm={showCommitForm}
       />
     </aside>
@@ -116,12 +122,16 @@ const CommitDetails = memo(function CommitDetails({
   branchName,
   files,
   gitWriteActions,
+  historyMode,
+  selectedReflogEntry,
   showCommitForm,
 }: {
   commit: CommitInfo | null;
   branchName?: string;
   files: RepositoryPayload["files"];
   gitWriteActions: GitWriteActions;
+  historyMode: "commits" | "reflog";
+  selectedReflogEntry: ReflogEntry | null;
   showCommitForm: boolean;
 }) {
   if (!commit) {
@@ -141,6 +151,8 @@ const CommitDetails = memo(function CommitDetails({
   }
 
   const fileCount = files.length;
+  const showReflogRestore =
+    historyMode === "reflog" && selectedReflogEntry !== null;
 
   return (
     <section className="commit-details-section">
@@ -153,12 +165,24 @@ const CommitDetails = memo(function CommitDetails({
           <span>{commit.author}</span>
           <span>{formatDate(commit.date)}</span>
         </div>
-        <div className="commit-detail-line">
-          <GitBranch size={13} />
-          <span>
-            In 1 branch: <strong>{branchName ?? "current"}</strong>
-          </span>
-        </div>
+        {showReflogRestore && selectedReflogEntry ? (
+          <div className="commit-detail-line">
+            <RotateCcw size={13} />
+            <span className="commit-reflog-meta">
+              <span className="compact-detail-pill mono-value">
+                {selectedReflogEntry.selector}
+              </span>
+              <span>{selectedReflogEntry.action}</span>
+            </span>
+          </div>
+        ) : (
+          <div className="commit-detail-line">
+            <GitBranch size={13} />
+            <span>
+              In 1 branch: <strong>{branchName ?? "current"}</strong>
+            </span>
+          </div>
+        )}
         <div className="commit-detail-line muted">
           <span>{fileCount} changed {fileCount === 1 ? "file" : "files"}</span>
         </div>

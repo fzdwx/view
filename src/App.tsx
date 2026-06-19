@@ -39,7 +39,7 @@ import {
 } from "./hooks/useRepositoryWorkspaceData";
 import { useSelectedPathGuard } from "./hooks/useSelectedPathGuard";
 import { useWorkbenchDock } from "./hooks/useWorkbenchDock";
-import { type FileSearchResult } from "./lib/api";
+import { type FileSearchResult, type ReflogEntry } from "./lib/api";
 import {
   type SavedProject,
   loadSavedProjects,
@@ -70,9 +70,12 @@ export function App() {
   );
   const [activeBranchRef, setActiveBranchRef] = useState<string | null>(null);
   const [activeCommit, setActiveCommit] = useState<string | null>(null);
+  const [activeReflogSelector, setActiveReflogSelector] = useState<string | null>(null);
   const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(null);
   const [selectedChangePath, setSelectedChangePath] = useState<string | null>(null);
   const [commitFilter, setCommitFilter] = useState("");
+  const [reflogFilter, setReflogFilter] = useState("");
+  const [historyMode, setHistoryMode] = useState<"commits" | "reflog">("commits");
   const [projectSwitcherOpen, setProjectSwitcherOpen] = useState(false);
   const {
     draggedGitPanel,
@@ -122,6 +125,8 @@ export function App() {
     filteredCommits,
     payload,
     projectFilesQuery,
+    reflogEntries,
+    reflogQuery,
     repositoryQuery,
     selectedBranch,
     selectedBranchRef,
@@ -135,6 +140,7 @@ export function App() {
     commandOpen,
     commitFilter,
     debouncedCommandQuery,
+    reflogFilter,
     selectedProjectPath,
   });
   const handleFileSaved = useCallback(
@@ -289,15 +295,28 @@ export function App() {
     confirmDiscardProjectDrafts,
     discardDraftsForProject,
     refetchCommits: commitsQuery.refetch,
+    refetchReflog: reflogQuery.refetch,
     refetchFileWorktreeDiff: fileWorktreeDiffQuery.refetch,
     refetchProjectFiles: projectFilesQuery.refetch,
-    refetchRepository: repositoryQuery.refetch,
-    refreshProjectFileState,
-    setActiveBranchRef,
-    setActiveCommit,
+      refetchRepository: repositoryQuery.refetch,
+      refreshProjectFileState,
+      setActiveBranchRef,
+      setActiveCommit,
     setSelectedChangePath,
     showDiffSelection,
-  });
+    });
+
+  useEffect(() => {
+    setActiveReflogSelector(null);
+  }, [activeProjectPath]);
+
+  const selectedReflogEntry = useMemo(
+    () =>
+      activeReflogSelector
+        ? reflogEntries.find((entry) => entry.selector === activeReflogSelector) ?? null
+        : null,
+    [activeReflogSelector, reflogEntries],
+  );
 
   useEffect(() => {
     const payload = repositoryQuery.data;
@@ -395,6 +414,12 @@ export function App() {
   const closePullChoice = useCallback(() => {
     setPullChoiceOpen(false);
   }, [setPullChoiceOpen]);
+  const changeHistoryMode = useCallback((mode: "commits" | "reflog") => {
+    setHistoryMode(mode);
+    if (mode === "commits") {
+      setActiveReflogSelector(null);
+    }
+  }, []);
   const saveActivePreviewFile = useCallback(() => {
     void saveActiveFile();
   }, [saveActiveFile]);
@@ -468,6 +493,7 @@ export function App() {
     (refName: string) => {
       setActiveBranchRef(refName);
       setActiveCommit(null);
+      setActiveReflogSelector(null);
       setSelectedChangePath(null);
       showDiffSelection();
     },
@@ -477,6 +503,17 @@ export function App() {
   const selectCommit = useCallback(
     (hash: string) => {
       setActiveCommit(hash);
+      setActiveReflogSelector(null);
+      setSelectedChangePath(null);
+      showDiffSelection();
+    },
+    [showDiffSelection],
+  );
+
+  const selectReflogEntry = useCallback(
+    (entry: ReflogEntry) => {
+      setActiveCommit(entry.hash);
+      setActiveReflogSelector(entry.selector);
       setSelectedChangePath(null);
       showDiffSelection();
     },
@@ -485,9 +522,24 @@ export function App() {
 
   const selectWorkingTree = useCallback(() => {
     setActiveCommit(null);
+    setActiveReflogSelector(null);
     setSelectedChangePath(null);
     showDiffSelection();
   }, [showDiffSelection]);
+  const restoreReflogEntry = useCallback(
+    async (selector: string) => {
+      const restored = await gitWriteActions.resetHardToReflogEntry(selector);
+      if (!restored) {
+        return;
+      }
+
+      setActiveCommit(null);
+      setActiveReflogSelector(null);
+      setSelectedChangePath(null);
+      showDiffSelection();
+    },
+    [gitWriteActions, showDiffSelection],
+  );
   const openDiffPreviewPath = useCallback(
     (path: string) => {
       openPreviewTab("diff", path);
@@ -530,43 +582,63 @@ export function App() {
   const gitPanelData = useMemo<GitPanelDataProps>(
     () => ({
       activeCommit,
+      activeReflogSelector,
       commitFilter,
       commits,
       commitsLoading: commitsQuery.isLoading,
       filteredCommits,
       gitFileActions: treeGitFileActions,
+      historyMode,
       gitWriteActions,
       payload,
+      reflogEntries,
+      reflogFilter,
+      reflogLoading: reflogQuery.isLoading,
       selectedBranch,
       selectedBranchRef,
       selectedChangePath,
       selectedCommit,
+      selectedReflogEntry,
       onBranchAction: performBranchAction,
       onChangeCommitFilter: setCommitFilter,
+      onChangeHistoryMode: changeHistoryMode,
+      onChangeReflogFilter: setReflogFilter,
       onOpenDiffPath: openDiffPreviewPath,
       onResizeCommitInfo: resizeCommitInfo,
       onSelectBranch: selectBranchRef,
       onSelectCommit: selectCommit,
+      onSelectReflogEntry: selectReflogEntry,
       onSelectWorkingTree: selectWorkingTree,
+      onRestoreReflogEntry: restoreReflogEntry,
     }),
     [
       activeCommit,
+      activeReflogSelector,
+      changeHistoryMode,
       commitFilter,
       commits,
       commitsQuery.isLoading,
       filteredCommits,
       gitWriteActions,
+      historyMode,
       openDiffPreviewPath,
       payload,
       performBranchAction,
+      reflogEntries,
+      reflogFilter,
+      reflogQuery.isLoading,
       resizeCommitInfo,
+      restoreReflogEntry,
       selectBranchRef,
       selectCommit,
+      selectReflogEntry,
       selectWorkingTree,
       selectedBranch,
       selectedBranchRef,
       selectedChangePath,
       selectedCommit,
+      selectedReflogEntry,
+      setReflogFilter,
       treeGitFileActions,
     ],
   );

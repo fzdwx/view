@@ -82,6 +82,14 @@ export function CommitForm({
           )}
           <span>{gitWriteActions.commitPending ? "Committing" : "Commit"}</span>
         </button>
+        {gitWriteActions.commitMessageHint ? (
+          <span
+            className="commit-form-hint"
+            title={gitWriteActions.commitMessageHint}
+          >
+            {gitWriteActions.commitMessageHint}
+          </span>
+        ) : null}
         {gitWriteActions.commitWarning ? (
           <span className="commit-form-warning" title={gitWriteActions.commitWarning}>
             {gitWriteActions.commitWarning}

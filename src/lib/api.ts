@@ -50,6 +50,16 @@ export interface CommitInfo {
   subject: string;
 }
 
+export interface ReflogEntry {
+  selector: string;
+  hash: string;
+  shortHash: string;
+  author: string;
+  date: string;
+  action: string;
+  subject: string;
+}
+
 export type GitStatus =
   | "added"
   | "conflict"
@@ -169,6 +179,11 @@ export interface CommitRequest {
   readonly message: string;
 }
 
+export interface ResetHardToReflogRequest {
+  readonly path: string;
+  readonly selector: string;
+}
+
 export interface GitWriteResponse {
   readonly summary: RepositorySummary;
   readonly files: TreeFile[];
@@ -216,10 +231,22 @@ export async function getFileDiff(
 export async function getCommits(
   path: string,
   branch?: string | null,
+  filter?: string | null,
 ): Promise<CommitInfo[]> {
   return invoke<CommitInfo[]>("get_commits", {
     path,
     branch: branch ?? null,
+    filter: filter ?? null,
+  });
+}
+
+export async function getReflog(
+  path: string,
+  filter?: string | null,
+): Promise<ReflogEntry[]> {
+  return invoke<ReflogEntry[]>("get_reflog", {
+    path,
+    filter: filter ?? null,
   });
 }
 
@@ -402,6 +429,12 @@ export async function pushCurrentBranch(
   path: string,
 ): Promise<GitWriteResponse> {
   return invoke<GitWriteResponse>("push_current_branch", { path });
+}
+
+export async function resetHardToReflog(
+  request: ResetHardToReflogRequest,
+): Promise<GitWriteResponse> {
+  return invoke<GitWriteResponse>("reset_hard_to_reflog", { request });
 }
 
 export async function terminalSpawn(

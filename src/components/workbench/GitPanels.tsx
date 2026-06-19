@@ -1,5 +1,10 @@
 import { memo, type CSSProperties, type ReactNode } from "react";
-import type { BranchInfo, CommitInfo, RepositoryPayload } from "../../lib/api";
+import type {
+  BranchInfo,
+  CommitInfo,
+  ReflogEntry,
+  RepositoryPayload,
+} from "../../lib/api";
 import type { BranchActionKind } from "../../lib/branchModels";
 import type { GitWriteActions } from "../../hooks/useGitWriteActions";
 import {
@@ -24,27 +29,37 @@ type ResizePanel = (
 
 export interface GitPanelDataProps {
   readonly activeCommit: string | null;
+  readonly activeReflogSelector: string | null;
   readonly commitFilter: string;
   readonly commits: CommitInfo[];
   readonly commitsLoading: boolean;
   readonly filteredCommits: CommitInfo[];
   readonly gitFileActions?: TreeGitFileActions;
+  readonly historyMode: "commits" | "reflog";
   readonly gitWriteActions: GitWriteActions;
   readonly payload: RepositoryPayload | undefined;
+  readonly reflogEntries: ReflogEntry[];
+  readonly reflogFilter: string;
+  readonly reflogLoading: boolean;
   readonly selectedBranch: BranchInfo | null;
   readonly selectedBranchRef: string | null;
   readonly selectedChangePath: string | null;
   readonly selectedCommit: CommitInfo | null;
+  readonly selectedReflogEntry: ReflogEntry | null;
   readonly onBranchAction: (
     action: BranchActionKind,
     branch: BranchInfo,
   ) => void;
   readonly onChangeCommitFilter: (filter: string) => void;
+  readonly onChangeHistoryMode: (mode: "commits" | "reflog") => void;
+  readonly onChangeReflogFilter: (filter: string) => void;
   readonly onOpenDiffPath: (path: string) => void;
   readonly onResizeCommitInfo: (delta: number) => void;
   readonly onSelectBranch: (refName: string) => void;
   readonly onSelectCommit: (hash: string) => void;
+  readonly onSelectReflogEntry: (entry: ReflogEntry) => void;
   readonly onSelectWorkingTree: () => void;
+  readonly onRestoreReflogEntry: (selector: string) => void | Promise<void>;
 }
 
 export interface GitPanelsProps {
@@ -127,25 +142,35 @@ GitPanels.displayName = "GitPanels";
 
 export const GitPanelBody = memo(function GitPanelBody({
   activeCommit,
+  activeReflogSelector,
   commitFilter,
   commits,
   commitsLoading,
   filteredCommits,
   gitFileActions,
+  historyMode,
   gitWriteActions,
   panelId,
   payload,
+  reflogEntries,
+  reflogFilter,
+  reflogLoading,
   selectedBranch,
   selectedBranchRef,
   selectedChangePath,
   selectedCommit,
+  selectedReflogEntry,
   onBranchAction,
   onChangeCommitFilter,
+  onChangeHistoryMode,
+  onChangeReflogFilter,
   onOpenDiffPath,
   onResizeCommitInfo,
   onSelectBranch,
   onSelectCommit,
+  onSelectReflogEntry,
   onSelectWorkingTree,
+  onRestoreReflogEntry,
   commitDetailSize,
 }: GitPanelDataProps & {
   readonly panelId: GitPanelId;
@@ -175,12 +200,21 @@ export const GitPanelBody = memo(function GitPanelBody({
             commits={filteredCommits}
             graphWidthCommits={commits}
             activeCommit={activeCommit}
+            activeReflogSelector={activeReflogSelector}
             branch={selectedBranch}
             filter={commitFilter}
             gitWriteActions={gitWriteActions}
+            historyMode={historyMode}
             loading={commitsLoading}
             onChangeFilter={onChangeCommitFilter}
+            onChangeHistoryMode={onChangeHistoryMode}
+            onChangeReflogFilter={onChangeReflogFilter}
+            reflogEntries={reflogEntries}
+            reflogFilter={reflogFilter}
+            reflogLoading={reflogLoading}
             onSelectCommit={onSelectCommit}
+            onSelectReflogEntry={onSelectReflogEntry}
+            onRestoreReflogEntry={onRestoreReflogEntry}
             onSelectWorkingTree={onSelectWorkingTree}
           />
         </section>
@@ -193,7 +227,9 @@ export const GitPanelBody = memo(function GitPanelBody({
           files={payload?.files ?? []}
           gitFileActions={gitFileActions}
           gitWriteActions={gitWriteActions}
+          historyMode={historyMode}
           detailHeight={commitDetailSize ?? 154}
+          selectedReflogEntry={selectedReflogEntry}
           selectedPath={selectedChangePath}
           onResizeDetails={onResizeCommitInfo}
           onSelectPath={onOpenDiffPath}

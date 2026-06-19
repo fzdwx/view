@@ -7,6 +7,7 @@ import {
 } from "react";
 import {
   createCommit,
+  resetHardToReflog,
   pushCurrentBranch,
   type BranchInfo,
   type RepositoryPayload,
@@ -18,6 +19,7 @@ import type { SavedProject } from "../lib/projects";
 import {
   commitDirtyDraftWarning,
   commitDisabledReason as commitReason,
+  commitMessageLint,
   countConflictFiles,
   countStagedFiles,
   currentRepositoryBranch,
@@ -43,6 +45,7 @@ export interface GitWriteActions {
   readonly canPush: boolean;
   readonly commitDisabledReason: string | null;
   readonly commitError: string | null;
+  readonly commitMessageHint: string | null;
   readonly commitMessage: string;
   readonly commitPending: boolean;
   readonly commitStagedChanges: () => Promise<boolean>;
@@ -56,6 +59,10 @@ export interface GitWriteActions {
   readonly pushDisabledReason: string | null;
   readonly pushError: string | null;
   readonly pushPending: boolean;
+  readonly resetDisabledReason: string | null;
+  readonly resetError: string | null;
+  readonly resetHardToReflogEntry: (selector: string) => Promise<boolean>;
+  readonly resetPending: boolean;
   readonly setCommitMessage: Dispatch<SetStateAction<string>>;
   readonly stagedCount: number;
 }
@@ -71,6 +78,7 @@ export function useGitWriteActions({
   const [commitMessage, setCommitMessage] = useState("");
   const [commitError, setCommitError] = useState<string | null>(null);
   const [pushError, setPushError] = useState<string | null>(null);
+  const [resetError, setResetError] = useState<string | null>(null);
   const { beginGitWrite, endGitWrite, pendingOperation } = gitWriteGuard;
   const pendingGitWriteAction =
     pendingOperation?.scope === "repository" ? pendingOperation.kind : null;
@@ -98,18 +106,24 @@ export function useGitWriteActions({
     [repositoryPayload?.summary.branches],
   );
   const trimmedCommitMessage = commitMessage.trim();
+  const hasNulByte = commitMessage.includes("\0");
   const commitDisabledReason = commitReason({
     activeProjectPath,
     conflictCount,
+    hasNulByte,
     pendingOperation,
     stagedCount,
     trimmedMessage: trimmedCommitMessage,
   });
+  const commitMessageHint = commitMessageLint(commitMessage);
   const pushDisabledReason = pushReason({
     activeProjectPath,
     branch: currentBranch,
     pendingOperation,
   });
+  const resetDisabledReason = !activeProjectPath
+    ? "Open a repository before resetting history."
+    : gitWriteOperationPendingTitle(pendingOperation);
   const commitWarning = commitDirtyDraftWarning(dirtyDraftCount);
 
   const commitStagedChanges = useCallback(async (): Promise<boolean> => {
@@ -128,6 +142,7 @@ export function useGitWriteActions({
 
     setCommitError(null);
     setPushError(null);
+    setResetError(null);
     let shouldRefresh = false;
 
     try {
@@ -186,6 +201,7 @@ export function useGitWriteActions({
 
     setCommitError(null);
     setPushError(null);
+    setResetError(null);
     let shouldRefresh = false;
 
     try {
@@ -211,11 +227,78 @@ export function useGitWriteActions({
     refreshProjectFileState,
   ]);
 
+  const resetHardToReflogEntry = useCallback(async (selector: string): Promise<boolean> => {
+    if (resetDisabledReason) {
+      setResetError(resetDisabledReason);
+      await showNativeMessage(resetDisabledReason, { kind: "warning" });
+      return false;
+    }
+
+    const normalizedSelector = selector.trim();
+    if (!normalizedSelector) {
+      const message = "Choose a reflog entry before resetting history.";
+      setResetError(message);
+      await showNativeMessage(message, { kind: "warning" });
+      return false;
+    }
+
+    const operation = {
+      kind: "reset",
+      scope: "repository",
+    } satisfies GitWriteOperation;
+    if (!activeProjectPath || !beginGitWrite(operation)) {
+      return false;
+    }
+
+    setCommitError(null);
+    setPushError(null);
+    setResetError(null);
+    let shouldRefresh = false;
+
+    try {
+      const confirmed = await confirmNativeDialog(
+        `Restore the current branch to ${normalizedSelector}?\n\nThis runs git reset --hard ${normalizedSelector}.\n\nTracked staged and unstaged changes will be discarded. Untracked files are left as-is.`,
+        {
+          cancelLabel: "Cancel",
+          kind: "warning",
+          okLabel: "Reset --hard",
+        },
+      );
+      if (!confirmed) {
+        return false;
+      }
+
+      shouldRefresh = true;
+      await resetHardToReflog({
+        path: activeProjectPath,
+        selector: normalizedSelector,
+      });
+      return true;
+    } catch (error) {
+      const message = errorMessage(error);
+      setResetError(message);
+      await showNativeMessage(message, { kind: "error" });
+      return false;
+    } finally {
+      if (shouldRefresh) {
+        await refreshProjectFileState(activeProjectPath);
+      }
+      endGitWrite(operation);
+    }
+  }, [
+    activeProjectPath,
+    beginGitWrite,
+    endGitWrite,
+    refreshProjectFileState,
+    resetDisabledReason,
+  ]);
+
   return {
     canCommit: commitDisabledReason === null,
     canPush: pushDisabledReason === null,
     commitDisabledReason,
     commitError,
+    commitMessageHint,
     commitMessage,
     commitPending: pendingGitWriteAction === "commit",
     commitStagedChanges,
@@ -229,6 +312,10 @@ export function useGitWriteActions({
     pushDisabledReason,
     pushError,
     pushPending: pendingGitWriteAction === "push",
+    resetDisabledReason,
+    resetError,
+    resetHardToReflogEntry,
+    resetPending: pendingGitWriteAction === "reset",
     setCommitMessage,
     stagedCount,
   };

@@ -19,6 +19,13 @@ pub(crate) struct CommitRequest {
     pub(crate) message: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ResetHardToReflogRequest {
+    pub(crate) path: String,
+    pub(crate) selector: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CommitWriteResponse {
@@ -73,6 +80,14 @@ pub(crate) fn push_current_branch(path: String) -> Result<GitWriteResponse, Stri
     .map_err(map_push_error)?;
     verify_remote_ref_matches_head(&root, &target)?;
 
+    git_write_response(&root)
+}
+
+#[tauri::command]
+pub(crate) fn reset_hard_to_reflog(request: ResetHardToReflogRequest) -> Result<GitWriteResponse, String> {
+    let root = repository_root(&request.path)?;
+    let selector = normalize_reflog_selector(&request.selector)?;
+    git(&root, &["reset", "--hard", selector.as_str()]).map_err(map_reset_error)?;
     git_write_response(&root)
 }
 
@@ -203,6 +218,29 @@ fn git_trim(root: &Path, args: &[&str]) -> Result<String, String> {
     Ok(git(root, args)?.trim().to_string())
 }
 
+fn normalize_reflog_selector(selector: &str) -> Result<String, String> {
+    let trimmed = selector.trim();
+    if trimmed.is_empty() {
+        return Err("Reflog selector cannot be empty".to_string());
+    }
+    if trimmed.contains('\0') {
+        return Err("Reflog selector cannot contain NUL bytes".to_string());
+    }
+
+    let Some(index) = trimmed
+        .strip_prefix("HEAD@{")
+        .and_then(|value| value.strip_suffix('}'))
+    else {
+        return Err("Only numeric HEAD reflog selectors are supported here".to_string());
+    };
+
+    if index.is_empty() || !index.chars().all(|character| character.is_ascii_digit()) {
+        return Err("Only numeric HEAD reflog selectors are supported here".to_string());
+    }
+
+    Ok(trimmed.to_string())
+}
+
 fn map_commit_error(error: String) -> String {
     let lower = error.to_ascii_lowercase();
     if lower.contains("nothing to commit")
@@ -243,6 +281,18 @@ fn map_push_error(error: String) -> String {
         format!("Push was rejected by a Git hook: {error}")
     } else {
         format!("Failed to push current branch: {error}")
+    }
+}
+
+fn map_reset_error(error: String) -> String {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("unknown revision")
+        || lower.contains("ambiguous argument")
+        || lower.contains("log for")
+    {
+        format!("Reflog entry could not be resolved: {error}")
+    } else {
+        format!("Failed to reset to reflog entry: {error}")
     }
 }
 

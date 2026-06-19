@@ -1,4 +1,4 @@
-use super::super::CommitRequest;
+use super::super::{CommitRequest, ResetHardToReflogRequest};
 use std::env;
 use std::fs;
 use std::io::{ErrorKind, Read, Write};
@@ -16,6 +16,16 @@ pub(super) fn commit_request(repo: &Path, message: &str) -> CommitRequest {
     CommitRequest {
         path: repo.to_string_lossy().to_string(),
         message: message.to_string(),
+    }
+}
+
+pub(super) fn reset_hard_to_reflog_request(
+    repo: &Path,
+    selector: &str,
+) -> ResetHardToReflogRequest {
+    ResetHardToReflogRequest {
+        path: repo.to_string_lossy().to_string(),
+        selector: selector.to_string(),
     }
 }
 

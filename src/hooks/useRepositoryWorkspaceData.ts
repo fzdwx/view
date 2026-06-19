@@ -3,24 +3,25 @@ import {
   useQuery,
   type UseQueryResult,
 } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   type CommitInfo,
   type FileContent,
   type FileSearchResult,
   type GitStatus,
+  type ReflogEntry,
   type RepositoryPayload,
   type TreeFile,
   getCommits,
   getFileContent,
   getFileDiff,
   getProjectFiles,
+  getReflog,
   loadRepository,
   searchFileContents,
   searchFileNames,
 } from "../lib/api";
 import type { CommandPanelMode } from "./useCommandPanel";
-import { filterCommits } from "../lib/commitFilters";
 import {
   countDiffStats,
   filterDiffFiles,
@@ -61,6 +62,7 @@ export interface RepositoryProjectDataOptions {
   readonly commandOpen: boolean;
   readonly commitFilter: string;
   readonly debouncedCommandQuery: string;
+  readonly reflogFilter: string;
   readonly selectedProjectPath: string | null;
 }
 
@@ -75,6 +77,8 @@ export interface RepositoryProjectData {
   readonly filteredCommits: CommitInfo[];
   readonly payload: RepositoryPayload | undefined;
   readonly projectFilesQuery: UseQueryResult<TreeFile[], Error>;
+  readonly reflogEntries: ReflogEntry[];
+  readonly reflogQuery: UseQueryResult<ReflogEntry[], Error>;
   readonly repositoryQuery: UseQueryResult<RepositoryPayload, Error>;
   readonly selectedBranch: RepositoryPayload["summary"]["branches"][number] | null;
   readonly selectedBranchRef: string | null;
@@ -111,8 +115,33 @@ export function useRepositoryProjectData({
   commandOpen,
   commitFilter,
   debouncedCommandQuery,
+  reflogFilter,
   selectedProjectPath,
 }: RepositoryProjectDataOptions): RepositoryProjectData {
+  const [debouncedCommitFilter, setDebouncedCommitFilter] = useState("");
+  const [debouncedReflogFilter, setDebouncedReflogFilter] = useState("");
+  const [knownCommits, setKnownCommits] = useState<CommitInfo[]>([]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedCommitFilter(commitFilter.trim());
+    }, 140);
+
+    return () => window.clearTimeout(timer);
+  }, [commitFilter]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedReflogFilter(reflogFilter.trim());
+    }, 140);
+
+    return () => window.clearTimeout(timer);
+  }, [reflogFilter]);
+
+  useEffect(() => {
+    setKnownCommits([]);
+  }, [activeProjectPath]);
+
   const repositoryQuery = useQuery({
     queryKey: ["repository", activeProjectPath, activeCommit],
     queryFn: () =>
@@ -127,11 +156,29 @@ export function useRepositoryProjectData({
   });
 
   const commitsQuery = useQuery({
-    queryKey: ["commits", activeProjectPath, activeBranchRef],
+    queryKey: [
+      "commits",
+      activeProjectPath,
+      activeBranchRef,
+      debouncedCommitFilter,
+    ],
     queryFn: () =>
       getCommits(
         requireQueryInput(activeProjectPath, "commits path"),
         activeBranchRef,
+        debouncedCommitFilter,
+      ),
+    enabled: Boolean(activeProjectPath),
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+
+  const reflogQuery = useQuery({
+    queryKey: ["reflog", activeProjectPath, debouncedReflogFilter],
+    queryFn: () =>
+      getReflog(
+        requireQueryInput(activeProjectPath, "reflog path"),
+        debouncedReflogFilter,
       ),
     enabled: Boolean(activeProjectPath),
     placeholderData: keepPreviousData,
@@ -200,10 +247,29 @@ export function useRepositoryProjectData({
     [projectFilesQuery.data, repositoryQuery.data?.files, selectedProjectPath],
   );
   const selectedProjectStatus = selectedProjectFile?.status ?? null;
-  const commits = commitsQuery.data ?? payload?.commits ?? [];
-  const filteredCommits = useMemo(
-    () => filterCommits(commits, commitFilter),
-    [commits, commitFilter],
+  const filteredCommits = commitsQuery.data ?? payload?.commits ?? [];
+  const reflogEntries = reflogQuery.data ?? [];
+  const reflogCommits = useMemo(
+    () => reflogEntries.map(reflogEntryToCommitInfo),
+    [reflogEntries],
+  );
+  const liveCommits = useMemo(
+    () => mergeCommitLists(filteredCommits, reflogCommits, payload?.commits ?? []),
+    [filteredCommits, payload?.commits, reflogCommits],
+  );
+  useEffect(() => {
+    if (liveCommits.length === 0) {
+      return;
+    }
+
+    setKnownCommits((current) => {
+      const merged = mergeCommitLists(liveCommits, current);
+      return merged.length === current.length ? current : merged;
+    });
+  }, [liveCommits]);
+  const commits = useMemo(
+    () => mergeCommitLists(liveCommits, knownCommits),
+    [knownCommits, liveCommits],
   );
   const currentBranchRef =
     payload?.summary.branches.find((branch) => branch.current)?.refName ?? null;
@@ -212,8 +278,13 @@ export function useRepositoryProjectData({
     payload?.summary.branches.find(
       (branch) => branch.refName === selectedBranchRef,
     ) ?? null;
-  const selectedCommit =
-    commits.find((commit) => commit.hash === activeCommit) ?? null;
+  const selectedCommit = useMemo(
+    () =>
+      activeCommit
+        ? commits.find((commit) => commit.hash === activeCommit) ?? null
+        : null,
+    [activeCommit, commits],
+  );
   const commandResults =
     debouncedCommandQuery.trim().length > 0
       ? (fileSearchQuery.data ?? [])
@@ -230,12 +301,45 @@ export function useRepositoryProjectData({
     filteredCommits,
     payload,
     projectFilesQuery,
+    reflogEntries,
+    reflogQuery,
     repositoryQuery,
     selectedBranch,
     selectedBranchRef,
     selectedCommit,
     selectedProjectFile,
     selectedProjectStatus,
+  };
+}
+
+function mergeCommitLists(
+  ...lists: readonly (readonly CommitInfo[])[]
+): CommitInfo[] {
+  const seen = new Set<string>();
+  const merged: CommitInfo[] = [];
+
+  for (const list of lists) {
+    for (const commit of list) {
+      if (seen.has(commit.hash)) {
+        continue;
+      }
+
+      seen.add(commit.hash);
+      merged.push(commit);
+    }
+  }
+
+  return merged;
+}
+
+function reflogEntryToCommitInfo(entry: ReflogEntry): CommitInfo {
+  return {
+    hash: entry.hash,
+    shortHash: entry.shortHash,
+    parents: [],
+    author: entry.author,
+    date: entry.date,
+    subject: entry.subject || entry.action,
   };
 }
 

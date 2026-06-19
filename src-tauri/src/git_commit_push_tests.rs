@@ -1,4 +1,4 @@
-use super::{create_commit, push_current_branch};
+use super::{create_commit, push_current_branch, reset_hard_to_reflog};
 use std::fs;
 
 #[path = "git_commit_push_test_support.rs"]
@@ -7,7 +7,7 @@ mod support;
 use support::{
     advance_remote, auth_required_http_remote, commit_request, create_clone_with_local_bare_remote,
     create_repo_with_staged_file_without_identity, create_repo_with_tracked_file, git_head,
-    git_status, install_hook, run_git, run_git_dir, write_evidence,
+    git_status, install_hook, reset_hard_to_reflog_request, run_git, run_git_dir, write_evidence,
 };
 
 #[test]
@@ -152,6 +152,57 @@ fn commit_rejects_nul_message_before_git_commit() {
     assert!(error.contains("NUL"));
     assert_eq!(git_head(repo.path()), before_head);
     assert!(!repo.path().join("hook-ran").exists());
+}
+
+#[test]
+fn reset_hard_to_reflog_moves_head_and_discards_tracked_changes() {
+    // Given: the repository has multiple reflog entries plus staged and unstaged changes.
+    let repo = create_repo_with_tracked_file("reset-reflog");
+    fs::write(repo.path().join("tracked.txt"), "first\n").expect("write first");
+    run_git(repo.path(), &["add", "tracked.txt"]);
+    let target_commit = create_commit(commit_request(repo.path(), "first")).expect("commit first");
+
+    fs::write(repo.path().join("tracked.txt"), "second\n").expect("write second");
+    run_git(repo.path(), &["add", "tracked.txt"]);
+    create_commit(commit_request(repo.path(), "second")).expect("commit second");
+
+    fs::write(repo.path().join("tracked.txt"), "staged dirty\n").expect("write staged dirty");
+    run_git(repo.path(), &["add", "tracked.txt"]);
+    fs::write(repo.path().join("tracked.txt"), "unstaged dirty\n").expect("write unstaged dirty");
+
+    // When: resetting hard to the previous reflog position.
+    let response = reset_hard_to_reflog(reset_hard_to_reflog_request(repo.path(), "HEAD@{1}"))
+        .expect("reset to reflog");
+
+    // Then: HEAD moves back and tracked changes are discarded.
+    let reflog_action = run_git(repo.path(), &["reflog", "-1", "--pretty=%gs"]);
+    assert_eq!(git_head(repo.path()), target_commit.hash);
+    assert_eq!(
+        fs::read_to_string(repo.path().join("tracked.txt")).expect("read tracked"),
+        "first\n"
+    );
+    assert!(git_status(repo.path()).trim().is_empty());
+    assert!(reflog_action.contains("reset: moving to HEAD@{1}"));
+    assert_eq!(response.summary.head, target_commit.short_hash);
+    assert!(response.files.is_empty());
+}
+
+#[test]
+fn reset_hard_to_reflog_rejects_non_numeric_selector() {
+    // Given: a valid repository.
+    let repo = create_repo_with_tracked_file("reset-invalid-selector");
+
+    // When: reset_hard_to_reflog receives a non-numeric selector.
+    let error = match reset_hard_to_reflog(reset_hard_to_reflog_request(
+        repo.path(),
+        "HEAD@{yesterday}",
+    )) {
+        Ok(_) => panic!("non-numeric selector should be rejected"),
+        Err(error) => error,
+    };
+
+    // Then: the command is rejected before invoking git reset.
+    assert!(error.contains("Only numeric HEAD reflog selectors are supported"));
 }
 
 #[test]

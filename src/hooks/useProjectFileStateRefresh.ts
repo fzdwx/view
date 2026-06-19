@@ -7,6 +7,7 @@ import {
 const durableProjectStateQueryRoots = [
   "commits",
   "project-files",
+  "reflog",
   "repository",
 ] as const;
 

@@ -9,6 +9,7 @@ export type { GitRepositoryWriteKind } from "./useGitWriteGuard";
 export interface CommitReasonInput {
   readonly activeProjectPath: string | null;
   readonly conflictCount: number;
+  readonly hasNulByte: boolean;
   readonly pendingOperation: GitWriteOperation | null;
   readonly stagedCount: number;
   readonly trimmedMessage: string;
@@ -45,6 +46,7 @@ export function commitDirtyDraftWarning(dirtyDraftCount: number): string | null 
 export function commitDisabledReason({
   activeProjectPath,
   conflictCount,
+  hasNulByte,
   pendingOperation,
   stagedCount,
   trimmedMessage,
@@ -56,6 +58,9 @@ export function commitDisabledReason({
   if (pendingReason) {
     return pendingReason;
   }
+  if (hasNulByte) {
+    return "Commit message cannot contain NUL bytes.";
+  }
   if (trimmedMessage.length === 0) {
     return "Enter a commit message before committing.";
   }
@@ -64,6 +69,24 @@ export function commitDisabledReason({
   }
   if (conflictCount > 0) {
     return "Resolve conflicted files before committing.";
+  }
+
+  return null;
+}
+
+export function commitMessageLint(message: string): string | null {
+  const normalized = message.replace(/\r\n/g, "\n");
+  if (!normalized.trim()) {
+    return null;
+  }
+
+  const [subject = "", ...bodyLines] = normalized.split("\n");
+  if (subject.trim().length > 72) {
+    return `Subject line is ${subject.trim().length} characters; aim for 72 or fewer.`;
+  }
+
+  if (bodyLines.some((line) => line.trim().length > 0) && bodyLines[0]?.trim()) {
+    return "Add a blank line between the subject and body for readability.";
   }
 
   return null;

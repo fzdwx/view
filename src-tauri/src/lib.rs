@@ -106,6 +106,66 @@ struct CommitInfo {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ReflogEntry {
+    selector: String,
+    hash: String,
+    short_hash: String,
+    author: String,
+    date: String,
+    action: String,
+    subject: String,
+}
+
+#[derive(Default)]
+struct CommitLogFilter {
+    authors: Vec<String>,
+    paths: Vec<String>,
+    after: Option<String>,
+    before: Option<String>,
+    text_terms: Vec<String>,
+}
+
+impl CommitLogFilter {
+    fn parse(filter: Option<&str>) -> Self {
+        let mut parsed = Self::default();
+        let Some(filter) = filter.map(str::trim).filter(|value| !value.is_empty()) else {
+            return parsed;
+        };
+
+        for token in tokenize_commit_filter(filter) {
+            let Some((key, value)) = token.split_once(':') else {
+                parsed.text_terms.push(token);
+                continue;
+            };
+            let key = key.trim().to_ascii_lowercase();
+            let value = value.trim();
+            if value.is_empty() {
+                parsed.text_terms.push(token);
+                continue;
+            }
+
+            match key.as_str() {
+                "author" => parsed.authors.push(value.to_string()),
+                "path" => match normalize_user_repo_path(value) {
+                    Ok(path) => parsed.paths.push(path),
+                    Err(_) => parsed.text_terms.push(token),
+                },
+                "after" => parsed.after = Some(value.to_string()),
+                "before" => parsed.before = Some(value.to_string()),
+                _ => parsed.text_terms.push(token),
+            }
+        }
+
+        parsed
+    }
+
+    fn has_text_terms(&self) -> bool {
+        !self.text_terms.is_empty()
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct RepositoryPayload {
     summary: RepositorySummary,
     commits: Vec<CommitInfo>,
@@ -339,7 +399,7 @@ fn load_repository(
 ) -> Result<RepositoryPayload, String> {
     let root = repository_root(&path)?;
     let summary = repository_summary(&root)?;
-    let commits = git_log(&root, branch.as_deref())?;
+    let commits = git_log(&root, branch.as_deref(), None)?;
     let files = changed_files(&root, commit.as_deref())?;
 
     Ok(RepositoryPayload {
@@ -372,9 +432,19 @@ fn get_file_diff(
 }
 
 #[tauri::command]
-fn get_commits(path: String, branch: Option<String>) -> Result<Vec<CommitInfo>, String> {
+fn get_commits(
+    path: String,
+    branch: Option<String>,
+    filter: Option<String>,
+) -> Result<Vec<CommitInfo>, String> {
     let root = repository_root(&path)?;
-    git_log(&root, branch.as_deref())
+    git_log(&root, branch.as_deref(), filter.as_deref())
+}
+
+#[tauri::command]
+fn get_reflog(path: String, filter: Option<String>) -> Result<Vec<ReflogEntry>, String> {
+    let root = repository_root(&path)?;
+    git_reflog(&root, filter.as_deref())
 }
 
 #[tauri::command]
@@ -782,40 +852,191 @@ fn repository_root(path: &str) -> Result<PathBuf, String> {
     ))
 }
 
-fn git_log(root: &Path, branch: Option<&str>) -> Result<Vec<CommitInfo>, String> {
+fn git_log(
+    root: &Path,
+    branch: Option<&str>,
+    filter: Option<&str>,
+) -> Result<Vec<CommitInfo>, String> {
     let target = branch.filter(|value| !value.trim().is_empty());
+    let commit_filter = CommitLogFilter::parse(filter);
     let mut args = vec![
-        "log",
-        "--topo-order",
-        "--date=iso-strict",
-        "--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%ad%x1f%s",
-        "-n",
-        "120",
+        "log".to_string(),
+        "--topo-order".to_string(),
+        "--date=iso-strict".to_string(),
+        "--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%ad%x1f%s".to_string(),
     ];
 
-    if let Some(target) = target {
-        args.push(target);
+    if let Some(after) = commit_filter.after.as_deref() {
+        args.push(format!("--since={after}"));
+    }
+    if let Some(before) = commit_filter.before.as_deref() {
+        args.push(format!("--until={before}"));
+    }
+    for author in &commit_filter.authors {
+        args.push(format!("--author={author}"));
+    }
+    if !commit_filter.has_text_terms() {
+        args.push("-n".to_string());
+        args.push("120".to_string());
     }
 
-    let output = git(root, &args).unwrap_or_default();
+    if let Some(target) = target {
+        args.push(target.to_string());
+    }
 
-    Ok(output
+    if !commit_filter.paths.is_empty() {
+        args.push("--".to_string());
+        args.extend(commit_filter.paths.iter().cloned());
+    }
+
+    let output = git_owned(root, &args).unwrap_or_default();
+    let commits = output
         .lines()
-        .filter_map(|line| {
-            let parts: Vec<&str> = line.split('\x1f').collect();
-            (parts.len() == 6).then(|| CommitInfo {
-                hash: parts[0].to_string(),
-                short_hash: parts[1].to_string(),
-                parents: parts[2]
-                    .split_whitespace()
-                    .map(ToString::to_string)
-                    .collect(),
-                author: parts[3].to_string(),
-                date: parts[4].to_string(),
-                subject: parts[5].to_string(),
-            })
-        })
-        .collect())
+        .filter_map(parse_commit_log_line)
+        .filter(|commit| matches_commit_text_terms(commit, &commit_filter.text_terms));
+
+    if commit_filter.has_text_terms() {
+        Ok(commits.take(120).collect())
+    } else {
+        Ok(commits.collect())
+    }
+}
+
+fn git_reflog(root: &Path, filter: Option<&str>) -> Result<Vec<ReflogEntry>, String> {
+    let text_terms = filter
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(tokenize_commit_filter)
+        .unwrap_or_default();
+    let mut args = vec![
+        "reflog".to_string(),
+        "--pretty=format:%gD%x1f%H%x1f%h%x1f%an%x1f%cI%x1f%gs%x1f%s".to_string(),
+    ];
+
+    if text_terms.is_empty() {
+        args.push("-n".to_string());
+        args.push("120".to_string());
+    }
+
+    let output = git_owned(root, &args).unwrap_or_default();
+    let entries = output
+        .lines()
+        .filter_map(parse_reflog_line)
+        .filter(|entry| matches_reflog_text_terms(entry, &text_terms));
+
+    if text_terms.is_empty() {
+        Ok(entries.collect())
+    } else {
+        Ok(entries.take(120).collect())
+    }
+}
+
+fn tokenize_commit_filter(filter: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+
+    for character in filter.chars() {
+        if escaped {
+            current.push(character);
+            escaped = false;
+            continue;
+        }
+
+        match character {
+            '\\' if quote.is_some() => escaped = true,
+            '"' | '\'' => {
+                if Some(character) == quote {
+                    quote = None;
+                } else if quote.is_none() {
+                    quote = Some(character);
+                } else {
+                    current.push(character);
+                }
+            }
+            character if character.is_whitespace() && quote.is_none() => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(character),
+        }
+    }
+
+    if escaped {
+        current.push('\\');
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+
+    tokens
+}
+
+fn parse_commit_log_line(line: &str) -> Option<CommitInfo> {
+    let parts: Vec<&str> = line.split('\x1f').collect();
+    (parts.len() == 6).then(|| CommitInfo {
+        hash: parts[0].to_string(),
+        short_hash: parts[1].to_string(),
+        parents: parts[2]
+            .split_whitespace()
+            .map(ToString::to_string)
+            .collect(),
+        author: parts[3].to_string(),
+        date: parts[4].to_string(),
+        subject: parts[5].to_string(),
+    })
+}
+
+fn parse_reflog_line(line: &str) -> Option<ReflogEntry> {
+    let parts: Vec<&str> = line.split('\x1f').collect();
+    (parts.len() == 7).then(|| ReflogEntry {
+        selector: parts[0].to_string(),
+        hash: parts[1].to_string(),
+        short_hash: parts[2].to_string(),
+        author: parts[3].to_string(),
+        date: parts[4].to_string(),
+        action: parts[5].to_string(),
+        subject: parts[6].to_string(),
+    })
+}
+
+fn matches_commit_text_terms(commit: &CommitInfo, text_terms: &[String]) -> bool {
+    matches_search_terms(
+        &[
+        commit.subject.as_str(),
+        commit.author.as_str(),
+        commit.hash.as_str(),
+        commit.short_hash.as_str(),
+        ],
+        text_terms,
+    )
+}
+
+fn matches_reflog_text_terms(entry: &ReflogEntry, text_terms: &[String]) -> bool {
+    matches_search_terms(
+        &[
+            entry.selector.as_str(),
+            entry.action.as_str(),
+            entry.subject.as_str(),
+            entry.author.as_str(),
+            entry.hash.as_str(),
+            entry.short_hash.as_str(),
+        ],
+        text_terms,
+    )
+}
+
+fn matches_search_terms(fields: &[&str], text_terms: &[String]) -> bool {
+    if text_terms.is_empty() {
+        return true;
+    }
+
+    let haystack = fields.join(" ").to_ascii_lowercase();
+    text_terms
+        .iter()
+        .all(|term| haystack.contains(&term.to_ascii_lowercase()))
 }
 
 fn git_branches(root: &Path) -> Result<Vec<BranchInfo>, String> {
@@ -3420,6 +3641,90 @@ mod tests {
         repo
     }
 
+    #[test]
+    fn git_log_applies_backend_commit_filters() {
+        let repo = create_basic_repo();
+
+        write_repo_file(&repo, "src/alpha.txt", "alpha\n");
+        run_git(&repo, &["add", "src/alpha.txt"]);
+        run_git_env(
+            &repo,
+            &["commit", "-m", "initial alpha"],
+            &[
+                ("GIT_AUTHOR_NAME", "Alice Doe"),
+                ("GIT_AUTHOR_EMAIL", "alice@example.test"),
+                ("GIT_AUTHOR_DATE", "2024-01-10T09:00:00+00:00"),
+                ("GIT_COMMITTER_DATE", "2024-01-10T09:00:00+00:00"),
+            ],
+        );
+
+        write_repo_file(&repo, "notes.txt", "notes\n");
+        run_git(&repo, &["add", "notes.txt"]);
+        run_git_env(
+            &repo,
+            &["commit", "-m", "update notes"],
+            &[
+                ("GIT_AUTHOR_NAME", "Bob Example"),
+                ("GIT_AUTHOR_EMAIL", "bob@example.test"),
+                ("GIT_AUTHOR_DATE", "2024-03-15T12:00:00+00:00"),
+                ("GIT_COMMITTER_DATE", "2024-03-15T12:00:00+00:00"),
+            ],
+        );
+
+        write_repo_file(&repo, "src/beta.txt", "beta\n");
+        run_git(&repo, &["add", "src/beta.txt"]);
+        run_git_env(
+            &repo,
+            &["commit", "-m", "refactor beta"],
+            &[
+                ("GIT_AUTHOR_NAME", "Alice Doe"),
+                ("GIT_AUTHOR_EMAIL", "alice@example.test"),
+                ("GIT_AUTHOR_DATE", "2024-05-20T15:30:00+00:00"),
+                ("GIT_COMMITTER_DATE", "2024-05-20T15:30:00+00:00"),
+            ],
+        );
+
+        let filtered = git_log(
+            &repo,
+            Some("main"),
+            Some("author:\"Alice Doe\" path:src after:2024-02-01 refactor"),
+        )
+        .expect("filtered git log");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].subject, "refactor beta");
+        assert_eq!(filtered[0].author, "Alice Doe");
+
+        let path_only =
+            git_log(&repo, Some("main"), Some("path:notes.txt")).expect("path filtered git log");
+        assert_eq!(path_only.len(), 1);
+        assert_eq!(path_only[0].subject, "update notes");
+
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn git_reflog_filters_entries_on_backend() {
+        let repo = create_basic_repo();
+
+        write_repo_file(&repo, "notes.txt", "notes\n");
+        run_git(&repo, &["add", "notes.txt"]);
+        run_git(&repo, &["commit", "-m", "update notes"]);
+
+        write_repo_file(&repo, "feature.txt", "feature\n");
+        run_git(&repo, &["add", "feature.txt"]);
+        run_git(&repo, &["commit", "-m", "feature work"]);
+
+        let filtered = git_reflog(&repo, Some("notes")).expect("filtered reflog");
+        assert_eq!(filtered.len(), 1);
+        assert!(filtered[0].action.contains("update notes"));
+        assert_eq!(filtered[0].short_hash, run_git(&repo, &["rev-parse", "--short", "HEAD~1"]));
+
+        let all_entries = git_reflog(&repo, None).expect("all reflog");
+        assert!(all_entries.len() >= 2);
+
+        fs::remove_dir_all(repo).ok();
+    }
+
     fn create_basic_repo() -> PathBuf {
         let repo = unique_temp_repo_path();
         fs::create_dir_all(&repo).expect("create temp repo");
@@ -3454,6 +3759,35 @@ mod tests {
         }
 
         String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    fn run_git_env(repo: &Path, args: &[&str], envs: &[(&str, &str)]) -> String {
+        let mut command = Command::new("git");
+        command.arg("-C").arg(repo).args(args);
+        for (key, value) in envs {
+            command.env(*key, *value);
+        }
+
+        let output = command
+            .output()
+            .unwrap_or_else(|error| panic!("failed to run git {args:?}: {error}"));
+
+        if !output.status.success() {
+            panic!(
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    fn write_repo_file(repo: &Path, file_path: &str, contents: &str) {
+        let full_path = repo.join(file_path);
+        if let Some(parent) = full_path.parent() {
+            fs::create_dir_all(parent).expect("create parent directories");
+        }
+        fs::write(full_path, contents).expect("write repo file");
     }
 
     fn run_git_global(args: &[&str]) -> String {
@@ -3500,6 +3834,7 @@ pub fn run() {
             get_diff,
             get_file_diff,
             get_commits,
+            get_reflog,
             get_project_files,
             get_file_blob,
             get_file_content,
@@ -3519,6 +3854,7 @@ pub fn run() {
             pull_current_branch,
             git_commit_push::create_commit,
             git_commit_push::push_current_branch,
+            git_commit_push::reset_hard_to_reflog,
             git_write::stage_files,
             git_write::unstage_files,
             git_restore::restore_files,

@@ -35,6 +35,7 @@ export interface UseGitActionsOptions {
   readonly refetchCommits: RefetchQuery;
   readonly refetchFileWorktreeDiff: RefetchQuery;
   readonly refetchProjectFiles: RefetchQuery;
+  readonly refetchReflog: RefetchQuery;
   readonly refetchRepository: RefetchQuery;
   readonly refreshProjectFileState: (projectPath: string) => Promise<void>;
   readonly setActiveBranchRef: Dispatch<SetStateAction<string | null>>;
@@ -64,6 +65,7 @@ export function useGitActions({
   refetchCommits,
   refetchFileWorktreeDiff,
   refetchProjectFiles,
+  refetchReflog,
   refetchRepository,
   refreshProjectFileState,
   setActiveBranchRef,
@@ -105,6 +107,7 @@ export function useGitActions({
           refetchRepository(),
           refetchCommits(),
           refetchProjectFiles(),
+          refetchReflog(),
           refetchFileWorktreeDiff(),
         ]);
         branchPullInFlightRef.current = false;
@@ -116,6 +119,7 @@ export function useGitActions({
       refetchCommits,
       refetchFileWorktreeDiff,
       refetchProjectFiles,
+      refetchReflog,
       refetchRepository,
     ],
   );

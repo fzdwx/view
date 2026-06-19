@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 
 export type GitFileActionKind = "restore" | "stage" | "unstage";
-export type GitRepositoryWriteKind = "commit" | "push";
+export type GitRepositoryWriteKind = "commit" | "push" | "reset";
 
 export type GitWriteOperation =
   | {
