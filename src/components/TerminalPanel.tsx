@@ -5,6 +5,7 @@ import {
   isTauriRuntime,
   terminalKill,
   terminalResize,
+  terminalScroll,
   terminalSpawn,
 } from "../lib/api";
 import {
@@ -674,21 +675,33 @@ function TerminalSessionView({
     };
 
     const handleWheel = (event: WheelEvent) => {
-      if (!terminalMouseEnabled(modesRef.current)) {
+      if (terminalMouseEnabled(modesRef.current)) {
+        // Application captures the mouse (vim, codex, tmux): forward wheel as
+        // mouse escape sequences so the program scrolls its own view.
+        event.preventDefault();
+        const { col, row } = terminalMousePosition(event, screenElement);
+        const direction = event.deltaY < 0 ? 64 : 65;
+        sendInput(
+          terminalMouseSequence(
+            modesRef.current,
+            direction + mouseModifierCode(event),
+            col,
+            row,
+            true,
+          ),
+        );
+        return;
+      }
+      // Plain shell: scroll the terminal scrollback. Wheel up (deltaY < 0) looks
+      // back into history, which is a positive scroll delta in the Rust layer.
+      const sessionId = sessionIdRef.current;
+      if (!sessionId) {
         return;
       }
       event.preventDefault();
-      const { col, row } = terminalMousePosition(event, screenElement);
-      const direction = event.deltaY < 0 ? 64 : 65;
-      sendInput(
-        terminalMouseSequence(
-          modesRef.current,
-          direction + mouseModifierCode(event),
-          col,
-          row,
-          true,
-        ),
-      );
+      const magnitude = Math.max(1, Math.abs(event.deltaY) / CELL_HEIGHT);
+      const delta = event.deltaY < 0 ? magnitude : -magnitude;
+      void terminalScroll(sessionId, Math.round(delta)).catch(() => undefined);
     };
 
     const handleContextMenu = (event: MouseEvent) => {

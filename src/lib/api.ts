@@ -493,6 +493,10 @@ export async function terminalResize(
   return invoke<void>("terminal_resize", { id, cols, rows });
 }
 
+export async function terminalScroll(id: string, delta: number): Promise<void> {
+  return invoke<void>("terminal_scroll", { id, delta });
+}
+
 export async function terminalKill(id: string): Promise<void> {
   return invoke<void>("terminal_kill", { id });
 }

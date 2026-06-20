@@ -1,5 +1,5 @@
 use alacritty_terminal::event::{Event as TerminalEvent, EventListener};
-use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::cell::{Cell, Flags};
 use alacritty_terminal::term::test::TermSize;
@@ -295,6 +295,11 @@ enum TerminalParserEvent {
     /// Ask the parser thread to re-emit the current terminal frame so a newly
     /// connected WebSocket client can render the existing screen state.
     Redraw,
+    /// Scroll the alternate scrollback view. Positive delta scrolls up (into
+    /// history), negative scrolls down (toward the prompt). Only meaningful
+    /// when the shell is not capturing the mouse, so the frontend routes wheel
+    /// events here instead of sending mouse escape sequences.
+    Scroll(i32),
 }
 
 #[derive(Clone)]
@@ -818,6 +823,18 @@ fn terminal_resize(
     let _ = session
         .parser_tx
         .send(TerminalParserEvent::Resize(cols.max(1), rows.max(1)));
+    Ok(())
+}
+
+#[tauri::command]
+fn terminal_scroll(state: State<TerminalState>, id: String, delta: i32) -> Result<(), String> {
+    let sessions = state.sessions.lock().map_err(|error| error.to_string())?;
+    let session = sessions
+        .get(&id)
+        .ok_or_else(|| "Terminal session was not found".to_string())?;
+    // The parser thread applies the scroll and re-emits a frame, so the
+    // connected WebSocket client renders the scrolled view.
+    let _ = session.parser_tx.send(TerminalParserEvent::Scroll(delta));
     Ok(())
 }
 
@@ -2463,6 +2480,9 @@ fn spawn_terminal_session(
                     }
                     // Redraw only needs the current frame re-emitted below.
                     TerminalParserEvent::Redraw => {}
+                    TerminalParserEvent::Scroll(delta) => {
+                        term.scroll_display(Scroll::Delta(delta));
+                    }
                 }
             };
 
@@ -3159,6 +3179,48 @@ mod tests {
         assert_eq!(frame["modes"]["focusInOut"], true);
         assert_eq!(frame["modes"]["mouseDrag"], true);
         assert_eq!(frame["modes"]["sgrMouse"], true);
+    }
+
+    #[test]
+    fn terminal_frame_renders_scrollback_history_when_scrolled() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        // 4 visible rows; history grows as rows scroll off.
+        let mut term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(20, 4),
+            test_terminal_event_proxy(input_tx),
+        );
+        let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
+
+        // Print 8 distinct markers, one per line. Only the last few remain on
+        // the visible screen; the earlier ones move into scrollback history.
+        for n in 1..=8 {
+            processor.advance(&mut term, format!("MK{n}\r\n").as_bytes());
+        }
+
+        let visible_frame: serde_json::Value =
+            serde_json::from_str(&terminal_frame(&term, None).expect("terminal frame"))
+                .expect("visible frame json");
+        let visible_text = terminal_frame_text(&visible_frame);
+        assert!(
+            visible_text.contains("MK8") && !visible_text.contains("MK1"),
+            "only the last rows should be on the visible screen: {visible_text:?}"
+        );
+
+        // Scroll all the way to the top of scrollback; MK1 should reappear in
+        // the rendered frame, proving history is exposed when scrolled.
+        term.scroll_display(Scroll::Top);
+        let scrolled_frame: serde_json::Value =
+            serde_json::from_str(&terminal_frame(&term, None).expect("terminal frame"))
+                .expect("scrolled frame json");
+        let scrolled_text = terminal_frame_text(&scrolled_frame);
+        assert!(
+            scrolled_text.contains("MK1"),
+            "scrolling up should reveal scrollback history: {scrolled_text:?}"
+        );
+        // Cursor should be hidden while viewing history (it sits below the
+        // scrolled viewport).
+        assert_eq!(scrolled_frame["cursorVisible"], false);
     }
 
     #[test]
@@ -4270,6 +4332,7 @@ pub fn run() {
             git_restore::restore_files,
             terminal_spawn,
             terminal_resize,
+            terminal_scroll,
             terminal_kill
         ])
         .run(tauri::generate_context!())
