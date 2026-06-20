@@ -9,7 +9,7 @@ run-release:
 
 run-realese: run-release
 
-# Download the Windows installer (.exe) from the latest CI build to the desktop.
+# Download the Windows binary (view.exe) from the latest CI build to the desktop.
 fetch-windows:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -22,14 +22,13 @@ fetch-windows:
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT
     gh run download "$run_id" --name view-windows --dir "$tmp"
-    installer="$(find "$tmp" -type f -name '*-setup.exe' | head -1)"
-    if [ -z "$installer" ]; then
-      echo "no *-setup.exe found in artifact" >&2
-      find "$tmp" -type f -name '*.exe' >&2
+    binary="$(find "$tmp" -type f -name 'view.exe' | head -1)"
+    if [ -z "$binary" ]; then
+      echo "no view.exe found in artifact" >&2
+      find "$tmp" -type f >&2
       exit 1
     fi
     desktop="${USERPROFILE:-$HOME}/Desktop"
     mkdir -p "$desktop"
-    name="$(basename "$installer")"
-    cp -f "$installer" "$desktop/$name"
-    echo "saved -> $desktop/$name"
+    cp -f "$binary" "$desktop/view.exe"
+    echo "saved -> $desktop/view.exe"

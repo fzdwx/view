@@ -85,20 +85,17 @@ jobs:
         with:
           path: artifacts
 
-      - name: Collect installers
+      - name: Collect binaries
         run: |
           set -euo pipefail
           mkdir -p release
           echo "=== downloaded artifact tree ==="
           find artifacts -type f | sort
-          # download-artifact@v4 may restore uploads at varying depths, so
-          # search the whole tree rather than assuming a fixed bundle/ path.
-          # Only pick real installers, not the raw view / view.exe binaries.
-          echo "=== collecting installers ==="
-          find artifacts -type f \
-            \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \
-               -o -name '*.msi' -o -name '*-setup.exe' \) \
-            -print -exec cp -t release/ {} +
+          # No bundle/installer config: releases ship the raw binaries.
+          # Disambiguate by platform so both land in release/ without clashes.
+          echo "=== collecting binaries ==="
+          cp -f "$(find artifacts/view-linux -type f -name view -print -quit)" release/view-linux
+          cp -f "$(find artifacts/view-windows -type f -name view.exe -print -quit)" release/view-windows.exe
           echo "=== release assets ==="
           ls -la release/
 
