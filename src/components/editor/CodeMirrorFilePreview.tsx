@@ -16,8 +16,10 @@ import {
   GutterMarker,
   gutter,
   keymap,
+  layer,
   lineNumbers,
   type Extension,
+  type LayerMarker,
   type ViewUpdate,
 } from "@uiw/react-codemirror";
 import { Loader2, Search, X } from "lucide-react";
@@ -126,9 +128,9 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
   const [activeEditorMatchIndex, setActiveEditorMatchIndex] = useState(0);
   const [activeGitMarkerId, setActiveGitMarkerId] = useState<string | null>(null);
   const [fileViewMode, setFileViewMode] = useState<FileViewMode>("source");
+  const [editorScrollLeft, setEditorScrollLeft] = useState(0);
   const [editorViewportHeight, setEditorViewportHeight] = useState(0);
   const [editorViewportWidth, setEditorViewportWidth] = useState(0);
-  const [editorLineHeight, setEditorLineHeight] = useState(19);
   const [activeEditorLineNumber, setActiveEditorLineNumber] = useState(1);
   const [gitPopoverLeftOffset, setGitPopoverLeftOffset] = useState(0);
   // Derived file values; the `??` coalescing here is flagged as a pseudo
@@ -263,9 +265,9 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
       return;
     }
 
+    setEditorScrollLeft(view.scrollDOM.scrollLeft);
     setEditorViewportHeight(view.scrollDOM.clientHeight);
     setEditorViewportWidth(view.scrollDOM.clientWidth);
-    setEditorLineHeight(view.defaultLineHeight || 19);
     setActiveEditorLineNumber(view.state.doc.lineAt(view.state.selection.main.head).number);
   }, []);
 
@@ -741,55 +743,40 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
       }
     }
 
-    class BlameGutterMarker extends GutterMarker {
+    class BlameLayerMarker implements LayerMarker {
       constructor(
-        private readonly row: VisibleBlameRow,
-        private readonly spacer = false,
+        readonly row: VisibleBlameRow,
+        readonly top: number,
+        readonly left: number,
+        readonly width: number,
+        readonly height: number,
       ) {
-        super();
       }
 
-      eq(other: GutterMarker) {
+      eq(other: LayerMarker) {
         return (
-          other instanceof BlameGutterMarker &&
+          other instanceof BlameLayerMarker &&
           other.row.text === this.row.text &&
           other.row.title === this.row.title &&
           other.row.tone === this.row.tone &&
-          other.spacer === this.spacer
+          other.top === this.top &&
+          other.left === this.left &&
+          other.width === this.width &&
+          other.height === this.height
         );
       }
 
-      toDOM() {
+      draw() {
         const element = document.createElement("div");
-        element.className = [
-          "cm-active-blame-line",
-          this.row.tone,
-          this.spacer ? "spacer" : "",
-        ]
-          .filter(Boolean)
-          .join(" ");
-        element.title = this.row.title;
-        if (this.spacer) {
-          element.setAttribute("aria-hidden", "true");
-        }
-
-        const text = document.createElement("span");
-        text.className = "cm-active-blame-text";
-        text.textContent = this.row.text;
-        element.append(text);
+        applyBlameLayerMarkerDom(element, this);
         return element;
       }
-    }
 
-    const blameSpacer = new BlameGutterMarker(
-      {
-        lineNumber: 0,
-        text: "0000000 Contributor: A much longer commit title preview",
-        title: "",
-        tone: "default",
-      },
-      true,
-    );
+      update(dom: HTMLElement) {
+        applyBlameLayerMarkerDom(dom, this);
+        return true;
+      }
+    }
 
     return [
       search({ top: true, caseSensitive: false }),
@@ -826,11 +813,10 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
       lineNumbers(),
       ...(showBlameAnnotations
         ? [
-            gutter({
-              class: "cm-blame-gutter",
-              side: "after",
-              initialSpacer: () => blameSpacer,
-              lineMarkerChange(update) {
+            layer({
+              above: true,
+              class: "cm-blame-layer",
+              update(update) {
                 return (
                   update.selectionSet ||
                   update.docChanged ||
@@ -838,15 +824,41 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
                   update.geometryChanged
                 );
               },
-              lineMarker(view, line) {
+              markers(view) {
                 if (!activeBlameRow) {
-                  return null;
+                  return [];
                 }
 
-                const lineNumber = view.state.doc.lineAt(line.from).number;
-                return lineNumber === activeBlameRow.lineNumber
-                  ? new BlameGutterMarker(activeBlameRow)
-                  : null;
+                const cursorCoords = view.coordsAtPos(view.state.selection.main.head);
+                if (!cursorCoords) {
+                  return [];
+                }
+
+                const width = resolveBlameLayerWidth(
+                  editorViewportWidth || view.scrollDOM.clientWidth,
+                );
+                const left = Math.max(
+                  0,
+                  (editorScrollLeft || view.scrollDOM.scrollLeft) +
+                    view.scrollDOM.clientWidth -
+                    width -
+                    18,
+                );
+                const top = Math.max(0, cursorCoords.top - view.documentTop);
+                const height = Math.max(
+                  1,
+                  cursorCoords.bottom - cursorCoords.top,
+                );
+
+                return [
+                  new BlameLayerMarker(
+                    activeBlameRow,
+                    top,
+                    left,
+                    width,
+                    height,
+                  ),
+                ];
               },
             }),
           ]
@@ -883,6 +895,8 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
   }, [
     activeEditorMatchIndex,
     activeBlameRow,
+    editorScrollLeft,
+    editorViewportWidth,
     gitMarkerSegmentsByLine,
     openEditorFind,
     showBlameAnnotations,
@@ -1204,6 +1218,36 @@ interface GitMarkerSegment {
   readonly marker: EditorGitMarker;
   readonly position: "start" | "middle" | "end" | "single";
   readonly active: boolean;
+}
+
+function applyBlameLayerMarkerDom(
+  element: HTMLElement,
+  marker: {
+    readonly row: VisibleBlameRow;
+    readonly top: number;
+    readonly left: number;
+    readonly width: number;
+    readonly height: number;
+  },
+): void {
+  element.className = ["cm-active-blame", marker.row.tone].join(" ");
+  element.title = marker.row.title;
+  element.style.top = `${marker.top}px`;
+  element.style.left = `${marker.left}px`;
+  element.style.width = `${marker.width}px`;
+  element.style.height = `${marker.height}px`;
+
+  let text = element.firstElementChild;
+  if (!(text instanceof HTMLSpanElement)) {
+    text = document.createElement("span");
+    text.className = "cm-active-blame-text";
+    element.replaceChildren(text);
+  }
+  text.textContent = marker.row.text;
+}
+
+function resolveBlameLayerWidth(viewportWidth: number): number {
+  return Math.max(240, Math.min(420, Math.round(viewportWidth * 0.34)));
 }
 
 function formatBlameLineText(line: FileBlameLine): string {

@@ -4249,25 +4249,23 @@ body.is-resizing-y * {
   background: var(--git-deleted);
 }
 
-.code-mirror-editor-shell .cm-blame-gutter {
-  width: clamp(220px, 28vw, 420px);
-  min-width: clamp(220px, 28vw, 420px);
-  border-left: 1px solid color-mix(in oklch, var(--line) 84%, transparent);
-  background: color-mix(in oklch, var(--surface-1) 58%, var(--surface-0));
+.code-mirror-editor-shell .cm-blame-layer {
+  pointer-events: none;
 }
 
-.code-mirror-editor-shell .cm-blame-gutter .cm-gutterElement {
-  width: 100%;
-  padding: 0;
-}
-
-.code-mirror-editor-shell .cm-active-blame-line {
-  position: relative;
+.code-mirror-editor-shell .cm-active-blame {
+  position: absolute;
   display: flex;
-  height: 100%;
   align-items: center;
+  min-width: 0;
   overflow: hidden;
-  padding: 0 10px 0 28px;
+  padding: 0 0 0 28px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in oklch, var(--surface-0) 34%, transparent) 14%,
+    color-mix(in oklch, var(--surface-0) 96%, var(--surface-1)) 34%
+  );
   color: color-mix(in oklch, var(--ink) 78%, var(--surface-0));
   font-family: var(--mono);
   font-size: max(11px, calc(var(--editor-font-size, 12px) - 1px));
@@ -4278,30 +4276,27 @@ body.is-resizing-y * {
   white-space: nowrap;
 }
 
-.code-mirror-editor-shell .cm-active-blame-line::before {
+.code-mirror-editor-shell .cm-active-blame::before {
   content: "//";
   position: absolute;
   left: 12px;
   opacity: 0.42;
 }
 
-.code-mirror-editor-shell .cm-active-blame-line.spacer {
-  visibility: hidden;
-  pointer-events: none;
-}
-
-.code-mirror-editor-shell .cm-active-blame-line.status {
+.code-mirror-editor-shell .cm-active-blame.status {
   color: var(--faint);
   font-style: italic;
 }
 
-.code-mirror-editor-shell .cm-active-blame-line.uncommitted {
+.code-mirror-editor-shell .cm-active-blame.uncommitted {
   color: color-mix(in oklch, var(--accent) 42%, var(--ink));
 }
 
 .code-mirror-editor-shell .cm-active-blame-text {
-  overflow: hidden;
+  display: block;
+  min-width: 0;
   text-overflow: ellipsis;
+  overflow: hidden;
 }
 
 .file-editor {
