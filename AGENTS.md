@@ -16,12 +16,12 @@ editing, search, and an embedded terminal.
 
 ## Commands
 
-- Install dependencies: `pnpm install`
-- Frontend dev server only: `pnpm dev`
-- Tauri dev app: `pnpm tauri dev`
-- Frontend build/typecheck: `pnpm build`
-- Typecheck only: `pnpm exec tsc --noEmit`
-- Tauri release build: `pnpm tauri:build`
+- Install dependencies: `bun install`
+- Frontend dev server only: `bun run dev`
+- Tauri dev app: `bun run tauri dev`
+- Frontend build/typecheck: `bun run build`
+- Typecheck only: `bunx tsc --noEmit`
+- Tauri release build: `bun run tauri:build`
 - Build and run release binary: `just run-release`
 - Backward-compatible typo alias: `just run-realese`
 - Rust tests: `cd src-tauri && cargo test`
@@ -123,10 +123,10 @@ editing, search, and an embedded terminal.
 
 Run the smallest relevant set first, then the broader gate before finishing:
 
-- TypeScript-only changes: `pnpm exec tsc --noEmit`
-- Frontend/runtime UI changes: `pnpm build`
+- TypeScript-only changes: `bunx tsc --noEmit`
+- Frontend/runtime UI changes: `bun run build`
 - Rust/Tauri changes: `cd src-tauri && cargo test`
-- Packaging or release changes: `pnpm tauri:build`
+- Packaging or release changes: `bun run tauri:build`
 - Any change before handoff: `git diff --check`
 
 For visible UI behavior, compile success is not enough. Start the dev app or the

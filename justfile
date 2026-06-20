@@ -1,10 +1,10 @@
 set shell := ["bash", "-uc"]
 
 run-dev:
-    pnpm tauri dev
+    bun run tauri dev
 
 run-release:
-    pnpm tauri:build
+    bun run tauri:build
     ./src-tauri/target/release/view
 
 run-realese: run-release

@@ -1,6 +1,0 @@
-# Supply-chain hardening. See https://pnpm.io/settings
-# These delay installs until releases have been vetted and refuse packages
-# whose provenance/signature trust weakens between resolutions.
-minimumReleaseAge: 10080 # 7 days
-trustPolicy: no-downgrade
-blockExoticSubdeps: true

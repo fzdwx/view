@@ -26,7 +26,7 @@ src-tauri/target
 *.sln
 *.sw?
 
-# Lockfiles: this project uses pnpm (see pnpm-lock.yaml); ignore others
-bun.lock
+# Lockfiles: this project uses bun (see bun.lock); ignore others
+pnpm-lock.yaml
 yarn.lock
 package-lock.json

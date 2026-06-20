@@ -39,10 +39,10 @@ change safely.
 
 AI-assisted work should have an observable pass/fail signal.
 
-- TypeScript changes: `pnpm exec tsc --noEmit`.
-- Frontend runtime changes: `pnpm build`; use visual QA for visible UI behavior.
+- TypeScript changes: `bunx tsc --noEmit`.
+- Frontend runtime changes: `bun run build`; use visual QA for visible UI behavior.
 - Rust/Tauri command changes: `cd src-tauri && cargo test`.
-- Release or packaging changes: `pnpm tauri:build` or `just run-release`.
+- Release or packaging changes: `bun run tauri:build` or `just run-release`.
 - Any handoff: `git diff --check`.
 
 When no automated check exists, add a focused test or describe the manual check
