@@ -89,10 +89,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release
-          echo "Linux installers:"
-          find artifacts/view-linux/bundle -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) -print -exec cp -t release/ {} +
-          echo "Windows installers:"
-          find artifacts/view-windows/bundle -type f \( -name '*.msi' -o -name '*.exe' \) -print -exec cp -t release/ {} +
+          echo "=== downloaded artifact tree ==="
+          find artifacts -type f | sort
+          # download-artifact@v4 may restore uploads at varying depths, so
+          # search the whole tree rather than assuming a fixed bundle/ path.
+          # Only pick real installers, not the raw view / view.exe binaries.
+          echo "=== collecting installers ==="
+          find artifacts -type f \
+            \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \
+               -o -name '*.msi' -o -name '*-setup.exe' \) \
+            -print -exec cp -t release/ {} +
           echo "=== release assets ==="
           ls -la release/
 
