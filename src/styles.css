@@ -3068,15 +3068,11 @@ body.is-resizing-y * {
 }
 
 .commit-subject > span:last-child {
-  display: -webkit-box;
+  display: block;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: normal;
-  word-break: break-word;
-  line-height: 1.35;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  white-space: nowrap;
 }
 
 .reflog-selector,
@@ -4992,6 +4988,14 @@ body.is-resizing-y * {
 
 .terminal-dim {
   opacity: 0.72;
+}
+
+.terminal-emoji-run {
+  font-family:
+    "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji",
+    "Twemoji Mozilla", emoji;
+  font-style: normal;
+  font-weight: 400;
 }
 
 .terminal-fg-black {
