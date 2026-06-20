@@ -4947,7 +4947,12 @@ body.is-resizing-y * {
   -moz-osx-font-smoothing: auto;
   outline: none;
   color: var(--ink);
-  font-family: var(--mono);
+  /* var(--mono) already carries the user mono font, but append color-emoji
+     fallbacks directly so emoji (codex spinners/markers) still render even when
+     the stored mono font value already contains a comma and drops the fallback
+     appended by normalizeFontCss. */
+  font-family: var(--mono), "Apple Color Emoji", "Segoe UI Emoji",
+    "Noto Color Emoji", "Twemoji Mozilla", emoji;
   font-size: var(--editor-font-size, 12px);
   font-weight: var(--editor-font-weight, 400);
   font-variant-ligatures: none;
