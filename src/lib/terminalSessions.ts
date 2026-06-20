@@ -8,10 +8,10 @@
  * multi-project workspace can hold one terminal workspace per project.
  */
 
-export interface TerminalSessionInfo {
-  readonly id: string;
-  readonly wsUrl: string;
-}
+import type { TerminalSessionInfo as ApiTerminalSessionInfo } from "./api";
+import { projectNameFromPath } from "./projects";
+
+export type TerminalSessionInfo = ApiTerminalSessionInfo;
 
 export interface TerminalTab {
   readonly id: string;
@@ -49,18 +49,29 @@ function ensureWorkspace(projectPath: string): TerminalWorkspace {
   if (existing) {
     return existing;
   }
-  const workspace = createInitialTerminalWorkspace();
+  const workspace = createInitialTerminalWorkspace(projectPath);
   workspaces.set(projectPath, workspace);
   return workspace;
 }
 
-export function createInitialTerminalWorkspace(): TerminalWorkspace {
+function defaultTerminalBaseTitle(projectPath: string | null, index: number): string {
+  const projectTitle =
+    projectPath && projectPath.trim().length > 0
+      ? projectNameFromPath(projectPath)
+      : "Terminal";
+  return index <= 1 ? projectTitle : `${projectTitle} ${index}`;
+}
+
+export function createInitialTerminalWorkspace(
+  projectPath: string | null = null,
+): TerminalWorkspace {
+  const baseTitle = defaultTerminalBaseTitle(projectPath, 1);
   return {
     tabs: [
       {
         id: "terminal-1",
-        baseTitle: "Terminal 1",
-        title: "Terminal 1",
+        baseTitle,
+        title: baseTitle,
         session: null,
         closed: false,
         exitCode: null,
@@ -73,7 +84,7 @@ export function createInitialTerminalWorkspace(): TerminalWorkspace {
 
 export function getTerminalWorkspace(projectPath: string): TerminalWorkspace {
   ensureWorkspace(projectPath);
-  return workspaces.get(projectPath) ?? createInitialTerminalWorkspace();
+  return workspaces.get(projectPath) ?? createInitialTerminalWorkspace(projectPath);
 }
 
 export function updateTerminalWorkspace(
@@ -92,10 +103,11 @@ export function updateTerminalWorkspace(
 export function addTerminalTab(projectPath: string): void {
   updateTerminalWorkspace(projectPath, (workspace) => {
     const nextIndex = workspace.nextTabIndex + 1;
+    const baseTitle = defaultTerminalBaseTitle(projectPath, nextIndex);
     const tab: TerminalTab = {
       id: `terminal-${Date.now()}-${nextIndex}`,
-      baseTitle: `Terminal ${nextIndex}`,
-      title: `Terminal ${nextIndex}`,
+      baseTitle,
+      title: baseTitle,
       session: null,
       closed: false,
       exitCode: null,

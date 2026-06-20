@@ -5,6 +5,7 @@ import type {
   FileTreeItemHandle,
 } from "@pierre/trees";
 import {
+  type ClipboardEvent,
   type DragEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -15,6 +16,7 @@ import {
   useRef,
 } from "react";
 import type { TreeFile } from "../lib/api";
+import { parentPathFromPath } from "../lib/pathLabels";
 import {
   TreeContextMenu,
   type TreeGitFileActions,
@@ -45,6 +47,7 @@ interface TreePanelProps {
   onDragStart?(event: DragEvent<HTMLDivElement>): void;
   onCreateFile?(parentPath: string | null): void;
   onDeleteFile?(path: string): void;
+  onPasteFiles?(files: File[], destDir: string | null): void;
   onRenameFile?(fromPath: string, toPath: string): void;
   gitFileActions?: TreeGitFileActions;
   onSelectPath(path: string): void;
@@ -62,6 +65,7 @@ export const TreePanel = memo(function TreePanel({
   onDragStart,
   onCreateFile,
   onDeleteFile,
+  onPasteFiles,
   onRenameFile,
   gitFileActions,
   onSelectPath,
@@ -169,6 +173,33 @@ export const TreePanel = memo(function TreePanel({
   }, [onCreateFile]);
   const createRootFile = onCreateFile ? handleCreateRootFile : undefined;
 
+  const onPasteFilesRef = useRef(onPasteFiles);
+  onPasteFilesRef.current = onPasteFiles;
+
+  const handleTreePaste = useCallback(
+    (event: ClipboardEvent<HTMLElement>) => {
+      const callback = onPasteFilesRef.current;
+      if (!callback) {
+        return;
+      }
+      const pastedFiles = clipboardFiles(event.nativeEvent);
+      if (pastedFiles.length === 0) {
+        return;
+      }
+      event.preventDefault();
+      const current = selectedPathRef.current;
+      let destDir: string | null = null;
+      if (current) {
+        const item = model.getItem(current);
+        destDir = item?.isDirectory()
+          ? current.replace(/\/$/, "")
+          : parentDirectoryFromTreePath(current);
+      }
+      callback(pastedFiles, destDir);
+    },
+    [model],
+  );
+
   useEffect(() => {
     model.resetPaths(paths, {
       preparedInput,
@@ -200,6 +231,7 @@ export const TreePanel = memo(function TreePanel({
       model={model}
       style={treeDarkThemeStyles}
       onClickCapture={handleTreeClickCapture}
+      onPaste={onPasteFiles ? handleTreePaste : undefined}
       header={
         showHeader ? (
           <TreePanelHeader
@@ -250,4 +282,32 @@ function isDirectoryHandle(
   item: FileTreeItemHandle,
 ): item is FileTreeDirectoryHandle {
   return item.isDirectory();
+}
+
+/// Parent directory of a tree path, or null for a root-level entry.
+function parentDirectoryFromTreePath(path: string): string | null {
+  const parent = parentPathFromPath(path);
+  return parent === "" ? null : parent;
+}
+
+/// Collect File objects from a paste event. Finder/Explorer file copies surface
+/// as file items in the webview's clipboard data.
+function clipboardFiles(event: globalThis.ClipboardEvent): File[] {
+  const dataTransfer = event.clipboardData;
+  if (!dataTransfer) {
+    return [];
+  }
+  const files: File[] = [];
+  for (const item of Array.from(dataTransfer.items)) {
+    if (item.kind === "file") {
+      const file = item.getAsFile();
+      if (file) {
+        files.push(file);
+      }
+    }
+  }
+  if (files.length > 0) {
+    return files;
+  }
+  return Array.from(dataTransfer.files);
 }

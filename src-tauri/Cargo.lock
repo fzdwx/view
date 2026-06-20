@@ -4797,6 +4797,7 @@ dependencies = [
  "base64 0.22.1",
  "fff-search",
  "fontdb",
+ "libc",
  "portable-pty",
  "serde",
  "serde_json",

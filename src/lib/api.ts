@@ -310,6 +310,30 @@ export async function createProjectFile(
   return invoke<string>("create_project_file", { path, filePath });
 }
 
+export interface PastedFile {
+  relativePath: string;
+  bytes: Uint8Array;
+}
+
+export async function writePastedFiles(
+  path: string,
+  destDir: string | null,
+  files: readonly PastedFile[],
+): Promise<string[]> {
+  // Tauri's invoke serializes arguments as JSON, which turns a Uint8Array into
+  // an indexed object rather than a number array. Convert to a plain number[]
+  // so the Rust Vec<u8> deserializes correctly.
+  const serializableFiles = files.map((file) => ({
+    relativePath: file.relativePath,
+    bytes: Array.from(file.bytes),
+  }));
+  return invoke<string[]>("write_pasted_files", {
+    path,
+    destDir: destDir ?? null,
+    files: serializableFiles,
+  });
+}
+
 export async function renameProjectFile(
   path: string,
   fromPath: string,

@@ -330,6 +330,7 @@ export function App() {
   const {
     createFileFromTree,
     deleteFileFromTree,
+    pasteFilesFromTree,
     refreshProjectFileState,
     renameFileFromTree,
   } = useProjectFileActions({
@@ -469,6 +470,12 @@ export function App() {
   const handleProjectTreeCreateFile = useCallback((parentPath: string | null) => {
     void createFileFromTree(parentPath);
   }, [createFileFromTree]);
+  const handleProjectTreePasteFiles = useCallback(
+    (files: File[], destDir: string | null) => {
+      void pasteFilesFromTree(files, destDir);
+    },
+    [pasteFilesFromTree],
+  );
   const handleProjectTreeDeleteFile = useCallback((path: string) => {
     void deleteFileFromTree(path);
   }, [deleteFileFromTree]);
@@ -747,6 +754,7 @@ export function App() {
       gitFileActions={activeTreeGitFileActions}
       onCreateFile={handleProjectTreeCreateFile}
       onDeleteFile={handleProjectTreeDeleteFile}
+      onPasteFiles={handleProjectTreePasteFiles}
       onRenameFile={handleProjectTreeRenameFile}
       onSelectPath={handleProjectTreeSelectPath}
     />

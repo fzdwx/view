@@ -841,10 +841,7 @@ function TerminalSessionView({
 
         sessionIdRef.current = session.id;
         if (!existingSession) {
-          onSessionReadyRef.current({
-            id: session.id,
-            wsUrl: session.wsUrl,
-          });
+          onSessionReadyRef.current(session);
         }
         // Keep the PTY sized to the current panel even on reconnect.
         void terminalResize(session.id, cols, rows).catch(() => undefined);

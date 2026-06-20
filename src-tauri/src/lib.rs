@@ -20,6 +20,8 @@ use std::env;
 use std::fs;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
+#[cfg(unix)]
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{
@@ -50,6 +52,7 @@ const FILE_SEARCH_SCAN_TIMEOUT: Duration = Duration::from_secs(10);
 const TERMINAL_WS_IDLE_SLEEP_MS: u64 = 1;
 const TERMINAL_WS_PENDING_OUTPUT_LIMIT: usize = 64;
 const TERMINAL_WS_OUTPUT_BURST_LIMIT: usize = 8;
+const TERMINAL_SESSION_METADATA_POLL_INTERVAL: Duration = Duration::from_millis(150);
 const ZERO_OID: &str = "0000000000000000000000000000000000000000";
 
 #[derive(Serialize)]
@@ -305,6 +308,7 @@ enum TerminalParserEvent {
 #[derive(Clone)]
 enum TerminalUiEvent {
     Title(Option<String>),
+    SessionMetadata(TerminalSessionMetadata),
 }
 
 struct TerminalSession {
@@ -318,6 +322,23 @@ struct TerminalSession {
 struct TerminalEventProxy {
     input_tx: mpsc::Sender<Vec<u8>>,
     ui_event_tx: mpsc::Sender<TerminalUiEvent>,
+}
+
+#[derive(Clone, Default, PartialEq, Eq)]
+struct TerminalSessionMetadata {
+    command: Option<String>,
+    cwd: Option<String>,
+}
+
+#[cfg(unix)]
+struct TerminalSessionMetadataProbe {
+    tty_fd: Option<OwnedFd>,
+    fallback_pid: Option<u32>,
+}
+
+#[cfg(not(unix))]
+struct TerminalSessionMetadataProbe {
+    fallback_pid: Option<u32>,
 }
 
 impl EventListener for TerminalEventProxy {
@@ -517,6 +538,90 @@ fn save_file_content(request: SaveFileRequest) -> Result<SaveFileResponse, Strin
 fn create_project_file(path: String, file_path: String) -> Result<String, String> {
     let root = workspace_root(&path)?;
     create_repo_file(&root, &file_path)
+}
+
+/// Write pasted file bytes into the project at a relative path under `dest_dir`.
+/// Used by the file tree's paste (Ctrl/Cmd+V) handler when the system clipboard
+/// carries files copied from Finder/Explorer. `bytes` is a list of (relative
+/// file path, contents) pairs so a multi-file paste is one IPC round-trip.
+#[tauri::command]
+fn write_pasted_files(
+    path: String,
+    dest_dir: Option<String>,
+    files: Vec<PastedFile>,
+) -> Result<Vec<String>, String> {
+    let root = workspace_root(&path)?;
+    let dest_dir = dest_dir
+        .map(|value| normalize_user_repo_path(&value))
+        .transpose()?
+        .unwrap_or_default();
+    let mut written = Vec::with_capacity(files.len());
+    for file in files {
+        let relative = match file.relative_path.split('/').next_back() {
+            Some(name) if !name.is_empty() => name,
+            _ => return Err("Pasted file name is empty".to_string()),
+        };
+        let normalized_name = normalize_user_repo_path(relative)?;
+        let combined = if dest_dir.is_empty() {
+            normalized_name
+        } else {
+            format!("{dest_dir}/{normalized_name}")
+        };
+        let normalized = normalize_user_repo_path(&combined)?;
+        let full_path = resolve_new_repo_child_path(&root, &normalized)?;
+        // Avoid clobbering an existing file: append a numeric suffix.
+        let target = unique_target_path(&full_path);
+        let parent = target
+            .parent()
+            .ok_or_else(|| "Selected file has no parent directory".to_string())?;
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Failed to create directories: {error}"))?;
+        fs::write(&target, &file.bytes)
+            .map_err(|error| format!("Failed to write pasted file: {error}"))?;
+        let normalized_target = target
+            .strip_prefix(
+                root.canonicalize()
+                    .map_err(|error| format!("Failed to resolve project root: {error}"))?,
+            )
+            .map_err(|error| format!("Failed to resolve pasted file path: {error}"))?
+            .to_string_lossy()
+            .replace("\\", "/");
+        written.push(normalized_target);
+    }
+    Ok(written)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PastedFile {
+    relative_path: String,
+    bytes: Vec<u8>,
+}
+
+/// Return a non-conflicting target path by appending a numeric suffix to the
+/// file stem when `path` already exists.
+fn unique_target_path(path: &Path) -> PathBuf {
+    if !path.exists() {
+        return path.to_path_buf();
+    }
+    let parent = path.parent().unwrap_or_else(|| Path::new(""));
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("file");
+    let ext = path.extension().and_then(|value| value.to_str());
+    let mut index = 1;
+    loop {
+        let candidate_name = match ext {
+            Some(extension) => format!("{stem} ({index}).{extension}"),
+            None => format!("{stem} ({index})"),
+        };
+        let candidate = parent.join(&candidate_name);
+        if !candidate.exists() {
+            return candidate;
+        }
+        index += 1;
+    }
 }
 
 #[tauri::command]
@@ -2330,17 +2435,204 @@ fn terminal_frame(term: &Term<TerminalEventProxy>, title: Option<&str>) -> Resul
     .map_err(|error| format!("Failed to serialize terminal frame: {error}"))
 }
 
+impl TerminalSessionMetadataProbe {
+    #[cfg(unix)]
+    fn from_master(master: &dyn MasterPty, fallback_pid: Option<u32>) -> Self {
+        Self {
+            tty_fd: master.as_raw_fd().and_then(duplicate_terminal_fd),
+            fallback_pid,
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn from_pid(fallback_pid: Option<u32>) -> Self {
+        Self { fallback_pid }
+    }
+
+    fn sample(&self) -> TerminalSessionMetadata {
+        #[cfg(unix)]
+        {
+            let pid = self
+                .tty_fd
+                .as_ref()
+                .and_then(terminal_foreground_process_id)
+                .or(self.fallback_pid);
+            return pid
+                .and_then(read_process_terminal_metadata)
+                .unwrap_or_default();
+        }
+
+        #[cfg(not(unix))]
+        {
+            let _ = self.fallback_pid;
+            TerminalSessionMetadata::default()
+        }
+    }
+}
+
+#[cfg(unix)]
+fn duplicate_terminal_fd(fd: RawFd) -> Option<OwnedFd> {
+    let duplicated = unsafe { libc::dup(fd) };
+    if duplicated < 0 {
+        return None;
+    }
+    Some(unsafe { OwnedFd::from_raw_fd(duplicated) })
+}
+
+#[cfg(unix)]
+fn terminal_foreground_process_id(fd: &OwnedFd) -> Option<u32> {
+    let process_group_id = unsafe { libc::tcgetpgrp(fd.as_raw_fd()) };
+    if process_group_id <= 0 {
+        return None;
+    }
+    Some(process_group_id as u32)
+}
+
+#[cfg(unix)]
+fn read_process_terminal_metadata(pid: u32) -> Option<TerminalSessionMetadata> {
+    let command = read_process_command_name(pid);
+    let cwd = read_process_cwd(pid);
+    if command.is_none() && cwd.is_none() {
+        return None;
+    }
+    Some(TerminalSessionMetadata { command, cwd })
+}
+
+#[cfg(not(unix))]
+fn read_process_terminal_metadata(_pid: u32) -> Option<TerminalSessionMetadata> {
+    None
+}
+
+#[cfg(unix)]
+fn read_process_command_name(pid: u32) -> Option<String> {
+    read_process_comm(pid).or_else(|| read_process_argv0_name(pid))
+}
+
+#[cfg(unix)]
+fn read_process_comm(pid: u32) -> Option<String> {
+    fs::read_to_string(format!("/proc/{pid}/comm"))
+        .ok()
+        .and_then(|value| terminal_trimmed_text(&value).map(str::to_string))
+}
+
+#[cfg(unix)]
+fn read_process_argv0_name(pid: u32) -> Option<String> {
+    let bytes = fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+    let argv0 = bytes
+        .split(|byte| *byte == 0)
+        .find(|part| !part.is_empty())?;
+    let argv0 = String::from_utf8_lossy(argv0);
+    Path::new(argv0.as_ref())
+        .file_name()
+        .and_then(terminal_os_label)
+}
+
+#[cfg(unix)]
+fn read_process_cwd(pid: u32) -> Option<String> {
+    fs::read_link(format!("/proc/{pid}/cwd"))
+        .ok()
+        .map(|path| path.to_string_lossy().to_string())
+}
+
+fn terminal_trimmed_text(value: &str) -> Option<&str> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed)
+}
+
+fn terminal_os_label(value: &std::ffi::OsStr) -> Option<String> {
+    let value = value.to_string_lossy();
+    terminal_trimmed_text(value.as_ref()).map(str::to_string)
+}
+
+fn terminal_root_label(root: &Path) -> String {
+    root.file_name()
+        .and_then(terminal_os_label)
+        .unwrap_or_else(|| root.to_string_lossy().to_string())
+}
+
+fn terminal_cwd_label(root: &Path, cwd: &str) -> String {
+    let cwd_path = Path::new(cwd);
+    if let Ok(relative) = cwd_path.strip_prefix(root) {
+        let relative_label = relative.to_string_lossy();
+        if !relative_label.is_empty() {
+            return relative_label.to_string();
+        }
+        return terminal_root_label(root);
+    }
+
+    cwd_path
+        .file_name()
+        .and_then(terminal_os_label)
+        .unwrap_or_else(|| cwd.to_string())
+}
+
+fn terminal_display_title(
+    root: &Path,
+    osc_title: Option<&str>,
+    metadata: &TerminalSessionMetadata,
+) -> Option<String> {
+    if let Some(osc_title) = osc_title.and_then(terminal_trimmed_text) {
+        return Some(osc_title.to_string());
+    }
+
+    let command = metadata.command.as_deref().and_then(terminal_trimmed_text);
+    let cwd = metadata.cwd.as_deref().and_then(terminal_trimmed_text);
+    match (command, cwd) {
+        (Some(command), Some(cwd)) => {
+            Some(format!("{command} @ {}", terminal_cwd_label(root, cwd)))
+        }
+        (Some(command), None) => Some(command.to_string()),
+        (None, Some(cwd)) => Some(terminal_cwd_label(root, cwd)),
+        (None, None) => None,
+    }
+}
+
+fn run_terminal_metadata_observer(
+    probe: TerminalSessionMetadataProbe,
+    ui_event_tx: mpsc::Sender<TerminalUiEvent>,
+) {
+    let mut last_metadata = TerminalSessionMetadata::default();
+    loop {
+        let next_metadata = probe.sample();
+        if next_metadata != last_metadata {
+            last_metadata = next_metadata.clone();
+            if ui_event_tx
+                .send(TerminalUiEvent::SessionMetadata(next_metadata))
+                .is_err()
+            {
+                return;
+            }
+        }
+        thread::sleep(TERMINAL_SESSION_METADATA_POLL_INTERVAL);
+    }
+}
+
 fn drain_terminal_ui_events(
     ui_event_rx: &mpsc::Receiver<TerminalUiEvent>,
     title: &mut Option<String>,
-) {
+    metadata: &mut TerminalSessionMetadata,
+) -> bool {
+    let mut changed = false;
     while let Ok(event) = ui_event_rx.try_recv() {
         match event {
             TerminalUiEvent::Title(next_title) => {
-                *title = next_title;
+                if *title != next_title {
+                    *title = next_title;
+                    changed = true;
+                }
+            }
+            TerminalUiEvent::SessionMetadata(next_metadata) => {
+                if *metadata != next_metadata {
+                    *metadata = next_metadata;
+                    changed = true;
+                }
             }
         }
     }
+    changed
 }
 
 fn spawn_terminal_session(
@@ -2371,6 +2663,12 @@ fn spawn_terminal_session(
     let pid = child.process_id();
     let killer = child.clone_killer();
     drop(slave);
+
+    #[cfg(unix)]
+    let metadata_probe = TerminalSessionMetadataProbe::from_master(master.as_ref(), pid);
+    #[cfg(not(unix))]
+    let metadata_probe = TerminalSessionMetadataProbe::from_pid(pid);
+    let initial_terminal_metadata = metadata_probe.sample();
 
     let mut reader = master
         .try_clone_reader()
@@ -2447,6 +2745,12 @@ fn spawn_terminal_session(
     });
 
     let reader_output_tx = ws_output_tx.clone();
+    let metadata_ui_event_tx = ui_event_tx.clone();
+    thread::spawn(move || {
+        run_terminal_metadata_observer(metadata_probe, metadata_ui_event_tx);
+    });
+
+    let title_root = root.to_path_buf();
     thread::spawn(move || {
         let initial_cols = cols.unwrap_or(80).max(1) as usize;
         let initial_rows = rows.unwrap_or(24).max(1) as usize;
@@ -2460,7 +2764,10 @@ fn spawn_terminal_session(
         );
         let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
         let mut title: Option<String> = None;
-        if let Ok(frame) = terminal_frame(&term, title.as_deref()) {
+        let mut metadata = initial_terminal_metadata;
+        let initial_display_title =
+            terminal_display_title(&title_root, title.as_deref(), &metadata);
+        if let Ok(frame) = terminal_frame(&term, initial_display_title.as_deref()) {
             let _ = reader_output_tx.send(TerminalWsEvent::Frame(frame));
         }
 
@@ -2483,14 +2790,26 @@ fn spawn_terminal_session(
                 }
             };
 
-        while let Ok(event) = parser_rx.recv() {
-            apply_event(event, &mut term, &mut processor);
-            while let Ok(event) = parser_rx.try_recv() {
-                apply_event(event, &mut term, &mut processor);
+        loop {
+            let mut terminal_changed = false;
+            match parser_rx.recv_timeout(TERMINAL_SESSION_METADATA_POLL_INTERVAL) {
+                Ok(event) => {
+                    terminal_changed = true;
+                    apply_event(event, &mut term, &mut processor);
+                    while let Ok(event) = parser_rx.try_recv() {
+                        apply_event(event, &mut term, &mut processor);
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
-            drain_terminal_ui_events(&ui_event_rx, &mut title);
+            let ui_changed = drain_terminal_ui_events(&ui_event_rx, &mut title, &mut metadata);
+            if !terminal_changed && !ui_changed {
+                continue;
+            }
 
-            match terminal_frame(&term, title.as_deref()) {
+            let display_title = terminal_display_title(&title_root, title.as_deref(), &metadata);
+            match terminal_frame(&term, display_title.as_deref()) {
                 Ok(frame) => {
                     if reader_output_tx
                         .send(TerminalWsEvent::Frame(frame))
@@ -3276,14 +3595,48 @@ mod tests {
         );
         let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
         let mut title = None;
+        let mut metadata = TerminalSessionMetadata::default();
 
         processor.advance(&mut term, b"\x1b]0;View Title Protocol\x07");
-        drain_terminal_ui_events(&ui_event_rx, &mut title);
-        let frame: serde_json::Value =
-            serde_json::from_str(&terminal_frame(&term, title.as_deref()).expect("terminal frame"))
-                .expect("frame json");
+        drain_terminal_ui_events(&ui_event_rx, &mut title, &mut metadata);
+        let display_title =
+            terminal_display_title(Path::new("/tmp/view"), title.as_deref(), &metadata);
+        let frame: serde_json::Value = serde_json::from_str(
+            &terminal_frame(&term, display_title.as_deref()).expect("terminal frame"),
+        )
+        .expect("frame json");
 
         assert_eq!(frame["title"], "View Title Protocol");
+    }
+
+    #[test]
+    fn terminal_display_title_prefers_osc_title_over_live_process_metadata() {
+        let metadata = TerminalSessionMetadata {
+            command: Some("codex".to_string()),
+            cwd: Some("/root/projects/view/src/components".to_string()),
+        };
+
+        assert_eq!(
+            terminal_display_title(
+                Path::new("/root/projects/view"),
+                Some("shell title"),
+                &metadata,
+            ),
+            Some("shell title".to_string())
+        );
+    }
+
+    #[test]
+    fn terminal_display_title_falls_back_to_live_process_metadata_after_reset() {
+        let metadata = TerminalSessionMetadata {
+            command: Some("codex".to_string()),
+            cwd: Some("/root/projects/view/src/components".to_string()),
+        };
+
+        assert_eq!(
+            terminal_display_title(Path::new("/root/projects/view"), None, &metadata,),
+            Some("codex @ src/components".to_string())
+        );
     }
 
     #[test]
@@ -3706,6 +4059,57 @@ mod tests {
                 "{path:?} should be rejected"
             );
         }
+
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn write_pasted_files_writes_bytes_under_dest_dir() {
+        let repo = create_basic_repo();
+        fs::create_dir_all(repo.join("docs")).expect("create docs dir");
+
+        let written = write_pasted_files(
+            repo.to_string_lossy().to_string(),
+            Some("docs".to_string()),
+            vec![PastedFile {
+                relative_path: "notes.txt".to_string(),
+                bytes: b"hello paste\n".to_vec(),
+            }],
+        )
+        .expect("write pasted file");
+
+        assert_eq!(written, vec!["docs/notes.txt".to_string()]);
+        let content = fs::read(repo.join("docs").join("notes.txt")).expect("read pasted file");
+        assert_eq!(content, b"hello paste\n");
+
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn write_pasted_files_appends_suffix_on_name_collision() {
+        let repo = create_basic_repo();
+        fs::write(repo.join("img.png"), b"original").expect("write existing file");
+
+        let written = write_pasted_files(
+            repo.to_string_lossy().to_string(),
+            None,
+            vec![PastedFile {
+                relative_path: "img.png".to_string(),
+                bytes: b"pasted".to_vec(),
+            }],
+        )
+        .expect("write colliding pasted file");
+
+        assert_eq!(written, vec!["img (1).png".to_string()]);
+        assert_eq!(
+            fs::read(repo.join("img (1).png")).expect("read pasted file"),
+            b"pasted"
+        );
+        // Original is untouched.
+        assert_eq!(
+            fs::read(repo.join("img.png")).expect("read original"),
+            b"original"
+        );
 
         fs::remove_dir_all(repo).ok();
     }
@@ -4334,6 +4738,7 @@ pub fn run() {
             get_file_blame,
             save_file_content,
             create_project_file,
+            write_pasted_files,
             rename_project_file,
             delete_project_file,
             search_file_names,

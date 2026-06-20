@@ -3,12 +3,18 @@ import {
   createProjectFile,
   deleteProjectFile,
   renameProjectFile,
+  writePastedFiles,
+  type PastedFile,
 } from "../lib/api";
 import { confirmNativeDialog, showNativeMessage } from "../lib/nativeDialogs";
 import { buildRequestedFilePath } from "../lib/pathLabels";
 import type { PreviewMode } from "../lib/previewTabs";
 import type { SavedProject } from "../lib/projects";
 import { useProjectFileStateRefresh } from "./useProjectFileStateRefresh";
+
+/// Cap pasted file size so a huge file does not flood the IPC channel with a
+/// multi-megabyte JSON number array.
+const MAX_PASTED_FILE_BYTES = 10 * 1024 * 1024;
 
 export interface UseProjectFileActionsOptions {
   readonly activeProject: SavedProject | undefined;
@@ -33,6 +39,10 @@ export interface UseProjectFileActionsOptions {
 export interface ProjectFileActions {
   readonly createFileFromTree: (parentPath: string | null) => Promise<void>;
   readonly deleteFileFromTree: (path: string) => Promise<void>;
+  readonly pasteFilesFromTree: (
+    files: File[],
+    destDir: string | null,
+  ) => Promise<void>;
   readonly refreshProjectFileState: (projectPath: string) => Promise<void>;
   readonly renameFileFromTree: (
     fromPath: string,
@@ -52,6 +62,63 @@ export function useProjectFileActions({
   setSelectedProjectPath,
 }: UseProjectFileActionsOptions): ProjectFileActions {
   const refreshProjectFileState = useProjectFileStateRefresh();
+
+  const pasteFilesFromTree = useCallback(
+    async (files: File[], destDir: string | null) => {
+      if (!activeProject || files.length === 0) {
+        return;
+      }
+
+      const pasteable: PastedFile[] = [];
+      let skippedTooLarge = 0;
+      for (const file of files) {
+        if (file.size > MAX_PASTED_FILE_BYTES) {
+          skippedTooLarge += 1;
+          continue;
+        }
+        const name = file.name?.trim();
+        if (!name) {
+          continue;
+        }
+        try {
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          pasteable.push({ relativePath: name, bytes });
+        } catch {
+          // Skip files that cannot be read.
+        }
+      }
+
+      if (pasteable.length === 0) {
+        await showNativeMessage(
+          skippedTooLarge > 0
+            ? `Skipped ${skippedTooLarge} file(s) larger than ${MAX_PASTED_FILE_BYTES / (1024 * 1024)} MB.`
+            : "No pastable files were found on the clipboard.",
+          { kind: "warning" },
+        );
+        return;
+      }
+
+      try {
+        const written = await writePastedFiles(
+          activeProject.activePath,
+          destDir,
+          pasteable,
+        );
+        await refreshProjectFileState(activeProject.activePath);
+        const firstPath = written[0];
+        if (firstPath) {
+          openPreviewTab("file", firstPath);
+        }
+      } catch (error) {
+        await showNativeMessage(
+          error instanceof Error ? error.message : String(error),
+          { kind: "error" },
+        );
+        await refreshProjectFileState(activeProject.activePath);
+      }
+    },
+    [activeProject, openPreviewTab, refreshProjectFileState],
+  );
 
   const createFileFromTree = useCallback(
     async (parentPath: string | null) => {
@@ -195,6 +262,7 @@ export function useProjectFileActions({
   return {
     createFileFromTree,
     deleteFileFromTree,
+    pasteFilesFromTree,
     refreshProjectFileState,
     renameFileFromTree,
   };
