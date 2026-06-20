@@ -8,17 +8,19 @@ use alacritty_terminal::vte::ansi::{Color as TerminalColorValue, NamedColor};
 use alacritty_terminal::vte::ansi::{
     Processor as TerminalProcessor, StdSyncHandler as TerminalSyncHandler,
 };
+use arboard::Clipboard;
 use base64::{engine::general_purpose, Engine as _};
 use fff_search::{
     FFFMode, FilePicker, FilePickerOptions, FuzzySearchOptions, GrepConfig, GrepMode,
     GrepSearchOptions, PaginationArgs, QueryParser, SharedFilePicker, SharedFrecency,
 };
+use image::ImageEncoder;
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::env;
 use std::fs;
-use std::io::{ErrorKind, Read, Write};
+use std::io::{Cursor, ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
 #[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -29,7 +31,7 @@ use std::sync::{
     mpsc, Arc, Mutex,
 };
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::State;
 use tungstenite::{accept, Error as WsError, Message, WebSocket};
 
@@ -591,11 +593,171 @@ fn write_pasted_files(
     Ok(written)
 }
 
+#[tauri::command]
+fn paste_clipboard_into_project(
+    path: String,
+    dest_dir: Option<String>,
+) -> Result<Vec<String>, String> {
+    let root = workspace_root(&path)?;
+    let dest_dir = dest_dir
+        .map(|value| normalize_user_repo_path(&value))
+        .transpose()?
+        .unwrap_or_default();
+    let mut clipboard =
+        Clipboard::new().map_err(|error| format!("Failed to access clipboard: {error}"))?;
+
+    let file_list = read_clipboard_file_list(&mut clipboard);
+    if !file_list.is_empty() {
+        return paste_clipboard_file_list(&root, &dest_dir, &file_list);
+    }
+
+    if let Some(image_bytes) = read_clipboard_image_png(&mut clipboard)? {
+        return write_clipboard_image_file(&root, &dest_dir, &image_bytes);
+    }
+
+    Err("No clipboard files or image found".to_string())
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PastedFile {
     relative_path: String,
     bytes: Vec<u8>,
+}
+
+fn read_clipboard_file_list(clipboard: &mut Clipboard) -> Vec<PathBuf> {
+    clipboard
+        .get()
+        .file_list()
+        .map(|paths| paths.into_iter().collect())
+        .unwrap_or_default()
+}
+
+fn read_clipboard_image_png(clipboard: &mut Clipboard) -> Result<Option<Vec<u8>>, String> {
+    let image = match clipboard.get().image() {
+        Ok(image) => image,
+        Err(_) => return Ok(None),
+    };
+    let rgba_bytes = image.bytes.into_owned();
+    let mut encoded = Cursor::new(Vec::new());
+    image::codecs::png::PngEncoder::new(&mut encoded)
+        .write_image(
+            &rgba_bytes,
+            image.width as u32,
+            image.height as u32,
+            image::ColorType::Rgba8.into(),
+        )
+        .map_err(|error| format!("Failed to encode clipboard image: {error}"))?;
+    Ok(Some(encoded.into_inner()))
+}
+
+fn paste_clipboard_file_list(
+    root: &Path,
+    dest_dir: &str,
+    file_list: &[PathBuf],
+) -> Result<Vec<String>, String> {
+    let project_root = root
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve project root: {error}"))?;
+    let destination_root = resolve_paste_destination_root(&project_root, dest_dir)?;
+    let mut written = Vec::new();
+
+    for source_path in file_list {
+        let canonical_source = source_path
+            .canonicalize()
+            .map_err(|error| format!("Failed to read pasted item: {error}"))?;
+        let file_name = canonical_source
+            .file_name()
+            .ok_or_else(|| "Pasted item has no file name".to_string())?;
+        let target = unique_target_path(&destination_root.join(file_name));
+        copy_pasted_path_into_project(&project_root, &canonical_source, &target, &mut written)?;
+    }
+
+    Ok(written)
+}
+
+fn write_clipboard_image_file(
+    root: &Path,
+    dest_dir: &str,
+    image_bytes: &[u8],
+) -> Result<Vec<String>, String> {
+    let project_root = root
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve project root: {error}"))?;
+    let destination_root = resolve_paste_destination_root(&project_root, dest_dir)?;
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    let target =
+        unique_target_path(&destination_root.join(format!("pasted-image-{timestamp}.png")));
+    let parent = target
+        .parent()
+        .ok_or_else(|| "Selected file has no parent directory".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| format!("Failed to create directories: {error}"))?;
+    fs::write(&target, image_bytes)
+        .map_err(|error| format!("Failed to write clipboard image: {error}"))?;
+
+    Ok(vec![project_relative_path(&project_root, &target)?])
+}
+
+fn resolve_paste_destination_root(root: &Path, dest_dir: &str) -> Result<PathBuf, String> {
+    if dest_dir.is_empty() {
+        return Ok(root.to_path_buf());
+    }
+
+    let destination = resolve_new_repo_child_path(root, dest_dir)?;
+    fs::create_dir_all(&destination)
+        .map_err(|error| format!("Failed to create paste destination: {error}"))?;
+    destination
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve paste destination: {error}"))
+}
+
+fn copy_pasted_path_into_project(
+    project_root: &Path,
+    source: &Path,
+    target: &Path,
+    written: &mut Vec<String>,
+) -> Result<(), String> {
+    let metadata = fs::metadata(source)
+        .map_err(|error| format!("Failed to read pasted item metadata: {error}"))?;
+
+    if metadata.is_dir() {
+        fs::create_dir_all(target)
+            .map_err(|error| format!("Failed to create pasted directory: {error}"))?;
+        let mut entries = fs::read_dir(source)
+            .map_err(|error| format!("Failed to read pasted directory: {error}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("Failed to read pasted directory: {error}"))?;
+        entries.sort_by_key(|entry| entry.path());
+
+        for entry in entries {
+            let child_source = entry.path();
+            let child_target = target.join(entry.file_name());
+            copy_pasted_path_into_project(project_root, &child_source, &child_target, written)?;
+        }
+        return Ok(());
+    }
+
+    if !metadata.is_file() {
+        return Ok(());
+    }
+
+    let parent = target
+        .parent()
+        .ok_or_else(|| "Selected file has no parent directory".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| format!("Failed to create directories: {error}"))?;
+    fs::copy(source, target).map_err(|error| format!("Failed to copy pasted file: {error}"))?;
+    written.push(project_relative_path(project_root, target)?);
+    Ok(())
+}
+
+fn project_relative_path(root: &Path, target: &Path) -> Result<String, String> {
+    target
+        .strip_prefix(root)
+        .map_err(|error| format!("Failed to resolve pasted file path: {error}"))
+        .map(|relative| relative.to_string_lossy().replace('\\', "/"))
 }
 
 /// Return a non-conflicting target path by appending a numeric suffix to the
@@ -4739,6 +4901,7 @@ pub fn run() {
             save_file_content,
             create_project_file,
             write_pasted_files,
+            paste_clipboard_into_project,
             rename_project_file,
             delete_project_file,
             search_file_names,

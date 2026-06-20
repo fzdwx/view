@@ -2,6 +2,7 @@ import { useCallback, type Dispatch, type SetStateAction } from "react";
 import {
   createProjectFile,
   deleteProjectFile,
+  pasteClipboardIntoProject,
   renameProjectFile,
   writePastedFiles,
   type PastedFile,
@@ -39,6 +40,7 @@ export interface UseProjectFileActionsOptions {
 export interface ProjectFileActions {
   readonly createFileFromTree: (parentPath: string | null) => Promise<void>;
   readonly deleteFileFromTree: (path: string) => Promise<void>;
+  readonly pasteClipboardFromTree: (destDir: string | null) => Promise<void>;
   readonly pasteFilesFromTree: (
     files: File[],
     destDir: string | null,
@@ -62,6 +64,17 @@ export function useProjectFileActions({
   setSelectedProjectPath,
 }: UseProjectFileActionsOptions): ProjectFileActions {
   const refreshProjectFileState = useProjectFileStateRefresh();
+
+  const revealPastedFiles = useCallback(
+    async (projectPath: string, written: readonly string[]) => {
+      await refreshProjectFileState(projectPath);
+      const firstPath = written[0];
+      if (firstPath) {
+        openPreviewTab("file", firstPath);
+      }
+    },
+    [openPreviewTab, refreshProjectFileState],
+  );
 
   const pasteFilesFromTree = useCallback(
     async (files: File[], destDir: string | null) => {
@@ -104,11 +117,7 @@ export function useProjectFileActions({
           destDir,
           pasteable,
         );
-        await refreshProjectFileState(activeProject.activePath);
-        const firstPath = written[0];
-        if (firstPath) {
-          openPreviewTab("file", firstPath);
-        }
+        await revealPastedFiles(activeProject.activePath, written);
       } catch (error) {
         await showNativeMessage(
           error instanceof Error ? error.message : String(error),
@@ -117,7 +126,30 @@ export function useProjectFileActions({
         await refreshProjectFileState(activeProject.activePath);
       }
     },
-    [activeProject, openPreviewTab, refreshProjectFileState],
+    [activeProject, refreshProjectFileState, revealPastedFiles],
+  );
+
+  const pasteClipboardFromTree = useCallback(
+    async (destDir: string | null) => {
+      if (!activeProject) {
+        return;
+      }
+
+      try {
+        const written = await pasteClipboardIntoProject(
+          activeProject.activePath,
+          destDir,
+        );
+        await revealPastedFiles(activeProject.activePath, written);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await showNativeMessage(message, {
+          kind:
+            message === "No clipboard files or image found" ? "warning" : "error",
+        });
+      }
+    },
+    [activeProject, revealPastedFiles],
   );
 
   const createFileFromTree = useCallback(
@@ -262,6 +294,7 @@ export function useProjectFileActions({
   return {
     createFileFromTree,
     deleteFileFromTree,
+    pasteClipboardFromTree,
     pasteFilesFromTree,
     refreshProjectFileState,
     renameFileFromTree,

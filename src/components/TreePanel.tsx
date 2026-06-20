@@ -16,6 +16,7 @@ import {
   useRef,
 } from "react";
 import type { TreeFile } from "../lib/api";
+import { clipboardFilesFromEvent } from "../lib/clipboardFiles";
 import { parentPathFromPath } from "../lib/pathLabels";
 import {
   TreeContextMenu,
@@ -182,7 +183,7 @@ export const TreePanel = memo(function TreePanel({
       if (!callback) {
         return;
       }
-      const pastedFiles = clipboardFiles(event.nativeEvent);
+      const pastedFiles = clipboardFilesFromEvent(event.nativeEvent);
       if (pastedFiles.length === 0) {
         return;
       }
@@ -288,26 +289,4 @@ function isDirectoryHandle(
 function parentDirectoryFromTreePath(path: string): string | null {
   const parent = parentPathFromPath(path);
   return parent === "" ? null : parent;
-}
-
-/// Collect File objects from a paste event. Finder/Explorer file copies surface
-/// as file items in the webview's clipboard data.
-function clipboardFiles(event: globalThis.ClipboardEvent): File[] {
-  const dataTransfer = event.clipboardData;
-  if (!dataTransfer) {
-    return [];
-  }
-  const files: File[] = [];
-  for (const item of Array.from(dataTransfer.items)) {
-    if (item.kind === "file") {
-      const file = item.getAsFile();
-      if (file) {
-        files.push(file);
-      }
-    }
-  }
-  if (files.length > 0) {
-    return files;
-  }
-  return Array.from(dataTransfer.files);
 }

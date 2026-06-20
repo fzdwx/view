@@ -54,6 +54,7 @@ import {
 import { useSelectedPathGuard } from "./hooks/useSelectedPathGuard";
 import { useWorkbenchDock } from "./hooks/useWorkbenchDock";
 import { type FileSearchResult, type ReflogEntry } from "./lib/api";
+import { pasteDestinationFromSelectedPath } from "./lib/clipboardFiles";
 import {
   type SavedProject,
   loadSavedProjects,
@@ -330,6 +331,7 @@ export function App() {
   const {
     createFileFromTree,
     deleteFileFromTree,
+    pasteClipboardFromTree,
     pasteFilesFromTree,
     refreshProjectFileState,
     renameFileFromTree,
@@ -759,6 +761,32 @@ export function App() {
       onSelectPath={handleProjectTreeSelectPath}
     />
   );
+
+  useEffect(() => {
+    if (!activeProject) {
+      return;
+    }
+
+    function handleNativePasteShortcut(event: globalThis.KeyboardEvent) {
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        isPasteImportBlockedTarget(event.target) ||
+        !(event.ctrlKey || event.metaKey) ||
+        event.altKey ||
+        event.key.toLowerCase() !== "v"
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      const destDir = pasteDestinationFromSelectedPath(selectedProjectPath);
+      void pasteClipboardFromTree(destDir);
+    }
+
+    window.addEventListener("keydown", handleNativePasteShortcut);
+    return () => window.removeEventListener("keydown", handleNativePasteShortcut);
+  }, [activeProject, pasteClipboardFromTree, selectedProjectPath]);
 
   useLayoutEffect(() => {
     syncRailPanelSizeVars(contentGridRef.current, panelSizes);
@@ -1246,6 +1274,14 @@ function syncRailPanelSizeVars(
   applyRailPanelSizeVar(element, "rightTop", panelSizes.rightTop);
   applyRailPanelSizeVar(element, "bottom", panelSizes.bottom);
   applyRailPanelSizeVar(element, "bottomLeft", panelSizes.bottomLeft);
+}
+
+function isPasteImportBlockedTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLElement &&
+    (target.matches("input, textarea, [contenteditable='true']") ||
+      Boolean(target.closest("[data-command-panel], .cm-editor, .terminal-screen")))
+  );
 }
 
 function applyRailPanelSizeVar(
