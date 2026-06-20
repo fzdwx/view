@@ -4952,7 +4952,7 @@ body.is-resizing-y * {
   font-size: var(--editor-font-size, 12px);
   font-weight: var(--editor-font-weight, 400);
   font-variant-ligatures: none;
-  line-height: 16px;
+  line-height: var(--editor-line-height, 16px);
   scrollbar-width: none;
 }
 
@@ -4975,9 +4975,14 @@ body.is-resizing-y * {
   user-select: text;
 }
 
+.terminal-output ::selection {
+  background: color-mix(in oklch, var(--accent) 38%, transparent);
+  color: var(--ink);
+}
+
 .terminal-line {
-  height: 16px;
-  min-height: 16px;
+  min-height: var(--editor-line-height, 16px);
+  line-height: var(--editor-line-height, 16px);
   overflow: hidden;
   white-space: pre;
 }
@@ -5064,8 +5069,8 @@ body.is-resizing-y * {
 
 .terminal-cursor {
   display: inline-block;
-  width: 8px;
-  height: 16px;
+  min-width: 1ch;
+  height: var(--editor-line-height, 16px);
   background: var(--ink);
   color: var(--surface-0);
   animation: terminal-cursor-blink 1.1s steps(2, jump-none) infinite;
@@ -5073,12 +5078,43 @@ body.is-resizing-y * {
 }
 
 .terminal-close-line {
-  height: 16px;
+  min-height: var(--editor-line-height, 16px);
   color: var(--faint);
   font-family: var(--mono);
   font-size: 12px;
-  line-height: 16px;
+  line-height: var(--editor-line-height, 16px);
   white-space: pre;
+}
+
+.terminal-scrollback-button {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  border: 1px solid color-mix(in oklch, var(--line) 82%, transparent);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--surface-0) 88%, transparent);
+  box-shadow: 0 8px 24px color-mix(in oklch, black 10%, transparent);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 0 10px;
+  backdrop-filter: blur(10px);
+}
+
+.terminal-scrollback-button:hover {
+  border-color: color-mix(in oklch, var(--accent) 40%, var(--line));
+  background: color-mix(in oklch, var(--surface-1) 92%, transparent);
+}
+
+.terminal-scrollback-button-alert {
+  bottom: 42px;
+  border-color: color-mix(in oklch, var(--accent) 42%, var(--line));
+  background: color-mix(in oklch, var(--accent) 14%, var(--surface-0));
 }
 
 @keyframes terminal-cursor-blink {

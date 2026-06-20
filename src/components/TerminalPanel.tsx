@@ -21,6 +21,7 @@ import {
   type TerminalSessionInfo,
   type TerminalWorkspace,
 } from "../lib/terminalSessions";
+import { settingsChangedEvent } from "../lib/settings";
 
 interface TerminalPanelProps {
   active: boolean;
@@ -55,11 +56,17 @@ type TerminalModes = {
   altScreen: boolean;
 };
 
+type TerminalCellMetrics = {
+  width: number;
+  height: number;
+};
+
 type TerminalFrame = {
   type: "frame";
   title: string | null;
   rows: number;
   cols: number;
+  displayOffset: number;
   cursorRow: number;
   cursorCol: number;
   cursorVisible: boolean;
@@ -74,12 +81,17 @@ type TerminalClose = {
 
 type TerminalInput = string | Uint8Array;
 
-const CELL_WIDTH = 8;
-const CELL_HEIGHT = 16;
+const MIN_TERMINAL_COLS = 20;
+const MIN_TERMINAL_ROWS = 6;
+const DEFAULT_TERMINAL_CELL_METRICS: TerminalCellMetrics = {
+  width: 8,
+  height: 16,
+};
 const MAX_TERMINAL_COLS = 260;
 const MAX_TERMINAL_ROWS = 120;
 const MAX_PENDING_INPUT_BYTES = 32 * 1024;
 const MAX_SOCKET_BUFFERED_INPUT_BYTES = 256 * 1024;
+const TERMINAL_SCROLLBACK_HINT_TTL_MS = 4000;
 const TEXT_ENCODER = new TextEncoder();
 const terminalGraphemeSegmenter =
   typeof Intl !== "undefined" && "Segmenter" in Intl
@@ -102,19 +114,78 @@ const DEFAULT_TERMINAL_MODES: TerminalModes = {
   altScreen: false,
 };
 
-function sizeFromElement(element: HTMLElement): { cols: number; rows: number } {
+function parsePixelSize(value: string | null | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function measureTerminalCellMetrics(element: HTMLElement): TerminalCellMetrics {
+  const computed = window.getComputedStyle(element);
+  const probe = document.createElement("span");
+  const sample = "0".repeat(64);
+
+  probe.textContent = sample;
+  probe.style.position = "absolute";
+  probe.style.visibility = "hidden";
+  probe.style.pointerEvents = "none";
+  probe.style.whiteSpace = "pre";
+  probe.style.padding = "0";
+  probe.style.margin = "0";
+  probe.style.border = "0";
+  probe.style.fontFamily = computed.fontFamily;
+  probe.style.fontSize = computed.fontSize;
+  probe.style.fontWeight = computed.fontWeight;
+  probe.style.fontStyle = computed.fontStyle;
+  probe.style.fontStretch = computed.fontStretch;
+  probe.style.lineHeight = computed.lineHeight;
+  probe.style.letterSpacing = computed.letterSpacing;
+  probe.style.fontVariantLigatures = "none";
+  probe.style.fontKerning = "none";
+
+  element.appendChild(probe);
+  const rect = probe.getBoundingClientRect();
+  probe.remove();
+
+  const measuredWidth = rect.width / sample.length;
+  const measuredHeight =
+    parsePixelSize(computed.lineHeight) ??
+    (Number.isFinite(rect.height) && rect.height > 0 ? rect.height : null);
+
+  return {
+    width:
+      Number.isFinite(measuredWidth) && measuredWidth > 0
+        ? measuredWidth
+        : DEFAULT_TERMINAL_CELL_METRICS.width,
+    height: measuredHeight ?? DEFAULT_TERMINAL_CELL_METRICS.height,
+  };
+}
+
+function sizeFromElement(
+  element: HTMLElement,
+  cellMetrics: TerminalCellMetrics,
+): { cols: number; rows: number } | null {
   const rect = element.getBoundingClientRect();
   const width = Number.isFinite(rect.width) ? rect.width : 0;
   const height = Number.isFinite(rect.height) ? rect.height : 0;
+  const safeCellWidth = Math.max(1, cellMetrics.width);
+  const safeCellHeight = Math.max(1, cellMetrics.height);
+
+  if (width < safeCellWidth || height < safeCellHeight) {
+    return null;
+  }
 
   return {
     cols: Math.min(
       MAX_TERMINAL_COLS,
-      Math.max(20, Math.floor(width / CELL_WIDTH)),
+      Math.max(MIN_TERMINAL_COLS, Math.floor(width / safeCellWidth)),
     ),
     rows: Math.min(
       MAX_TERMINAL_ROWS,
-      Math.max(6, Math.floor(height / CELL_HEIGHT)),
+      Math.max(MIN_TERMINAL_ROWS, Math.floor(height / safeCellHeight)),
     ),
   };
 }
@@ -255,16 +326,48 @@ function mouseModifierCode(event: MouseEvent | WheelEvent): number {
 function terminalMousePosition(
   event: MouseEvent | WheelEvent,
   element: HTMLElement,
+  cellMetrics: TerminalCellMetrics,
 ): { col: number; row: number } {
   const rect = element.getBoundingClientRect();
-  const col = Math.floor((event.clientX - rect.left) / CELL_WIDTH) + 1;
-  const row = Math.floor((event.clientY - rect.top) / CELL_HEIGHT) + 1;
-  const { cols, rows } = sizeFromElement(element);
+  const col = Math.floor((event.clientX - rect.left) / cellMetrics.width) + 1;
+  const row = Math.floor((event.clientY - rect.top) / cellMetrics.height) + 1;
+  const size = sizeFromElement(element, cellMetrics);
+  const cols = size?.cols ?? MIN_TERMINAL_COLS;
+  const rows = size?.rows ?? MIN_TERMINAL_ROWS;
 
   return {
     col: Math.min(cols, Math.max(1, col)),
     row: Math.min(rows, Math.max(1, row)),
   };
+}
+
+function normalizeWheelLines(
+  event: WheelEvent,
+  cellMetrics: TerminalCellMetrics,
+  visibleRows: number,
+): number {
+  switch (event.deltaMode) {
+    case WheelEvent.DOM_DELTA_LINE:
+      return event.deltaY;
+    case WheelEvent.DOM_DELTA_PAGE:
+      return event.deltaY * Math.max(1, visibleRows);
+    default:
+      return event.deltaY / Math.max(1, cellMetrics.height);
+  }
+}
+
+function selectedTextWithin(element: HTMLElement): string {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+    return "";
+  }
+
+  const range = selection.getRangeAt(0);
+  if (!element.contains(range.commonAncestorContainer)) {
+    return "";
+  }
+
+  return selection.toString();
 }
 
 function terminalInputByteLength(input: TerminalInput): number {
@@ -510,6 +613,16 @@ function TerminalSessionView({
   const onSessionReadyRef = useRef(onSessionReady);
   const onClosedRef = useRef(onClosed);
   const sessionRef = useRef<TerminalSessionInfo | null>(session);
+  const frameRef = useRef<TerminalFrame | null>(null);
+  const cellMetricsRef = useRef<TerminalCellMetrics>(
+    DEFAULT_TERMINAL_CELL_METRICS,
+  );
+  const wheelScrollAccumulatorRef = useRef(0);
+  const pendingScrollIntentRef = useRef<{
+    direction: "up" | "down" | "bottom";
+    expiresAt: number;
+  } | null>(null);
+  const scrollbackHintTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     sessionRef.current = session;
@@ -520,6 +633,78 @@ function TerminalSessionView({
   const mouseButtonRef = useRef<number | null>(null);
   const [frame, setFrame] = useState<TerminalFrame | null>(null);
   const [closed, setClosed] = useState<TerminalClose | null>(null);
+  const [jumpedScrollbackOffset, setJumpedScrollbackOffset] = useState<
+    number | null
+  >(null);
+
+  const clearScrollbackHint = () => {
+    if (scrollbackHintTimerRef.current != null) {
+      window.clearTimeout(scrollbackHintTimerRef.current);
+      scrollbackHintTimerRef.current = null;
+    }
+    setJumpedScrollbackOffset(null);
+  };
+
+  const showScrollbackHint = (offset: number) => {
+    if (offset <= 0) {
+      clearScrollbackHint();
+      return;
+    }
+    if (scrollbackHintTimerRef.current != null) {
+      window.clearTimeout(scrollbackHintTimerRef.current);
+    }
+    setJumpedScrollbackOffset(offset);
+    scrollbackHintTimerRef.current = window.setTimeout(() => {
+      scrollbackHintTimerRef.current = null;
+      setJumpedScrollbackOffset(null);
+    }, TERMINAL_SCROLLBACK_HINT_TTL_MS);
+  };
+
+  const markPendingScrollIntent = (direction: "up" | "down" | "bottom") => {
+    pendingScrollIntentRef.current = {
+      direction,
+      expiresAt: performance.now() + 400,
+    };
+  };
+
+  const consumePendingScrollIntent = (): "up" | "down" | "bottom" | null => {
+    const pendingIntent = pendingScrollIntentRef.current;
+    if (!pendingIntent) {
+      return null;
+    }
+    pendingScrollIntentRef.current = null;
+    return pendingIntent.expiresAt >= performance.now()
+      ? pendingIntent.direction
+      : null;
+  };
+
+  const scrollTerminal = (delta: number, direction: "up" | "down" | "bottom") => {
+    const sessionId = sessionIdRef.current;
+    if (!sessionId || !Number.isFinite(delta) || delta === 0) {
+      return;
+    }
+    markPendingScrollIntent(direction);
+    wheelScrollAccumulatorRef.current = 0;
+    if (direction !== "up") {
+      clearScrollbackHint();
+    }
+    void terminalScroll(sessionId, delta).catch(() => undefined);
+  };
+
+  const handleScrollToBottom = () => {
+    const displayOffset = frameRef.current?.displayOffset ?? 0;
+    if (displayOffset > 0) {
+      scrollTerminal(-displayOffset, "bottom");
+    }
+  };
+
+  const handleRestoreScrollback = () => {
+    if (jumpedScrollbackOffset == null || jumpedScrollbackOffset <= 0) {
+      return;
+    }
+    scrollTerminal(jumpedScrollbackOffset, "up");
+    clearScrollbackHint();
+  };
 
   useEffect(() => {
     activeRef.current = active;
@@ -549,10 +734,28 @@ function TerminalSessionView({
     const screenElement = screen;
     let disposed = false;
 
+    const syncCellMetrics = () => {
+      const nextMetrics = measureTerminalCellMetrics(screenElement);
+      cellMetricsRef.current = nextMetrics;
+      return nextMetrics;
+    };
+
     const queueFrame = (nextFrame: TerminalFrame) => {
       const previousModes = modesRef.current;
       const nextModes = nextFrame.modes ?? DEFAULT_TERMINAL_MODES;
       modesRef.current = nextModes;
+      const previousDisplayOffset = frameRef.current?.displayOffset ?? 0;
+      const nextDisplayOffset = Math.max(0, nextFrame.displayOffset ?? 0);
+      const pendingScrollIntent = consumePendingScrollIntent();
+      if (previousDisplayOffset > 0 && nextDisplayOffset === 0) {
+        if (pendingScrollIntent === "down" || pendingScrollIntent === "bottom") {
+          clearScrollbackHint();
+        } else {
+          showScrollbackHint(previousDisplayOffset);
+        }
+      } else if (nextDisplayOffset > 0) {
+        clearScrollbackHint();
+      }
       if (
         !previousModes.focusInOut &&
         nextModes.focusInOut &&
@@ -561,7 +764,10 @@ function TerminalSessionView({
       ) {
         sendInput("\x1b[I");
       }
-      pendingFrameRef.current = nextFrame;
+      pendingFrameRef.current = {
+        ...nextFrame,
+        displayOffset: nextDisplayOffset,
+      };
       if (frameFlushRef.current != null) {
         return;
       }
@@ -571,6 +777,7 @@ function TerminalSessionView({
         pendingFrameRef.current = null;
         if (!disposed && pendingFrame) {
           setClosed(null);
+          frameRef.current = pendingFrame;
           setFrame(pendingFrame);
         }
       });
@@ -645,9 +852,38 @@ function TerminalSessionView({
       }
     };
 
+    const pasteText = (text: string) => {
+      if (!text) {
+        return;
+      }
+      const normalizedText = text.replace(/\r?\n/g, "\r");
+      if (modesRef.current.bracketedPaste) {
+        sendInput(`\x1b[200~${normalizedText}\x1b[201~`);
+      } else {
+        sendInput(normalizedText);
+      }
+    };
+
+    const copySelectedText = (clipboardData?: DataTransfer | null) => {
+      const selectedText = selectedTextWithin(screenElement);
+      if (!selectedText) {
+        return false;
+      }
+      clipboardData?.setData("text/plain", selectedText);
+      if (navigator.clipboard?.writeText) {
+        void navigator.clipboard.writeText(selectedText).catch(() => undefined);
+      }
+      return true;
+    };
+
     const resizeNow = () => {
       resizeFrameRef.current = null;
-      const { cols, rows } = sizeFromElement(screenElement);
+      const cellMetrics = syncCellMetrics();
+      const size = sizeFromElement(screenElement, cellMetrics);
+      if (!size) {
+        return;
+      }
+      const { cols, rows } = size;
       const lastSize = lastSizeRef.current;
       if (lastSize?.cols === cols && lastSize.rows === rows) {
         return;
@@ -667,6 +903,20 @@ function TerminalSessionView({
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      const usesClipboardShortcut = (event.ctrlKey || event.metaKey) && event.shiftKey;
+      if (usesClipboardShortcut && key === "c") {
+        event.preventDefault();
+        copySelectedText();
+        return;
+      }
+      if (usesClipboardShortcut && key === "v") {
+        event.preventDefault();
+        if (navigator.clipboard?.readText) {
+          void navigator.clipboard.readText().then(pasteText).catch(() => undefined);
+        }
+        return;
+      }
       const input = keyToTerminalInput(event, modesRef.current);
       if (input == null) {
         return;
@@ -675,18 +925,20 @@ function TerminalSessionView({
       sendInput(input);
     };
 
+    const handleCopy = (event: ClipboardEvent) => {
+      if (!copySelectedText(event.clipboardData)) {
+        return;
+      }
+      event.preventDefault();
+    };
+
     const handlePaste = (event: ClipboardEvent) => {
       const text = event.clipboardData?.getData("text/plain");
       if (!text) {
         return;
       }
       event.preventDefault();
-      const normalizedText = text.replace(/\r?\n/g, "\r");
-      if (modesRef.current.bracketedPaste) {
-        sendInput(`\x1b[200~${normalizedText}\x1b[201~`);
-      } else {
-        sendInput(normalizedText);
-      }
+      pasteText(text);
     };
 
     const handleFocus = () => {
@@ -713,7 +965,11 @@ function TerminalSessionView({
       event.preventDefault();
       screenElement.focus({ preventScroll: true });
       mouseButtonRef.current = button;
-      const { col, row } = terminalMousePosition(event, screenElement);
+      const { col, row } = terminalMousePosition(
+        event,
+        screenElement,
+        cellMetricsRef.current,
+      );
       sendInput(
         terminalMouseSequence(
           modesRef.current,
@@ -735,7 +991,11 @@ function TerminalSessionView({
       }
       event.preventDefault();
       mouseButtonRef.current = null;
-      const { col, row } = terminalMousePosition(event, screenElement);
+      const { col, row } = terminalMousePosition(
+        event,
+        screenElement,
+        cellMetricsRef.current,
+      );
       sendInput(
         terminalMouseSequence(
           modesRef.current,
@@ -759,7 +1019,11 @@ function TerminalSessionView({
         return;
       }
       event.preventDefault();
-      const { col, row } = terminalMousePosition(event, screenElement);
+      const { col, row } = terminalMousePosition(
+        event,
+        screenElement,
+        cellMetricsRef.current,
+      );
       const baseButton = activeButton ?? 3;
       sendInput(
         terminalMouseSequence(
@@ -777,7 +1041,11 @@ function TerminalSessionView({
         // Application captures the mouse (vim, codex, tmux): forward wheel as
         // mouse escape sequences so the program scrolls its own view.
         event.preventDefault();
-        const { col, row } = terminalMousePosition(event, screenElement);
+        const { col, row } = terminalMousePosition(
+          event,
+          screenElement,
+          cellMetricsRef.current,
+        );
         const direction = event.deltaY < 0 ? 64 : 65;
         sendInput(
           terminalMouseSequence(
@@ -797,9 +1065,20 @@ function TerminalSessionView({
         return;
       }
       event.preventDefault();
-      const magnitude = Math.max(1, Math.abs(event.deltaY) / CELL_HEIGHT);
-      const delta = event.deltaY < 0 ? magnitude : -magnitude;
-      void terminalScroll(sessionId, Math.round(delta)).catch(() => undefined);
+      wheelScrollAccumulatorRef.current += -normalizeWheelLines(
+        event,
+        cellMetricsRef.current,
+        frameRef.current?.rows ?? MIN_TERMINAL_ROWS,
+      );
+      const delta =
+        wheelScrollAccumulatorRef.current > 0
+          ? Math.floor(wheelScrollAccumulatorRef.current)
+          : Math.ceil(wheelScrollAccumulatorRef.current);
+      if (delta === 0) {
+        return;
+      }
+      wheelScrollAccumulatorRef.current -= delta;
+      scrollTerminal(delta, delta > 0 ? "up" : "down");
     };
 
     const handleContextMenu = (event: MouseEvent) => {
@@ -810,6 +1089,7 @@ function TerminalSessionView({
 
     const resizeObserver = new ResizeObserver(scheduleResize);
     screenElement.addEventListener("keydown", handleKeyDown);
+    screenElement.addEventListener("copy", handleCopy);
     screenElement.addEventListener("paste", handlePaste);
     screenElement.addEventListener("focus", handleFocus);
     screenElement.addEventListener("blur", handleBlur);
@@ -821,15 +1101,19 @@ function TerminalSessionView({
     // oxlint-disable-next-line react-doctor/client-passive-event-listeners
     screenElement.addEventListener("wheel", handleWheel, { passive: false });
     screenElement.addEventListener("contextmenu", handleContextMenu);
+    window.addEventListener(settingsChangedEvent, scheduleResize);
     resizeObserver.observe(screenElement);
 
     async function start() {
       try {
-        const { cols, rows } = sizeFromElement(screenElement);
         const existingSession = sessionRef.current;
+        const cellMetrics = syncCellMetrics();
+        const size = sizeFromElement(screenElement, cellMetrics);
         const session =
           existingSession ??
-          (await terminalSpawn(projectPath, null, cols, rows));
+          (size
+            ? await terminalSpawn(projectPath, null, size.cols, size.rows)
+            : await terminalSpawn(projectPath, null));
         if (disposed) {
           // Only kill a freshly spawned session; an existing live session must
           // keep running so it can be reconnected when the panel re-shows.
@@ -843,8 +1127,14 @@ function TerminalSessionView({
         if (!existingSession) {
           onSessionReadyRef.current(session);
         }
-        // Keep the PTY sized to the current panel even on reconnect.
-        void terminalResize(session.id, cols, rows).catch(() => undefined);
+        if (size) {
+          lastSizeRef.current = size;
+          if (existingSession) {
+            // Keep the PTY sized to the current panel on reconnect, but only
+            // when the panel has a real measured layout.
+            void terminalResize(session.id, size.cols, size.rows).catch(() => undefined);
+          }
+        }
         const socket = new WebSocket(session.wsUrl);
         socketRef.current = socket;
 
@@ -874,6 +1164,7 @@ function TerminalSessionView({
               const pendingFrame = pendingFrameRef.current;
               pendingFrameRef.current = null;
               if (pendingFrame) {
+                frameRef.current = pendingFrame;
                 setFrame(pendingFrame);
               }
               setClosed(message);
@@ -890,11 +1181,12 @@ function TerminalSessionView({
         };
       } catch (error) {
         setClosed({ type: "close", exitCode: null });
-        setFrame({
+        const errorFrame: TerminalFrame = {
           type: "frame",
           title: null,
           rows: 1,
           cols: 80,
+          displayOffset: 0,
           cursorRow: 0,
           cursorCol: 0,
           cursorVisible: false,
@@ -913,7 +1205,9 @@ function TerminalSessionView({
               ],
             },
           ],
-        });
+        };
+        frameRef.current = errorFrame;
+        setFrame(errorFrame);
       }
     }
 
@@ -922,6 +1216,7 @@ function TerminalSessionView({
     return () => {
       disposed = true;
       screenElement.removeEventListener("keydown", handleKeyDown);
+      screenElement.removeEventListener("copy", handleCopy);
       screenElement.removeEventListener("paste", handlePaste);
       screenElement.removeEventListener("focus", handleFocus);
       screenElement.removeEventListener("blur", handleBlur);
@@ -930,6 +1225,7 @@ function TerminalSessionView({
       screenElement.removeEventListener("mousemove", handleMouseMove);
       screenElement.removeEventListener("wheel", handleWheel);
       screenElement.removeEventListener("contextmenu", handleContextMenu);
+      window.removeEventListener(settingsChangedEvent, scheduleResize);
       resizeObserver.disconnect();
 
       const socket = socketRef.current;
@@ -961,10 +1257,19 @@ function TerminalSessionView({
         window.cancelAnimationFrame(frameFlushRef.current);
         frameFlushRef.current = null;
       }
+      if (scrollbackHintTimerRef.current != null) {
+        window.clearTimeout(scrollbackHintTimerRef.current);
+        scrollbackHintTimerRef.current = null;
+      }
       pendingFrameRef.current = null;
       lastSizeRef.current = null;
+      frameRef.current = null;
+      cellMetricsRef.current = DEFAULT_TERMINAL_CELL_METRICS;
+      wheelScrollAccumulatorRef.current = 0;
+      pendingScrollIntentRef.current = null;
       modesRef.current = DEFAULT_TERMINAL_MODES;
       mouseButtonRef.current = null;
+      setJumpedScrollbackOffset(null);
     };
   }, [projectPath]);
 
@@ -983,6 +1288,24 @@ function TerminalSessionView({
           </div>
         ) : null}
       </div>
+      {(frame?.displayOffset ?? 0) > 0 ? (
+        <button
+          type="button"
+          className="terminal-scrollback-button"
+          onClick={handleScrollToBottom}
+        >
+          Back to bottom
+        </button>
+      ) : null}
+      {jumpedScrollbackOffset != null ? (
+        <button
+          type="button"
+          className="terminal-scrollback-button terminal-scrollback-button-alert"
+          onClick={handleRestoreScrollback}
+        >
+          New output. Restore scrollback
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -1039,6 +1362,11 @@ export function TerminalPanel({ active, projectPath }: TerminalPanelProps) {
     setTerminalTabClosed(projectPath, tabId, exitCode);
   };
 
+  const activeTab =
+    activeProjectWorkspace.tabs.find(
+      (tab) => tab.id === activeProjectWorkspace.activeTabId,
+    ) ?? activeProjectWorkspace.tabs[0] ?? null;
+
   return (
     <section className="terminal-panel" aria-label="Terminal">
       <>
@@ -1091,31 +1419,18 @@ export function TerminalPanel({ active, projectPath }: TerminalPanelProps) {
               <button type="button" className="terminal-new-empty" onClick={addTab}>
                 New terminal
               </button>
-            ) : (
-              activeProjectWorkspace.tabs.map((tab) => {
-                const isActiveTab = tab.id === activeProjectWorkspace.activeTabId;
-                return (
-                  <div
-                    key={tab.id}
-                    className={
-                      isActiveTab
-                        ? "terminal-session-layer"
-                        : "terminal-session-layer terminal-session-layer-hidden"
-                    }
-                    aria-hidden={!isActiveTab}
-                  >
-                    <TerminalSessionView
-                      active={active && isActiveTab}
-                      projectPath={projectPath}
-                      session={tab.session}
-                      onTitleChange={(title) => updateTabTitle(tab.id, title)}
-                      onSessionReady={(session) => handleSessionReady(tab.id, session)}
-                      onClosed={(exitCode) => handleClosed(tab.id, exitCode)}
-                    />
-                  </div>
-                );
-              })
-            )}
+            ) : activeTab ? (
+              <div className="terminal-session-layer">
+                <TerminalSessionView
+                  active={active}
+                  projectPath={projectPath}
+                  session={activeTab.session}
+                  onTitleChange={(title) => updateTabTitle(activeTab.id, title)}
+                  onSessionReady={(session) => handleSessionReady(activeTab.id, session)}
+                  onClosed={(exitCode) => handleClosed(activeTab.id, exitCode)}
+                />
+              </div>
+            ) : null}
           </div>
         </>
     </section>

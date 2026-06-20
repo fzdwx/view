@@ -54,7 +54,7 @@ const FILE_SEARCH_SCAN_TIMEOUT: Duration = Duration::from_secs(10);
 const TERMINAL_WS_IDLE_SLEEP_MS: u64 = 1;
 const TERMINAL_WS_PENDING_OUTPUT_LIMIT: usize = 64;
 const TERMINAL_WS_OUTPUT_BURST_LIMIT: usize = 8;
-const TERMINAL_SESSION_METADATA_POLL_INTERVAL: Duration = Duration::from_millis(150);
+const TERMINAL_SESSION_METADATA_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const ZERO_OID: &str = "0000000000000000000000000000000000000000";
 
 #[derive(Serialize)]
@@ -409,6 +409,7 @@ struct TerminalFrame {
     title: Option<String>,
     rows: usize,
     cols: usize,
+    display_offset: usize,
     cursor_row: usize,
     cursor_col: usize,
     cursor_visible: bool,
@@ -2588,6 +2589,7 @@ fn terminal_frame(term: &Term<TerminalEventProxy>, title: Option<&str>) -> Resul
         title: title.map(str::to_string),
         rows,
         cols,
+        display_offset: display_offset.max(0) as usize,
         cursor_row,
         cursor_col,
         cursor_visible,
@@ -2939,7 +2941,16 @@ fn spawn_terminal_session(
              processor: &mut TerminalProcessor<TerminalSyncHandler>| {
                 match event {
                     TerminalParserEvent::Output(bytes) => {
+                        let previous_display_offset = term.grid().display_offset() as i32;
+                        let preserve_scrollback = previous_display_offset > 0
+                            && !term.mode().contains(TermMode::ALT_SCREEN);
                         processor.advance(term, &bytes);
+                        // Alacritty resets display_offset when fresh output arrives. Keep the
+                        // user anchored to the same scrollback position until they explicitly
+                        // scroll back down.
+                        if preserve_scrollback && !term.mode().contains(TermMode::ALT_SCREEN) {
+                            term.scroll_display(Scroll::Delta(previous_display_offset));
+                        }
                     }
                     TerminalParserEvent::Resize(cols, rows) => {
                         term.resize(TermSize::new(cols.max(1) as usize, rows.max(1) as usize));
