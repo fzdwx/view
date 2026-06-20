@@ -422,14 +422,23 @@ export function App() {
     /* oxlint-enable react-doctor/no-derived-state */
   }, [activeProject, repositoryQuery.data]);
 
+  const leftTopItems = railLayout.left.top;
+  const leftBottomItems = railLayout.left.bottom;
+  const rightTopItems = railLayout.right.top;
+  const rightBottomItems = railLayout.right.bottom;
   const leftTopActiveItem = railActiveItems.left.top;
   const leftBottomActiveItem = railActiveItems.left.bottom;
   const rightTopActiveItem = railActiveItems.right.top;
   const rightBottomActiveItem = railActiveItems.right.bottom;
-  const hasLeftTopPanel = leftTopActiveItem !== null;
-  const hasLeftBottomPanel = leftBottomActiveItem !== null;
-  const hasRightTopPanel = rightTopActiveItem !== null;
-  const hasRightBottomPanel = rightBottomActiveItem !== null;
+  const hasLeftTopPanel =
+    leftTopActiveItem !== null && leftTopItems.includes(leftTopActiveItem);
+  const hasLeftBottomPanel =
+    leftBottomActiveItem !== null && leftBottomItems.includes(leftBottomActiveItem);
+  const hasRightTopPanel =
+    rightTopActiveItem !== null && rightTopItems.includes(rightTopActiveItem);
+  const hasRightBottomPanel =
+    rightBottomActiveItem !== null &&
+    rightBottomItems.includes(rightBottomActiveItem);
   const hasBottomPanels = hasLeftBottomPanel || hasRightBottomPanel;
   const contentGridStyle = useMemo<RailGridStyle>(
     () => ({
