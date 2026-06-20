@@ -2297,14 +2297,11 @@ fn terminal_frame(term: &Term<TerminalEventProxy>, title: Option<&str>) -> Resul
                 current_style = style.clone();
             }
 
-            let character = if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
-                ' '
-            } else if cell.flags.contains(Flags::HIDDEN) {
-                ' '
-            } else {
-                cell.c
-            };
-            current_text.push(character);
+            if cell.flags.contains(Flags::WIDE_CHAR_SPACER) || cell.flags.contains(Flags::HIDDEN) {
+                continue;
+            }
+
+            current_text.push(cell.c);
             if let Some(zerowidth) = cell.zerowidth() {
                 current_text.extend(zerowidth);
             }
@@ -3287,6 +3284,31 @@ mod tests {
                 .expect("frame json");
 
         assert_eq!(frame["title"], "View Title Protocol");
+    }
+
+    #[test]
+    fn terminal_frame_omits_wide_char_spacer_cells_from_serialized_text() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        let mut term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(20, 6),
+            test_terminal_event_proxy(input_tx),
+        );
+        let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
+
+        processor.advance(&mut term, "算了\r\n好的\r\n".as_bytes());
+
+        let frame: serde_json::Value =
+            serde_json::from_str(&terminal_frame(&term, None).expect("terminal frame"))
+                .expect("frame json");
+        let all_text = terminal_frame_text(&frame);
+
+        assert!(all_text.contains("算了"));
+        assert!(all_text.contains("好的"));
+        assert!(
+            !all_text.contains("算 了") && !all_text.contains("好 的"),
+            "wide-character spacer cells should not serialize as literal spaces: {all_text:?}"
+        );
     }
 
     #[test]

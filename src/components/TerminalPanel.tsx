@@ -81,6 +81,14 @@ const MAX_TERMINAL_ROWS = 120;
 const MAX_PENDING_INPUT_BYTES = 32 * 1024;
 const MAX_SOCKET_BUFFERED_INPUT_BYTES = 256 * 1024;
 const TEXT_ENCODER = new TextEncoder();
+const terminalGraphemeSegmenter =
+  typeof Intl !== "undefined" && "Segmenter" in Intl
+    ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
+    : null;
+const EMOJI_GRAPHEME_PATTERN =
+  /[\p{Extended_Pictographic}\p{Regional_Indicator}\u{20E3}\u{FE0F}]/u;
+const TERMINAL_WIDE_GRAPHEME_PATTERN =
+  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\u{1100}-\u{115F}\u{2329}\u{232A}\u{2E80}-\u{303F}\u{3040}-\u{A4CF}\u{AC00}-\u{D7A3}\u{F900}-\u{FAFF}\u{FE10}-\u{FE19}\u{FE30}-\u{FE6F}\u{FF01}-\u{FF60}\u{FFE0}-\u{FFE6}]/u;
 const DEFAULT_TERMINAL_MODES: TerminalModes = {
   appCursor: false,
   appKeypad: false,
@@ -317,38 +325,121 @@ function runStyle(run: TerminalRun): CSSProperties {
   };
 }
 
+function splitTerminalGraphemes(text: string): string[] {
+  const normalizedText = text || " ";
+  if (!terminalGraphemeSegmenter) {
+    return Array.from(normalizedText);
+  }
+
+  const graphemes = Array.from(
+    terminalGraphemeSegmenter.segment(normalizedText),
+    ({ segment }) => segment,
+  );
+  return graphemes.length > 0 ? graphemes : [" "];
+}
+
+function terminalGraphemeColumns(grapheme: string): number {
+  return EMOJI_GRAPHEME_PATTERN.test(grapheme) ||
+    TERMINAL_WIDE_GRAPHEME_PATTERN.test(grapheme)
+    ? 2
+    : 1;
+}
+
+function terminalTextColumns(graphemes: readonly string[]): number {
+  return graphemes.reduce(
+    (totalColumns, grapheme) => totalColumns + terminalGraphemeColumns(grapheme),
+    0,
+  );
+}
+
+function terminalCursorGraphemeIndex(
+  graphemes: readonly string[],
+  columnOffset: number,
+): number {
+  let consumedColumns = 0;
+
+  for (let index = 0; index < graphemes.length; index += 1) {
+    const graphemeColumns = terminalGraphemeColumns(graphemes[index]);
+    if (columnOffset < consumedColumns + graphemeColumns) {
+      return index;
+    }
+    consumedColumns += graphemeColumns;
+  }
+
+  return Math.max(0, graphemes.length - 1);
+}
+
+function buildTerminalTextSegments(
+  graphemes: readonly string[],
+): Array<{ text: string; emoji: boolean }> {
+  const segments: Array<{ text: string; emoji: boolean }> = [];
+
+  for (const grapheme of graphemes) {
+    const emoji = EMOJI_GRAPHEME_PATTERN.test(grapheme);
+    const lastSegment = segments.at(-1);
+    if (lastSegment && lastSegment.emoji === emoji) {
+      lastSegment.text += grapheme;
+      continue;
+    }
+
+    segments.push({ text: grapheme, emoji });
+  }
+
+  return segments;
+}
+
+function renderTerminalText(
+  graphemes: readonly string[],
+  keyPrefix: string,
+) {
+  return buildTerminalTextSegments(graphemes).map((segment, index) => (
+    <span
+      key={`${keyPrefix}-${index}`}
+      className={segment.emoji ? "terminal-emoji-run" : undefined}
+    >
+      {segment.text}
+    </span>
+  ));
+}
+
 function renderRunWithCursor(
   run: TerminalRun,
   row: number,
   startCol: number,
   frame: TerminalFrame,
+  graphemes: readonly string[],
 ) {
-  const text = run.text || " ";
+  const textColumns = terminalTextColumns(graphemes);
   const cursorInRun =
     frame.cursorVisible &&
     frame.cursorRow === row &&
     frame.cursorCol >= startCol &&
-    frame.cursorCol < startCol + text.length;
+    frame.cursorCol < startCol + textColumns;
   const style = runStyle(run);
 
   if (!cursorInRun) {
     return (
-      <span key={`${startCol}-${text.length}`} style={style}>
-        {text}
+      <span key={`${startCol}-${graphemes.length}`} style={style}>
+        {renderTerminalText(graphemes, `${startCol}`)}
       </span>
     );
   }
 
-  const cursorIndex = frame.cursorCol - startCol;
-  const before = text.slice(0, cursorIndex);
-  const cursor = text[cursorIndex] || " ";
-  const after = text.slice(cursorIndex + 1);
+  const cursorIndex = terminalCursorGraphemeIndex(
+    graphemes,
+    frame.cursorCol - startCol,
+  );
+  const before = graphemes.slice(0, cursorIndex);
+  const cursor = graphemes[cursorIndex] ?? " ";
+  const after = graphemes.slice(cursorIndex + 1);
 
   return (
-    <span key={`${startCol}-${text.length}`} style={style}>
-      {before}
-      <span className="terminal-cursor">{cursor}</span>
-      {after}
+    <span key={`${startCol}-${graphemes.length}`} style={style}>
+      {renderTerminalText(before, `${startCol}-before`)}
+      <span className="terminal-cursor">
+        {renderTerminalText([cursor], `${startCol}-cursor`)}
+      </span>
+      {renderTerminalText(after, `${startCol}-after`)}
     </span>
   );
 }
@@ -361,9 +452,16 @@ function TerminalRows({ frame }: { frame: TerminalFrame }) {
         return (
           <div key={row} className="terminal-line">
             {line.cells.map((run) => {
+              const graphemes = splitTerminalGraphemes(run.text || " ");
               const startColumn = column;
-              column += run.text.length || 1;
-              return renderRunWithCursor(run, row, startColumn, frame);
+              column += terminalTextColumns(graphemes);
+              return renderRunWithCursor(
+                run,
+                row,
+                startColumn,
+                frame,
+                graphemes,
+              );
             })}
             {frame.cursorVisible && frame.cursorRow === row && frame.cursorCol >= column ? (
               <>
