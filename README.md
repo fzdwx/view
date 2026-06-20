@@ -8,6 +8,8 @@ It is built for day-to-day repository work rather than marketing-style chrome:
 fast navigation, multi-panel workflows, and native-feeling resize and drag
 interactions.
 
+![view desktop screenshot](docs/images/readme-screenshot.png)
+
 ## Highlights
 
 - Rail-based workspace layout with draggable tool icons on the left and right
@@ -102,9 +104,8 @@ GitHub Actions builds Linux and Windows artifacts from
 
 - Rust dependencies and target output are cached with
   `swatinem/rust-cache@v2`
+- Bun package downloads are cached via `actions/cache@v4`
 - Frontend dependencies are installed with `bun install --frozen-lockfile`
-- There is currently no explicit Bun package cache or `node_modules` cache in
-  the workflow
 
 ## Notes
 
