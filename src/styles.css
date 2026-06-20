@@ -4205,53 +4205,6 @@ body.is-resizing-y * {
   text-align: right;
 }
 
-.editor-active-blame {
-  position: absolute;
-  right: 18px;
-  z-index: 5;
-  display: flex;
-  max-width: min(60ch, calc(100% - 92px));
-  align-items: center;
-  overflow: hidden;
-  padding: 0 0 0 28px;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    color-mix(in oklch, var(--surface-0) 34%, transparent) 14%,
-    color-mix(in oklch, var(--surface-0) 96%, var(--surface-1)) 34%
-  );
-  color: color-mix(in oklch, var(--ink) 78%, var(--surface-0));
-  font-family: var(--mono);
-  font-size: max(11px, calc(var(--editor-font-size, 12px) - 1px));
-  font-variant-numeric: tabular-nums;
-  line-height: var(--editor-line-height, 19px);
-  pointer-events: none;
-  text-overflow: ellipsis;
-  user-select: none;
-  white-space: nowrap;
-}
-
-.editor-active-blame::before {
-  content: "//";
-  position: absolute;
-  left: 12px;
-  opacity: 0.42;
-}
-
-.editor-active-blame-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.editor-active-blame.status {
-  color: var(--faint);
-  font-style: italic;
-}
-
-.editor-active-blame.uncommitted {
-  color: color-mix(in oklch, var(--accent) 42%, var(--ink));
-}
-
 .code-mirror-editor-shell .cm-git-gutter {
   width: 10px;
 }
@@ -4294,6 +4247,61 @@ body.is-resizing-y * {
 
 .code-mirror-editor-shell .cm-git-marker-segment.deleted {
   background: var(--git-deleted);
+}
+
+.code-mirror-editor-shell .cm-blame-gutter {
+  width: clamp(220px, 28vw, 420px);
+  min-width: clamp(220px, 28vw, 420px);
+  border-left: 1px solid color-mix(in oklch, var(--line) 84%, transparent);
+  background: color-mix(in oklch, var(--surface-1) 58%, var(--surface-0));
+}
+
+.code-mirror-editor-shell .cm-blame-gutter .cm-gutterElement {
+  width: 100%;
+  padding: 0;
+}
+
+.code-mirror-editor-shell .cm-active-blame-line {
+  position: relative;
+  display: flex;
+  height: 100%;
+  align-items: center;
+  overflow: hidden;
+  padding: 0 10px 0 28px;
+  color: color-mix(in oklch, var(--ink) 78%, var(--surface-0));
+  font-family: var(--mono);
+  font-size: max(11px, calc(var(--editor-font-size, 12px) - 1px));
+  font-variant-numeric: tabular-nums;
+  line-height: var(--editor-line-height, 19px);
+  text-overflow: ellipsis;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.code-mirror-editor-shell .cm-active-blame-line::before {
+  content: "//";
+  position: absolute;
+  left: 12px;
+  opacity: 0.42;
+}
+
+.code-mirror-editor-shell .cm-active-blame-line.spacer {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.code-mirror-editor-shell .cm-active-blame-line.status {
+  color: var(--faint);
+  font-style: italic;
+}
+
+.code-mirror-editor-shell .cm-active-blame-line.uncommitted {
+  color: color-mix(in oklch, var(--accent) 42%, var(--ink));
+}
+
+.code-mirror-editor-shell .cm-active-blame-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .file-editor {

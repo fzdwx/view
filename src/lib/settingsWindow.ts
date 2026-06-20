@@ -13,7 +13,13 @@ export async function installSettingsWindowZoom(
   appZoom: number,
 ): Promise<void> {
   try {
-    await applyDisplayScale({ appZoom });
+    await applyDisplayScale({
+      appZoom,
+      logicalSize: {
+        width: settingsWindowWidth,
+        height: settingsWindowHeight,
+      },
+    });
   } catch {
     // ignore zoom failures
   }

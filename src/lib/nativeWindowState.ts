@@ -1,4 +1,5 @@
 import {
+  LogicalSize,
   PhysicalPosition,
   PhysicalSize,
   availableMonitors,
@@ -19,8 +20,10 @@ const minimumVisiblePixels = 96;
 interface SavedWindowState {
   readonly x: number;
   readonly y: number;
-  readonly width: number;
-  readonly height: number;
+  readonly physicalWidth: number;
+  readonly physicalHeight: number;
+  readonly logicalWidth: number | null;
+  readonly logicalHeight: number | null;
   readonly maximized: boolean;
 }
 
@@ -64,17 +67,15 @@ async function restoreWindowState(appWindow: TauriWindow): Promise<void> {
     return;
   }
 
-  await appWindow.setSize(
-    new PhysicalSize(
-      Math.round(savedState.width),
-      Math.round(savedState.height),
-    ),
-  );
   await appWindow.setPosition(
     new PhysicalPosition(
       Math.round(savedState.x),
       Math.round(savedState.y),
     ),
+  );
+
+  await appWindow.setSize(
+    resolveRestoredWindowSize(savedState, monitors),
   );
   if (savedState.maximized) {
     await appWindow.maximize();
@@ -89,6 +90,9 @@ function registerWindowStateListeners(appWindow: TauriWindow): void {
   void appWindow
     .onMoved(() => saveLater())
     .catch((error: unknown) => reportNativeWindowStateError("move", error));
+  void appWindow
+    .onScaleChanged(() => saveLater())
+    .catch((error: unknown) => reportNativeWindowStateError("scale", error));
   window.addEventListener("pagehide", () => {
     void persistCurrentWindowState(appWindow);
   });
@@ -115,24 +119,30 @@ async function persistCurrentWindowState(
   appWindow: TauriWindow,
 ): Promise<void> {
   try {
-    const [size, position, maximized, fullscreen, minimized] =
+    const [size, position, maximized, fullscreen, minimized, scaleFactor] =
       await Promise.all([
         appWindow.innerSize(),
         appWindow.outerPosition(),
         appWindow.isMaximized(),
         appWindow.isFullscreen(),
         appWindow.isMinimized(),
+        appWindow.scaleFactor(),
       ]);
 
     if (fullscreen || minimized) {
       return;
     }
 
+    const safeScaleFactor =
+      Number.isFinite(scaleFactor) && scaleFactor > 0 ? scaleFactor : 1;
+
     saveWindowState({
       x: Math.round(position.x),
       y: Math.round(position.y),
-      width: Math.round(size.width),
-      height: Math.round(size.height),
+      physicalWidth: Math.round(size.width),
+      physicalHeight: Math.round(size.height),
+      logicalWidth: roundLogicalSize(size.width / safeScaleFactor),
+      logicalHeight: roundLogicalSize(size.height / safeScaleFactor),
       maximized,
     });
   } catch (error) {
@@ -168,14 +178,24 @@ function normalizeSavedWindowState(value: unknown): SavedWindowState | null {
     return null;
   }
 
-  const { x, y, width, height, maximized } = value;
+  const { x, y, physicalWidth, physicalHeight, logicalWidth, logicalHeight, width, height, maximized } = value;
+  const normalizedPhysicalWidth = isFiniteNumber(physicalWidth)
+    ? physicalWidth
+    : isFiniteNumber(width)
+      ? width
+      : NaN;
+  const normalizedPhysicalHeight = isFiniteNumber(physicalHeight)
+    ? physicalHeight
+    : isFiniteNumber(height)
+      ? height
+      : NaN;
   if (
     !isFiniteNumber(x) ||
     !isFiniteNumber(y) ||
-    !isFiniteNumber(width) ||
-    !isFiniteNumber(height) ||
-    width < minimumWindowWidth ||
-    height < minimumWindowHeight
+    !Number.isFinite(normalizedPhysicalWidth) ||
+    !Number.isFinite(normalizedPhysicalHeight) ||
+    normalizedPhysicalWidth < minimumWindowWidth ||
+    normalizedPhysicalHeight < minimumWindowHeight
   ) {
     return null;
   }
@@ -183,8 +203,10 @@ function normalizeSavedWindowState(value: unknown): SavedWindowState | null {
   return {
     x,
     y,
-    width,
-    height,
+    physicalWidth: normalizedPhysicalWidth,
+    physicalHeight: normalizedPhysicalHeight,
+    logicalWidth: isFiniteNumber(logicalWidth) ? logicalWidth : null,
+    logicalHeight: isFiniteNumber(logicalHeight) ? logicalHeight : null,
     maximized: typeof maximized === "boolean" ? maximized : false,
   };
 }
@@ -193,8 +215,8 @@ function windowStateIntersectsVisibleWorkArea(
   state: SavedWindowState,
   monitors: readonly Monitor[],
 ): boolean {
-  const stateRight = state.x + state.width;
-  const stateBottom = state.y + state.height;
+  const stateRight = state.x + state.physicalWidth;
+  const stateBottom = state.y + state.physicalHeight;
 
   return monitors.some((monitor) => {
     const workArea = monitor.workArea;
@@ -212,6 +234,98 @@ function windowStateIntersectsVisibleWorkArea(
       visibleHeight >= minimumVisiblePixels
     );
   });
+}
+
+function resolveRestoredWindowSize(
+  state: SavedWindowState,
+  monitors: readonly Monitor[],
+): LogicalSize | PhysicalSize {
+  const targetScaleFactor = resolveSavedWindowScaleFactor(state, monitors);
+  if (
+    targetScaleFactor != null &&
+    state.logicalWidth != null &&
+    state.logicalHeight != null
+  ) {
+    return new PhysicalSize(
+      Math.round(state.logicalWidth * targetScaleFactor),
+      Math.round(state.logicalHeight * targetScaleFactor),
+    );
+  }
+
+  if (state.logicalWidth != null && state.logicalHeight != null) {
+    return new LogicalSize(state.logicalWidth, state.logicalHeight);
+  }
+
+  return new PhysicalSize(
+    Math.round(state.physicalWidth),
+    Math.round(state.physicalHeight),
+  );
+}
+
+function resolveSavedWindowScaleFactor(
+  state: SavedWindowState,
+  monitors: readonly Monitor[],
+): number | null {
+  const pointMatchedMonitor = monitors.find((monitor) =>
+    monitorContainsPoint(monitor, state.x, state.y),
+  );
+  if (pointMatchedMonitor) {
+    return sanitizeMonitorScaleFactor(pointMatchedMonitor.scaleFactor);
+  }
+
+  const intersectedMonitor = resolveBestIntersectedMonitor(state, monitors);
+  return intersectedMonitor
+    ? sanitizeMonitorScaleFactor(intersectedMonitor.scaleFactor)
+    : null;
+}
+
+function resolveBestIntersectedMonitor(
+  state: SavedWindowState,
+  monitors: readonly Monitor[],
+): Monitor | null {
+  const stateRight = state.x + state.physicalWidth;
+  const stateBottom = state.y + state.physicalHeight;
+  let bestMonitor: Monitor | null = null;
+  let bestArea = 0;
+
+  for (const monitor of monitors) {
+    const monitorRight = monitor.position.x + monitor.size.width;
+    const monitorBottom = monitor.position.y + monitor.size.height;
+    const visibleWidth =
+      Math.min(stateRight, monitorRight) - Math.max(state.x, monitor.position.x);
+    const visibleHeight =
+      Math.min(stateBottom, monitorBottom) -
+      Math.max(state.y, monitor.position.y);
+    const visibleArea = Math.max(0, visibleWidth) * Math.max(0, visibleHeight);
+    if (visibleArea > bestArea) {
+      bestArea = visibleArea;
+      bestMonitor = monitor;
+    }
+  }
+
+  return bestMonitor;
+}
+
+function monitorContainsPoint(
+  monitor: Monitor,
+  x: number,
+  y: number,
+): boolean {
+  const right = monitor.position.x + monitor.size.width;
+  const bottom = monitor.position.y + monitor.size.height;
+  return x >= monitor.position.x && x < right && y >= monitor.position.y && y < bottom;
+}
+
+function sanitizeMonitorScaleFactor(value: number): number | null {
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function roundLogicalSize(value: number): number | null {
+  if (!Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+
+  return Math.round(value * 1000) / 1000;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

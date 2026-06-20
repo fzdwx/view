@@ -40,6 +40,7 @@ mod git_pathspec;
 mod git_restore;
 mod git_status;
 mod git_write;
+mod wsl;
 
 use git_status::{
     count_statuses, normalize_git_path, parse_name_status_entries, parse_porcelain_v1_z_status,
@@ -4934,7 +4935,8 @@ pub fn run() {
             terminal_spawn,
             terminal_resize,
             terminal_scroll,
-            terminal_kill
+            terminal_kill,
+            wsl::wsl_display_scale_for_monitor
         ])
         .run(tauri::generate_context!())
         // SAFE-EXPECT: Tauri can only fail here during unrecoverable app bootstrap.

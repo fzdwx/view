@@ -126,8 +126,6 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
   const [activeEditorMatchIndex, setActiveEditorMatchIndex] = useState(0);
   const [activeGitMarkerId, setActiveGitMarkerId] = useState<string | null>(null);
   const [fileViewMode, setFileViewMode] = useState<FileViewMode>("source");
-  const [editorScrollTop, setEditorScrollTop] = useState(0);
-  const [editorScrollLeft, setEditorScrollLeft] = useState(0);
   const [editorViewportHeight, setEditorViewportHeight] = useState(0);
   const [editorViewportWidth, setEditorViewportWidth] = useState(0);
   const [editorLineHeight, setEditorLineHeight] = useState(19);
@@ -235,53 +233,6 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
     blameLoading,
     showBlameAnnotations,
   ]);
-  const activeBlameOverlay = useMemo(() => {
-    if (!activeBlameRow || !editorView || !stageRef.current) {
-      return null;
-    }
-
-    const lineNumber = Math.min(
-      Math.max(1, activeBlameRow.lineNumber),
-      editorView.state.doc.lines,
-    );
-    const line = editorView.state.doc.line(lineNumber);
-    const startCoords = editorView.coordsAtPos(line.from);
-    const endCoords = editorView.coordsAtPos(line.to) ?? startCoords;
-    if (!startCoords || !endCoords) {
-      return {
-        top: 8,
-        height: editorLineHeight,
-        left: 132,
-      };
-    }
-
-    const stageRect = stageRef.current.getBoundingClientRect();
-    const left = clamp(
-      endCoords.right - stageRect.left + 28,
-      132,
-      Math.max(132, editorViewportWidth - 238),
-    );
-    return {
-      top: clamp(
-        startCoords.top - stageRect.top,
-        0,
-        Math.max(0, editorViewportHeight - editorLineHeight),
-      ),
-      height: editorLineHeight,
-      left,
-    };
-    // editorScrollLeft/Top intentionally re-trigger the overlay on scroll.
-    /* oxlint-disable react-doctor/exhaustive-deps */
-  }, [
-    activeBlameRow,
-    editorLineHeight,
-    editorScrollLeft,
-    editorScrollTop,
-    editorView,
-    editorViewportHeight,
-    editorViewportWidth,
-  ]);
-    /* oxlint-enable react-doctor/exhaustive-deps */
   const gitMarkerSegmentsByLine = useMemo(() => {
     const segments = new Map<number, GitMarkerSegment>();
 
@@ -312,8 +263,6 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
       return;
     }
 
-    setEditorScrollTop(view.scrollDOM.scrollTop);
-    setEditorScrollLeft(view.scrollDOM.scrollLeft);
     setEditorViewportHeight(view.scrollDOM.clientHeight);
     setEditorViewportWidth(view.scrollDOM.clientWidth);
     setEditorLineHeight(view.defaultLineHeight || 19);
@@ -792,6 +741,56 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
       }
     }
 
+    class BlameGutterMarker extends GutterMarker {
+      constructor(
+        private readonly row: VisibleBlameRow,
+        private readonly spacer = false,
+      ) {
+        super();
+      }
+
+      eq(other: GutterMarker) {
+        return (
+          other instanceof BlameGutterMarker &&
+          other.row.text === this.row.text &&
+          other.row.title === this.row.title &&
+          other.row.tone === this.row.tone &&
+          other.spacer === this.spacer
+        );
+      }
+
+      toDOM() {
+        const element = document.createElement("div");
+        element.className = [
+          "cm-active-blame-line",
+          this.row.tone,
+          this.spacer ? "spacer" : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        element.title = this.row.title;
+        if (this.spacer) {
+          element.setAttribute("aria-hidden", "true");
+        }
+
+        const text = document.createElement("span");
+        text.className = "cm-active-blame-text";
+        text.textContent = this.row.text;
+        element.append(text);
+        return element;
+      }
+    }
+
+    const blameSpacer = new BlameGutterMarker(
+      {
+        lineNumber: 0,
+        text: "0000000 Contributor: A much longer commit title preview",
+        title: "",
+        tone: "default",
+      },
+      true,
+    );
+
     return [
       search({ top: true, caseSensitive: false }),
       keymap.of([
@@ -825,6 +824,33 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
         },
       ]),
       lineNumbers(),
+      ...(showBlameAnnotations
+        ? [
+            gutter({
+              class: "cm-blame-gutter",
+              side: "after",
+              initialSpacer: () => blameSpacer,
+              lineMarkerChange(update) {
+                return (
+                  update.selectionSet ||
+                  update.docChanged ||
+                  update.viewportChanged ||
+                  update.geometryChanged
+                );
+              },
+              lineMarker(view, line) {
+                if (!activeBlameRow) {
+                  return null;
+                }
+
+                const lineNumber = view.state.doc.lineAt(line.from).number;
+                return lineNumber === activeBlameRow.lineNumber
+                  ? new BlameGutterMarker(activeBlameRow)
+                  : null;
+              },
+            }),
+          ]
+        : []),
       ...(showGitGutter
         ? [
             gutter({
@@ -856,8 +882,10 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
     ];
   }, [
     activeEditorMatchIndex,
+    activeBlameRow,
     gitMarkerSegmentsByLine,
     openEditorFind,
+    showBlameAnnotations,
     showGitGutter,
     selectEditorMatch,
     toggleGitMarker,
@@ -1128,22 +1156,6 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
             }
           }}
         />
-        {activeBlameRow && activeBlameOverlay ? (
-          <div
-            className={`editor-active-blame ${activeBlameRow.tone}`}
-            style={
-              {
-                top: `${activeBlameOverlay.top}px`,
-                height: `${activeBlameOverlay.height}px`,
-                left: `${activeBlameOverlay.left}px`,
-              } as CSSProperties
-            }
-            title={activeBlameRow.title}
-            aria-hidden="true"
-          >
-            <span className="editor-active-blame-text">{activeBlameRow.text}</span>
-          </div>
-        ) : null}
         {visibleGitMarkers.length > 0 ? (
           <div className="editor-git-overview" aria-hidden="true">
             {visibleGitMarkers.map((marker) => (

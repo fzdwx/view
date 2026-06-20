@@ -70,8 +70,8 @@ function EditorSettings({
         <header className="font-card-heading">
           <h3>Application scale</h3>
           <p>
-            Adjust the current app zoom. This is applied on top of automatic
-            WSL DPI detection.
+            Adjust the current app zoom while keeping it aligned with your
+            system display scaling.
           </p>
         </header>
         <div className="font-control">
