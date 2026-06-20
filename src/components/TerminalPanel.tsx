@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties } from "react";
 import { Plus, TerminalSquare, X } from "lucide-react";
 import {
@@ -7,23 +7,24 @@ import {
   terminalResize,
   terminalSpawn,
 } from "../lib/api";
+import {
+  addTerminalTab,
+  closeTerminalTab,
+  createInitialTerminalWorkspace,
+  getTerminalWorkspace,
+  selectTerminalTab,
+  setTerminalTabClosed,
+  setTerminalTabSession,
+  setTerminalTabTitle,
+  subscribeTerminalWorkspaces,
+  type TerminalSessionInfo,
+  type TerminalWorkspace,
+} from "../lib/terminalSessions";
 
 interface TerminalPanelProps {
   active: boolean;
   projectPath: string | null;
 }
-
-type TerminalTab = {
-  id: string;
-  baseTitle: string;
-  title: string;
-};
-
-type TerminalWorkspace = {
-  tabs: TerminalTab[];
-  activeTabId: string;
-  nextTabIndex: number;
-};
 
 type TerminalRun = {
   text: string;
@@ -379,7 +380,11 @@ function TerminalRows({ frame }: { frame: TerminalFrame }) {
 interface TerminalSessionViewProps {
   active: boolean;
   projectPath: string;
+  /** Existing live PTY session to reconnect to, or null to spawn a new one. */
+  session: TerminalSessionInfo | null;
   onTitleChange(title: string | null): void;
+  onSessionReady(session: TerminalSessionInfo): void;
+  onClosed(exitCode: number | null): void;
 }
 
 // TerminalSessionView couples the PTY lifecycle to its UI; splitting it is a
@@ -388,7 +393,10 @@ interface TerminalSessionViewProps {
 function TerminalSessionView({
   active,
   projectPath,
+  session,
   onTitleChange,
+  onSessionReady,
+  onClosed,
 }: TerminalSessionViewProps) {
   const screenRef = useRef<HTMLDivElement | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
@@ -400,6 +408,13 @@ function TerminalSessionView({
   const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null);
   const activeRef = useRef(active);
   const titleChangeRef = useRef(onTitleChange);
+  const onSessionReadyRef = useRef(onSessionReady);
+  const onClosedRef = useRef(onClosed);
+  const sessionRef = useRef<TerminalSessionInfo | null>(session);
+
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
   const pendingFrameRef = useRef<TerminalFrame | null>(null);
   const frameFlushRef = useRef<number | null>(null);
   const modesRef = useRef<TerminalModes>(DEFAULT_TERMINAL_MODES);
@@ -410,7 +425,9 @@ function TerminalSessionView({
   useEffect(() => {
     activeRef.current = active;
     titleChangeRef.current = onTitleChange;
-  }, [active, onTitleChange]);
+    onSessionReadyRef.current = onSessionReady;
+    onClosedRef.current = onClosed;
+  }, [active, onTitleChange, onSessionReady, onClosed]);
 
   useEffect(() => {
     /* oxlint-disable react-doctor/no-event-handler, react-doctor/no-effect-chain, react-doctor/no-derived-state */
@@ -698,13 +715,28 @@ function TerminalSessionView({
     async function start() {
       try {
         const { cols, rows } = sizeFromElement(screenElement);
-        const session = await terminalSpawn(projectPath, null, cols, rows);
+        const existingSession = sessionRef.current;
+        const session =
+          existingSession ??
+          (await terminalSpawn(projectPath, null, cols, rows));
         if (disposed) {
-          await terminalKill(session.id).catch(() => undefined);
+          // Only kill a freshly spawned session; an existing live session must
+          // keep running so it can be reconnected when the panel re-shows.
+          if (!existingSession) {
+            await terminalKill(session.id).catch(() => undefined);
+          }
           return;
         }
 
         sessionIdRef.current = session.id;
+        if (!existingSession) {
+          onSessionReadyRef.current({
+            id: session.id,
+            wsUrl: session.wsUrl,
+          });
+        }
+        // Keep the PTY sized to the current panel even on reconnect.
+        void terminalResize(session.id, cols, rows).catch(() => undefined);
         const socket = new WebSocket(session.wsUrl);
         socketRef.current = socket;
 
@@ -737,6 +769,7 @@ function TerminalSessionView({
                 setFrame(pendingFrame);
               }
               setClosed(message);
+              onClosedRef.current(message.exitCode);
             }
           } catch {
             // Ignore malformed frames from an old dev backend.
@@ -791,8 +824,6 @@ function TerminalSessionView({
       screenElement.removeEventListener("contextmenu", handleContextMenu);
       resizeObserver.disconnect();
 
-      const sessionId = sessionIdRef.current;
-      sessionIdRef.current = null;
       const socket = socketRef.current;
       socketRef.current = null;
       if (socket) {
@@ -802,9 +833,11 @@ function TerminalSessionView({
         socket.onclose = null;
         socket.close();
       }
-      if (sessionId) {
-        void terminalKill(sessionId).catch(() => undefined);
-      }
+      // Intentionally do NOT kill the PTY here. The terminal panel is
+      // unmounted whenever the rail hides it, but the underlying process and
+      // screen state must survive so the panel can reconnect on re-show.
+      // PTYs are killed explicitly when a tab is closed or the shell exits.
+      sessionIdRef.current = null;
 
       pendingInputRef.current = [];
       pendingInputBytesRef.current = 0;
@@ -847,164 +880,60 @@ function TerminalSessionView({
 }
 
 export function TerminalPanel({ active, projectPath }: TerminalPanelProps) {
-  const [workspaces, setWorkspaces] = useState<Record<string, TerminalWorkspace>>({});
-  const unavailableMessage = !projectPath
-    ? "Open a folder first."
-    : !isTauriRuntime()
-      ? "Terminal is available in Tauri."
-      : null;
-  const activeWorkspace = projectPath
-    ? (workspaces[projectPath] ?? createInitialTerminalWorkspace())
-    : null;
-  const workspaceEntries: Array<[string, TerminalWorkspace]> =
-    projectPath && activeWorkspace && !workspaces[projectPath]
-      ? [...Object.entries(workspaces), [projectPath, activeWorkspace]]
-      : Object.entries(workspaces);
+  // Terminal workspaces live in a module-level store keyed by project path so
+  // the live PTY sessions survive the panel being hidden (which unmounts this
+  // whole stack) and can be reconnected when the panel is shown again.
+  const activeProjectWorkspace = useSyncExternalStore(
+    subscribeTerminalWorkspaces,
+    () => (projectPath ? getTerminalWorkspace(projectPath) : EMPTY_WORKSPACE),
+    () => EMPTY_WORKSPACE,
+  );
 
-  // workspaces is accumulated session state keyed by project; it can't be
-  // derived because it grows across renders as sessions are created.
-  useEffect(() => {
-    /* oxlint-disable react-doctor/no-event-handler, react-doctor/no-effect-chain, react-doctor/no-derived-state */
-    if (!projectPath || !isTauriRuntime()) {
-      return;
-    }
-
-    setWorkspaces((currentWorkspaces) =>
-      currentWorkspaces[projectPath]
-        ? currentWorkspaces
-        : {
-            ...currentWorkspaces,
-            [projectPath]: createInitialTerminalWorkspace(),
-          },
+  if (!projectPath || !isTauriRuntime()) {
+    const unavailableMessage = !projectPath
+      ? "Open a folder first."
+      : "Terminal is available in Tauri.";
+    return (
+      <section className="terminal-panel" aria-label="Terminal">
+        <div className="terminal-empty">{unavailableMessage}</div>
+      </section>
     );
-    /* oxlint-enable react-doctor/no-event-handler, react-doctor/no-effect-chain, react-doctor/no-derived-state */
-  }, [projectPath]);
+  }
 
   const addTab = () => {
-    if (!projectPath) {
-      return;
-    }
-
-    setWorkspaces((currentWorkspaces) => {
-      const workspace = currentWorkspaces[projectPath] ?? createInitialTerminalWorkspace();
-      const nextIndex = workspace.nextTabIndex + 1;
-      const tab = {
-        id: `terminal-${Date.now()}-${nextIndex}`,
-        baseTitle: `Terminal ${nextIndex}`,
-        title: `Terminal ${nextIndex}`,
-      };
-
-      return {
-        ...currentWorkspaces,
-        [projectPath]: {
-          tabs: [...workspace.tabs, tab],
-          activeTabId: tab.id,
-          nextTabIndex: nextIndex,
-        },
-      };
-    });
+    addTerminalTab(projectPath);
   };
 
   const closeTab = (tabId: string) => {
-    if (!projectPath) {
-      return;
-    }
-
-    setWorkspaces((currentWorkspaces) => {
-      const workspace = currentWorkspaces[projectPath];
-      if (!workspace) {
-        return currentWorkspaces;
-      }
-
-      const index = workspace.tabs.findIndex((tab) => tab.id === tabId);
-      if (index < 0) {
-        return currentWorkspaces;
-      }
-
-      const nextTabs = workspace.tabs.filter((tab) => tab.id !== tabId);
-      const fallback = nextTabs[Math.max(0, index - 1)] ?? nextTabs[0] ?? null;
-      return {
-        ...currentWorkspaces,
-        [projectPath]: {
-          ...workspace,
-          tabs: nextTabs,
-          activeTabId:
-            workspace.activeTabId === tabId
-              ? (fallback?.id ?? "")
-              : workspace.activeTabId,
-        },
-      };
+    closeTerminalTab(projectPath, tabId, (session) => {
+      void terminalKill(session.id).catch(() => undefined);
     });
   };
 
   const selectTab = (tabId: string) => {
-    if (!projectPath) {
-      return;
-    }
-
-    setWorkspaces((currentWorkspaces) => {
-      const workspace = currentWorkspaces[projectPath];
-      if (!workspace) {
-        return currentWorkspaces;
-      }
-
-      return {
-        ...currentWorkspaces,
-        [projectPath]: {
-          ...workspace,
-          activeTabId: tabId,
-        },
-      };
-    });
+    selectTerminalTab(projectPath, tabId);
   };
 
   const updateTabTitle = (tabId: string, title: string | null) => {
-    if (!projectPath) {
-      return;
+    setTerminalTabTitle(projectPath, tabId, title);
+  };
+
+  const handleSessionReady = (tabId: string, session: TerminalSessionInfo) => {
+    setTerminalTabSession(projectPath, tabId, session);
+  };
+
+  const handleClosed = (tabId: string, exitCode: number | null) => {
+    const workspace = getTerminalWorkspace(projectPath);
+    const tab = workspace.tabs.find((entry) => entry.id === tabId);
+    if (tab?.session) {
+      void terminalKill(tab.session.id).catch(() => undefined);
     }
-
-    setWorkspaces((currentWorkspaces) => {
-      const workspace = currentWorkspaces[projectPath];
-      if (!workspace) {
-        return currentWorkspaces;
-      }
-
-      let changed = false;
-      const nextTabs = workspace.tabs.map((tab) => {
-        if (tab.id !== tabId) {
-          return tab;
-        }
-        const nextTitle = title?.trim() || tab.baseTitle;
-        if (tab.title === nextTitle) {
-          return tab;
-        }
-        changed = true;
-        return {
-          ...tab,
-          title: nextTitle,
-        };
-      });
-
-      if (!changed) {
-        return currentWorkspaces;
-      }
-
-      return {
-        ...currentWorkspaces,
-        [projectPath]: {
-          ...workspace,
-          tabs: nextTabs,
-        },
-      };
-    });
+    setTerminalTabClosed(projectPath, tabId, exitCode);
   };
 
   return (
     <section className="terminal-panel" aria-label="Terminal">
-      {unavailableMessage ? (
-        <div className="terminal-empty">{unavailableMessage}</div>
-      ) : (
-        <>
+      <>
           <div className="terminal-header">
             <div className="terminal-header-title" aria-label="Terminal">
               <TerminalSquare size={14} />
@@ -1019,11 +948,11 @@ export function TerminalPanel({ active, projectPath }: TerminalPanelProps) {
               <Plus size={14} />
             </button>
             <div className="terminal-tabs" role="tablist" aria-label="Terminals">
-              {activeWorkspace?.tabs.map((tab) => (
+              {activeProjectWorkspace.tabs.map((tab) => (
                 <div
                   key={tab.id}
                   className={
-                    tab.id === activeWorkspace.activeTabId
+                    tab.id === activeProjectWorkspace.activeTabId
                       ? "terminal-tab-shell terminal-tab-active"
                       : "terminal-tab-shell"
                   }
@@ -1032,7 +961,7 @@ export function TerminalPanel({ active, projectPath }: TerminalPanelProps) {
                     type="button"
                     className="terminal-tab"
                     role="tab"
-                    aria-selected={tab.id === activeWorkspace.activeTabId}
+                    aria-selected={tab.id === activeProjectWorkspace.activeTabId}
                     onClick={() => selectTab(tab.id)}
                   >
                     <span>{tab.title}</span>
@@ -1050,46 +979,39 @@ export function TerminalPanel({ active, projectPath }: TerminalPanelProps) {
             </div>
           </div>
           <div className="terminal-session-stack">
-            {activeWorkspace?.tabs.length === 0 ? (
+            {activeProjectWorkspace.tabs.length === 0 ? (
               <button type="button" className="terminal-new-empty" onClick={addTab}>
                 New terminal
               </button>
             ) : (
-              workspaceEntries.flatMap(([workspaceProjectPath, workspace]) =>
-                workspace.tabs.map((tab) => {
-                  const isActiveProject = workspaceProjectPath === projectPath;
-                  const isActiveTab = tab.id === workspace.activeTabId;
-                  return (
-                    <div
-                      key={`${workspaceProjectPath}:${tab.id}`}
-                      className={
-                        isActiveProject && isActiveTab
-                          ? "terminal-session-layer"
-                          : "terminal-session-layer terminal-session-layer-hidden"
-                      }
-                      aria-hidden={!isActiveProject || !isActiveTab}
-                    >
-                      <TerminalSessionView
-                        active={active && isActiveProject && isActiveTab}
-                        projectPath={workspaceProjectPath}
-                        onTitleChange={(title) => updateTabTitle(tab.id, title)}
-                      />
-                    </div>
-                  );
-                }),
-              )
+              activeProjectWorkspace.tabs.map((tab) => {
+                const isActiveTab = tab.id === activeProjectWorkspace.activeTabId;
+                return (
+                  <div
+                    key={tab.id}
+                    className={
+                      isActiveTab
+                        ? "terminal-session-layer"
+                        : "terminal-session-layer terminal-session-layer-hidden"
+                    }
+                    aria-hidden={!isActiveTab}
+                  >
+                    <TerminalSessionView
+                      active={active && isActiveTab}
+                      projectPath={projectPath}
+                      session={tab.session}
+                      onTitleChange={(title) => updateTabTitle(tab.id, title)}
+                      onSessionReady={(session) => handleSessionReady(tab.id, session)}
+                      onClosed={(exitCode) => handleClosed(tab.id, exitCode)}
+                    />
+                  </div>
+                );
+              })
             )}
           </div>
         </>
-      )}
     </section>
   );
 }
 
-function createInitialTerminalWorkspace(): TerminalWorkspace {
-  return {
-    tabs: [{ id: "terminal-1", baseTitle: "Terminal 1", title: "Terminal 1" }],
-    activeTabId: "terminal-1",
-    nextTabIndex: 1,
-  };
-}
+const EMPTY_WORKSPACE: TerminalWorkspace = createInitialTerminalWorkspace();

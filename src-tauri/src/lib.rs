@@ -292,6 +292,9 @@ enum TerminalWsEvent {
 enum TerminalParserEvent {
     Output(Vec<u8>),
     Resize(u16, u16),
+    /// Ask the parser thread to re-emit the current terminal frame so a newly
+    /// connected WebSocket client can render the existing screen state.
+    Redraw,
 }
 
 #[derive(Clone)]
@@ -2458,6 +2461,8 @@ fn spawn_terminal_session(
                     TerminalParserEvent::Resize(cols, rows) => {
                         term.resize(TermSize::new(cols.max(1) as usize, rows.max(1) as usize));
                     }
+                    // Redraw only needs the current frame re-emitted below.
+                    TerminalParserEvent::Redraw => {}
                 }
             };
 
@@ -2483,7 +2488,13 @@ fn spawn_terminal_session(
     });
 
     thread::spawn(move || {
-        run_terminal_ws(listener, ws_input_tx, ws_output_rx, ws_shutdown_rx);
+        run_terminal_ws(
+            listener,
+            ws_input_tx,
+            ws_output_rx,
+            ws_shutdown_rx,
+            parser_tx.clone(),
+        );
     });
 
     let exit_output_tx = ws_output_tx;
@@ -2505,36 +2516,85 @@ fn run_terminal_ws(
     input_tx: mpsc::Sender<Vec<u8>>,
     output_rx: mpsc::Receiver<TerminalWsEvent>,
     shutdown_rx: mpsc::Receiver<()>,
+    redraw_tx: mpsc::Sender<TerminalParserEvent>,
 ) {
     let sleep_duration = Duration::from_millis(TERMINAL_WS_IDLE_SLEEP_MS);
-    let mut websocket = loop {
-        if shutdown_rx.try_recv().is_ok() {
-            return;
-        }
-        match listener.accept() {
-            Ok((stream, _)) => {
-                let _ = stream.set_nodelay(true);
-                match accept(stream) {
-                    Ok(mut websocket) => {
-                        let _ = websocket.get_mut().set_nonblocking(true);
-                        let _ = websocket.get_mut().set_nodelay(true);
-                        break websocket;
-                    }
-                    Err(_) => return,
-                }
-            }
-            Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                thread::sleep(sleep_duration);
-            }
-            Err(_) => return,
-        }
-    };
-
     let mut pending_output = VecDeque::<TerminalWsEvent>::new();
+
+    // Outer loop accepts successive WebSocket connections so a terminal can
+    // disconnect (e.g. the panel is hidden/unmounted) and reconnect to the
+    // same live PTY without losing its process or screen state.
     loop {
         if shutdown_rx.try_recv().is_ok() {
-            let _ = websocket.close(None);
             return;
+        }
+        let mut websocket = loop {
+            if shutdown_rx.try_recv().is_ok() {
+                return;
+            }
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    let _ = stream.set_nodelay(true);
+                    match accept(stream) {
+                        Ok(mut websocket) => {
+                            let _ = websocket.get_mut().set_nonblocking(true);
+                            let _ = websocket.get_mut().set_nodelay(true);
+                            break websocket;
+                        }
+                        Err(_) => continue,
+                    }
+                }
+                Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                    thread::sleep(sleep_duration);
+                }
+                Err(_) => continue,
+            }
+        };
+
+        // A fresh connection should render the current terminal contents, not
+        // a blank screen; ask the parser thread to re-emit the latest frame.
+        let _ = redraw_tx.send(TerminalParserEvent::Redraw);
+
+        let disconnected = run_terminal_ws_connection(
+            &mut websocket,
+            &input_tx,
+            &output_rx,
+            &shutdown_rx,
+            &mut pending_output,
+            sleep_duration,
+        );
+
+        match disconnected {
+            TerminalWsDisconnect::Reconnect => {
+                let _ = websocket.close(None);
+                continue;
+            }
+            TerminalWsDisconnect::Exit => {
+                let _ = websocket.close(None);
+                return;
+            }
+        }
+    }
+}
+
+enum TerminalWsDisconnect {
+    /// Client disconnected; accept a new connection to keep the session alive.
+    Reconnect,
+    /// PTY exited or the session was killed; stop serving.
+    Exit,
+}
+
+fn run_terminal_ws_connection(
+    websocket: &mut WebSocket<TcpStream>,
+    input_tx: &mpsc::Sender<Vec<u8>>,
+    output_rx: &mpsc::Receiver<TerminalWsEvent>,
+    shutdown_rx: &mpsc::Receiver<()>,
+    pending_output: &mut VecDeque<TerminalWsEvent>,
+    sleep_duration: Duration,
+) -> TerminalWsDisconnect {
+    loop {
+        if shutdown_rx.try_recv().is_ok() {
+            return TerminalWsDisconnect::Exit;
         }
         let mut did_work = false;
 
@@ -2548,7 +2608,7 @@ fn run_terminal_ws(
                     did_work = true;
                     let _ = input_tx.send(bytes);
                 }
-                Ok(Message::Close(_)) => return,
+                Ok(Message::Close(_)) => return TerminalWsDisconnect::Reconnect,
                 Ok(Message::Ping(payload)) => {
                     did_work = true;
                     let _ = websocket.send(Message::Pong(payload));
@@ -2557,16 +2617,22 @@ fn run_terminal_ws(
                     did_work = true;
                 }
                 Err(WsError::Io(error)) if error.kind() == ErrorKind::WouldBlock => break,
-                Err(WsError::ConnectionClosed) | Err(WsError::AlreadyClosed) => return,
-                Err(_) => return,
+                Err(WsError::ConnectionClosed) | Err(WsError::AlreadyClosed) => {
+                    return TerminalWsDisconnect::Reconnect;
+                }
+                Err(_) => return TerminalWsDisconnect::Reconnect,
             }
         }
 
         while let Ok(event) = output_rx.try_recv() {
             did_work = true;
+            let is_exit = matches!(event, TerminalWsEvent::Close(_));
             pending_output.push_back(event);
             while pending_output.len() > TERMINAL_WS_PENDING_OUTPUT_LIMIT {
                 pending_output.pop_front();
+            }
+            if is_exit {
+                break;
             }
         }
 
@@ -2575,8 +2641,8 @@ fn run_terminal_ws(
             let Some(event) = pending_output.pop_front() else {
                 break;
             };
-            match write_terminal_ws_event(&mut websocket, &event) {
-                Ok(true) => return,
+            match write_terminal_ws_event(websocket, &event) {
+                Ok(true) => return TerminalWsDisconnect::Exit,
                 Ok(false) => {
                     did_work = true;
                     sent_output_count += 1;
@@ -2585,8 +2651,10 @@ fn run_terminal_ws(
                     pending_output.push_front(event);
                     break;
                 }
-                Err(WsError::ConnectionClosed) | Err(WsError::AlreadyClosed) => return,
-                Err(_) => return,
+                Err(WsError::ConnectionClosed) | Err(WsError::AlreadyClosed) => {
+                    return TerminalWsDisconnect::Reconnect;
+                }
+                Err(_) => return TerminalWsDisconnect::Reconnect,
             }
         }
 
@@ -3203,6 +3271,39 @@ mod tests {
 
         let frame_text = read_terminal_until_text(&mut websocket, "VIEW_TERMINAL_BURST_OK");
         assert!(frame_text.contains("VIEW_TERMINAL_BURST_OK"));
+        let _ = websocket.close(None);
+        let _ = kill_terminal_session(&state, &session.id);
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn terminal_session_survives_websocket_reconnect() {
+        let repo = create_basic_repo();
+        let state = TerminalState::default();
+        let session = spawn_terminal_session(&state, &repo, None, Some(80), Some(12))
+            .expect("spawn terminal session");
+
+        // Write a sentinel marker through the first connection, then drop it to
+        // simulate the terminal panel being hidden/unmounted.
+        let mut websocket = connect_terminal_websocket(&session);
+        websocket
+            .send(Message::Text(
+                "printf '\nVIEW_TERMINAL_RECONNECT_MARKER\n'\r".to_string(),
+            ))
+            .expect("send terminal input");
+        let frame_text = read_terminal_until_text(&mut websocket, "VIEW_TERMINAL_RECONNECT_MARKER");
+        assert!(frame_text.contains("VIEW_TERMINAL_RECONNECT_MARKER"));
+        let _ = websocket.close(None);
+
+        // A new connection to the same live PTY should render the marker that
+        // the previous connection wrote, proving the session state persisted.
+        let mut websocket = connect_terminal_websocket(&session);
+        let frame_text = read_terminal_until_text(&mut websocket, "VIEW_TERMINAL_RECONNECT_MARKER");
+        assert!(
+            frame_text.contains("VIEW_TERMINAL_RECONNECT_MARKER"),
+            "reconnected terminal should render prior screen state"
+        );
+
         let _ = websocket.close(None);
         let _ = kill_terminal_session(&state, &session.id);
         fs::remove_dir_all(repo).ok();
