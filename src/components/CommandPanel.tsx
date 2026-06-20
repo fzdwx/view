@@ -1,5 +1,6 @@
 import type { KeyboardEvent, ReactNode } from "react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { measureElement, useVirtualizer } from "@tanstack/react-virtual";
 import { Loader2, Search } from "lucide-react";
 import type { FileSearchResult } from "../lib/api";
 import { useFileIcon } from "../lib/fileIcons";
@@ -7,6 +8,10 @@ import {
   fileNameFromPath,
   parentPathFromPath,
 } from "../lib/pathLabels";
+import { LoadingRows } from "./LoadingRows";
+
+const FILE_RESULT_ESTIMATE = 52;
+const CONTENT_RESULT_ESTIMATE = 108;
 
 export function CommandPanel({
   activeIndex,
@@ -37,15 +42,35 @@ export function CommandPanel({
 }) {
   const overlayRef = useRef<HTMLDialogElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const resultRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const resultsScrollRef = useRef<HTMLDivElement | null>(null);
   const hasQuery = query.trim().length > 0;
   const lowerQuery = useMemo(() => query.trim().toLowerCase(), [query]);
+  const estimateSize = mode === "content" ? CONTENT_RESULT_ESTIMATE : FILE_RESULT_ESTIMATE;
+  const resultsVirtualizer = useVirtualizer<HTMLDivElement, HTMLButtonElement>({
+    count: results.length,
+    getScrollElement: () => resultsScrollRef.current,
+    directDomUpdates: true,
+    directDomUpdatesMode: "transform",
+    estimateSize: () => estimateSize,
+    getItemKey: (index) => `${results[index]?.path ?? index}:${results[index]?.lineNumber ?? "file"}`,
+    measureElement,
+    overscan: mode === "content" ? 10 : 14,
+    useAnimationFrameWithResizeObserver: true,
+  });
 
   useEffect(() => {
-    const el = resultRefs.current[activeIndex];
-    if (!el) return;
-    el.scrollIntoView({ block: "nearest" });
-  }, [activeIndex]);
+    if (!open || !results[activeIndex]) {
+      return;
+    }
+    resultsVirtualizer.scrollToIndex(activeIndex, {
+      align: "auto",
+      behavior: "smooth",
+    });
+  }, [activeIndex, open, results, resultsVirtualizer]);
+
+  useLayoutEffect(() => {
+    resultsScrollRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [mode, query]);
 
   useEffect(() => {
     if (!open) {
@@ -150,7 +175,7 @@ export function CommandPanel({
           <kbd>Enter</kbd>
           <kbd>Esc</kbd>
         </div>
-        <div className="command-results">
+        <div ref={resultsScrollRef} className="command-results">
           {error ? (
             <div className="command-empty">
               <div className="empty-title">Search failed</div>
@@ -167,6 +192,10 @@ export function CommandPanel({
                   : "Fuzzy search scans tracked and untracked files in the active worktree."}
               </div>
             </div>
+          ) : loading && results.length === 0 ? (
+            <div className="command-loading">
+              <LoadingRows />
+            </div>
           ) : results.length === 0 && !loading ? (
             <div className="command-empty">
               <div className="empty-title">No results found</div>
@@ -175,91 +204,125 @@ export function CommandPanel({
               </div>
             </div>
           ) : (
-            results.map((result, index) => {
-              const fileName = fileNameFromPath(result.path);
-              const parentPath = parentPathFromPath(result.path) || "./";
-              const hasLineMatch = Boolean(result.lineNumber && result.lineText);
-
-              return (
-               <button
-                 key={`${result.path}:${result.lineNumber ?? "file"}`}
-                  type="button"
-                  ref={(el) => {
-                    resultRefs.current[index] = el;
-                  }}
-                  className={[
-                    "command-result",
-                    index === activeIndex ? "active" : "",
-                    mode === "content" ? "command-result-content" : "command-result-file",
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                  onMouseEnter={() => onSelectIndex(index)}
-                  onClick={() => onOpenResult(result)}
-                >
-                  <span className="command-result-icon">
-                    <ResultFileIcon path={result.path} />
-                  </span>
-                  <span className="command-result-main">
-                    {mode === "content" && hasLineMatch ? (
-                      <>
-                        <span className="command-result-path">
-                          {highlightMatch(fileName, lowerQuery)}{" "}
-                          <small className="command-result-path-dir">
-                            {parentPath}
-                          </small>
-                        </span>
-                        <div className="command-result-context">
-                          {result.contextBefore.map((line, i) => (
-                            <small
-                              key={`before-${(result.lineNumber ?? 0) - result.contextBefore.length + i}`}
-                              className="command-result-context-line"
-                            >
-                              <span className="command-result-line-number">
-                                {(result.lineNumber ?? 0) - result.contextBefore.length + i}
-                              </span>
-                              <span className="command-result-context-text">{line}</span>
-                            </small>
-                          ))}
-                          <small className="command-result-line command-result-line-matched">
-                            <span className="command-result-line-number">
-                              {result.lineNumber}
-                            </span>
-                            <span className="command-result-line-text">
-                              {highlightRanges(result.lineText ?? "", result.matchRanges)}
-                            </span>
-                          </small>
-                          {result.contextAfter.map((line, i) => (
-                            <small
-                              key={`after-${(result.lineNumber ?? 0) + 1 + i}`}
-                              className="command-result-context-line"
-                            >
-                              <span className="command-result-line-number">
-                                {(result.lineNumber ?? 0) + 1 + i}
-                              </span>
-                              <span className="command-result-context-text">{line}</span>
-                            </small>
-                          ))}
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <span>
-                          {highlightMatch(fileName, lowerQuery)}
-                        </span>
-                        <small>
-                          {highlightMatch(parentPath, lowerQuery)}
-                        </small>
-                      </>
-                    )}
-                  </span>
-                </button>
-              );
-            })
+            <div ref={resultsVirtualizer.containerRef} className="command-results-spacer">
+              {resultsVirtualizer.getVirtualItems().map((virtualItem) => {
+                const result = results[virtualItem.index];
+                return (
+                  <CommandResultRow
+                    key={virtualItem.key}
+                    active={virtualItem.index === activeIndex}
+                    lowerQuery={lowerQuery}
+                    mode={mode}
+                    result={result}
+                    refCallback={(node) => {
+                      resultsVirtualizer.measureElement(node);
+                    }}
+                    onClick={() => onOpenResult(result)}
+                    onMouseEnter={() => onSelectIndex(virtualItem.index)}
+                  />
+                );
+              })}
+            </div>
           )}
         </div>
       </section>
     </dialog>
+  );
+}
+
+function CommandResultRow({
+  active,
+  lowerQuery,
+  mode,
+  result,
+  refCallback,
+  onClick,
+  onMouseEnter,
+}: {
+  active: boolean;
+  lowerQuery: string;
+  mode: "files" | "content";
+  result: FileSearchResult;
+  refCallback(node: HTMLButtonElement | null): void;
+  onClick(): void;
+  onMouseEnter(): void;
+}) {
+  const fileName = fileNameFromPath(result.path);
+  const parentPath = parentPathFromPath(result.path) || "./";
+  const hasLineMatch = Boolean(result.lineNumber && result.lineText);
+
+  return (
+    <button
+      type="button"
+      ref={refCallback}
+      className={[
+        "command-result",
+        "command-result-virtual-row",
+        active ? "active" : "",
+        mode === "content" ? "command-result-content" : "command-result-file",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      onMouseEnter={onMouseEnter}
+      onClick={onClick}
+    >
+      <span className="command-result-icon">
+        <ResultFileIcon path={result.path} />
+      </span>
+      <span className="command-result-main">
+        {mode === "content" && hasLineMatch ? (
+          <>
+            <span className="command-result-path">
+              {highlightMatch(fileName, lowerQuery)}{" "}
+              <small className="command-result-path-dir">
+                {parentPath}
+              </small>
+            </span>
+            <div className="command-result-context">
+              {result.contextBefore.map((line, i) => (
+                <small
+                  key={`before-${(result.lineNumber ?? 0) - result.contextBefore.length + i}`}
+                  className="command-result-context-line"
+                >
+                  <span className="command-result-line-number">
+                    {(result.lineNumber ?? 0) - result.contextBefore.length + i}
+                  </span>
+                  <span className="command-result-context-text">{line}</span>
+                </small>
+              ))}
+              <small className="command-result-line command-result-line-matched">
+                <span className="command-result-line-number">
+                  {result.lineNumber}
+                </span>
+                <span className="command-result-line-text">
+                  {highlightRanges(result.lineText ?? "", result.matchRanges)}
+                </span>
+              </small>
+              {result.contextAfter.map((line, i) => (
+                <small
+                  key={`after-${(result.lineNumber ?? 0) + 1 + i}`}
+                  className="command-result-context-line"
+                >
+                  <span className="command-result-line-number">
+                    {(result.lineNumber ?? 0) + 1 + i}
+                  </span>
+                  <span className="command-result-context-text">{line}</span>
+                </small>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <span>
+              {highlightMatch(fileName, lowerQuery)}
+            </span>
+            <small>
+              {highlightMatch(parentPath, lowerQuery)}
+            </small>
+          </>
+        )}
+      </span>
+    </button>
   );
 }
 

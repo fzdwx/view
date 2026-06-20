@@ -134,7 +134,7 @@ export const WorkbenchRailSlotStack = memo(function WorkbenchRailSlotStack({
                   gitPanelData.selectedBranchRef,
                 )}
                 detailHeight={commitDetailSize}
-                files={gitPanelData.payload?.files ?? []}
+                files={gitPanelData.changedFiles}
                 gitFileActions={gitPanelData.gitFileActions}
                 gitWriteActions={gitPanelData.gitWriteActions}
                 selectedPath={gitPanelData.selectedChangePath}

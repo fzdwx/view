@@ -1,12 +1,32 @@
-import type { MouseEvent as ReactMouseEvent } from "react";
-import { useEffect, useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import type {
+  CSSProperties,
+  MouseEvent as ReactMouseEvent,
+} from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { measureElement, useVirtualizer } from "@tanstack/react-virtual";
+import {
+  ChevronDown,
+  ChevronRight,
+  Folder,
+  GitBranch,
+  Search,
+  Tag,
+} from "lucide-react";
 import type { BranchInfo, TagInfo } from "../../lib/api";
 import type { BranchActionKind } from "../../lib/branchModels";
-import { filterRefs } from "../../lib/branchTree";
-import { BranchGroup } from "./BranchGroup";
+import {
+  buildBranchTreeRows,
+  filterRefs,
+  refRowSectionTitle,
+  type RefLeaf,
+  type RefSectionId,
+  type VirtualRefRow,
+} from "../../lib/branchTree";
 import { BranchContextMenu } from "./BranchContextMenu";
-import { TagGroup } from "./TagGroup";
+
+const BRANCH_HEAD_ROW_ESTIMATE = 32;
+const BRANCH_SECTION_ROW_ESTIMATE = 28;
+const BRANCH_ITEM_ROW_ESTIMATE = 28;
 
 type BranchMenuState = {
   readonly branch: BranchInfo;
@@ -29,6 +49,12 @@ export function BranchTree({
 }) {
   const [branchFilter, setBranchFilter] = useState("");
   const [branchMenu, setBranchMenu] = useState<BranchMenuState | null>(null);
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => new Set());
+  const [collapsedBranchSections, setCollapsedBranchSections] = useState<
+    Set<Exclude<RefSectionId, "tags">>
+  >(() => new Set());
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const lastScrolledRef = useRef<string | null>(null);
   const filtering = branchFilter.trim().length > 0;
   const localBranches = useMemo(
     () =>
@@ -50,12 +76,65 @@ export function BranchTree({
     () => filterRefs(tags, branchFilter),
     [tags, branchFilter],
   );
-  const currentBranch = branches.find((branch) => branch.current);
+  const currentBranch = branches.find((branch) => branch.current) ?? null;
   const showCurrentBranch =
-    currentBranch && filterRefs([currentBranch], branchFilter).length > 0;
+    currentBranch !== null && filterRefs([currentBranch], branchFilter).length > 0;
   const refCount = branches.length + tags.length;
-  const visibleRefCount = localBranches.length + remoteBranches.length + visibleTags.length;
-  const refCountLabel = filtering ? `${visibleRefCount} / ${refCount}` : `${refCount}`;
+  const visibleRefCount =
+    localBranches.length + remoteBranches.length + visibleTags.length;
+  const refCountLabel = filtering
+    ? `${visibleRefCount} / ${refCount}`
+    : `${refCount}`;
+  const rows = useMemo(
+    () =>
+      buildBranchTreeRows({
+        currentBranch,
+        showCurrentBranch,
+        localBranches,
+        remoteBranches,
+        tags: visibleTags,
+        filtering,
+        collapsedBranchSections,
+        collapsedFolders,
+      }),
+    [
+      collapsedBranchSections,
+      collapsedFolders,
+      currentBranch,
+      filtering,
+      localBranches,
+      remoteBranches,
+      showCurrentBranch,
+      visibleTags,
+    ],
+  );
+  const activeIndex = useMemo(
+    () => rows.findIndex((row) => isActiveRefRow(row, activeRef)),
+    [activeRef, rows],
+  );
+  const branchVirtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
+    count: rows.length,
+    getScrollElement: () => scrollRef.current,
+    directDomUpdates: true,
+    directDomUpdatesMode: "transform",
+    estimateSize: (index) => estimateRefRowSize(rows[index]),
+    getItemKey: (index) => rows[index]?.key ?? index,
+    measureElement,
+    overscan: 14,
+    useAnimationFrameWithResizeObserver: true,
+  });
+  const firstVisibleIndex = branchVirtualizer.range?.startIndex ?? 0;
+  const firstVisibleRow = rows[firstVisibleIndex] ?? null;
+  const firstVisibleItem = branchVirtualizer
+    .getVirtualItems()
+    .find((item) => item.index === firstVisibleIndex);
+  const stickySectionTitle = firstVisibleRow
+    ? refRowSectionTitle(firstVisibleRow)
+    : null;
+  const hideStickySection =
+    firstVisibleRow?.kind === "section" &&
+    firstVisibleItem !== undefined &&
+    Math.abs((branchVirtualizer.scrollOffset ?? 0) - firstVisibleItem.start) < 12;
 
   useEffect(() => {
     if (!branchMenu) {
@@ -81,6 +160,25 @@ export function BranchTree({
     };
   }, [branchMenu]);
 
+  useLayoutEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [branchFilter]);
+
+  useEffect(() => {
+    if (!activeRef) {
+      lastScrolledRef.current = null;
+      return;
+    }
+    if (activeIndex < 0 || lastScrolledRef.current === activeRef) {
+      return;
+    }
+    branchVirtualizer.scrollToIndex(activeIndex, {
+      align: "auto",
+      behavior: "smooth",
+    });
+    lastScrolledRef.current = activeRef;
+  }, [activeIndex, activeRef, branchVirtualizer]);
+
   function openBranchMenu(
     event: ReactMouseEvent<HTMLButtonElement>,
     branch: BranchInfo,
@@ -99,6 +197,30 @@ export function BranchTree({
     onBranchAction(action, branch);
   }
 
+  function toggleFolder(folderKey: string) {
+    setCollapsedFolders((current) => {
+      const next = new Set(current);
+      if (next.has(folderKey)) {
+        next.delete(folderKey);
+      } else {
+        next.add(folderKey);
+      }
+      return next;
+    });
+  }
+
+  function toggleBranchSection(section: Exclude<RefSectionId, "tags">) {
+    setCollapsedBranchSections((current) => {
+      const next = new Set(current);
+      if (next.has(section)) {
+        next.delete(section);
+      } else {
+        next.add(section);
+      }
+      return next;
+    });
+  }
+
   return (
     <div className="branch-tree">
       <label className="search-field branch-search">
@@ -111,39 +233,50 @@ export function BranchTree({
         <span className="search-count">{refCountLabel}</span>
       </label>
 
-      <div className="branch-scroll">
-        {showCurrentBranch ? (
-         <button
-           className={
-             currentBranch.refName === activeRef
-               ? "branch-head-row active"
-               : "branch-head-row"
-           }
-            type="button"
-            onClick={() => onSelect(currentBranch.refName)}
-            onContextMenu={(event) => openBranchMenu(event, currentBranch)}
-          >
-            <span>HEAD</span>
-            <small>{currentBranch.name}</small>
-          </button>
+      <div ref={scrollRef} className="branch-scroll">
+        {stickySectionTitle && !hideStickySection ? (
+          <div className="branch-sticky-section" aria-hidden="true">
+            <span className="branch-sticky-section-label">{stickySectionTitle}</span>
+          </div>
         ) : null}
-        <BranchGroup
-          title="Local"
-          branches={localBranches}
-          filtering={filtering}
-          activeRef={activeRef}
-          onSelect={onSelect}
-          onBranchContextMenu={openBranchMenu}
-        />
-        <BranchGroup
-          title="Remote"
-          branches={remoteBranches}
-          filtering={filtering}
-          activeRef={activeRef}
-          onSelect={onSelect}
-          onBranchContextMenu={openBranchMenu}
-        />
-        <TagGroup tags={visibleTags} activeRef={activeRef} onSelect={onSelect} />
+        {rows.length === 0 ? (
+          <div className="branch-empty">
+            <div className="empty-title">
+              {filtering ? "No refs match the current filter" : "No refs available"}
+            </div>
+            <div className="empty-copy">
+              {filtering
+                ? "Try another branch, tag, or remote name."
+                : "Branches and tags will appear here when the repository exposes them."}
+            </div>
+          </div>
+        ) : (
+          <div ref={branchVirtualizer.containerRef} className="branch-virtual-spacer">
+            {branchVirtualizer.getVirtualItems().map((virtualItem) => {
+              const row = rows[virtualItem.index];
+              return (
+                <div
+                  key={virtualItem.key}
+                  className="branch-virtual-row"
+                  data-index={virtualItem.index}
+                  ref={(node) => {
+                    branchVirtualizer.measureElement(node);
+                  }}
+                >
+                  <BranchTreeRow
+                    activeRef={activeRef}
+                    filtering={filtering}
+                    row={row}
+                    onBranchContextMenu={openBranchMenu}
+                    onSelect={onSelect}
+                    onToggleFolder={toggleFolder}
+                    onToggleSection={toggleBranchSection}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
       {branchMenu ? (
         <BranchContextMenu
@@ -155,4 +288,163 @@ export function BranchTree({
       ) : null}
     </div>
   );
+}
+
+function BranchTreeRow({
+  activeRef,
+  filtering,
+  row,
+  onBranchContextMenu,
+  onSelect,
+  onToggleFolder,
+  onToggleSection,
+}: {
+  activeRef: string | null;
+  filtering: boolean;
+  row: VirtualRefRow;
+  onBranchContextMenu(
+    event: ReactMouseEvent<HTMLButtonElement>,
+    branch: BranchInfo,
+  ): void;
+  onSelect(refName: string): void;
+  onToggleFolder(folderKey: string): void;
+  onToggleSection(section: Exclude<RefSectionId, "tags">): void;
+}) {
+  switch (row.kind) {
+    case "head":
+      return (
+        <button
+          className={row.branch.refName === activeRef ? "branch-head-row active" : "branch-head-row"}
+          type="button"
+          onClick={() => onSelect(row.branch.refName)}
+          onContextMenu={(event) => onBranchContextMenu(event, row.branch)}
+        >
+          <span className="branch-row-label">HEAD</span>
+          <small>{row.branch.name}</small>
+        </button>
+      );
+    case "section":
+      if (row.section !== "tags") {
+        const collapsed = row.collapsed && !filtering;
+        return (
+          <button
+            className="branch-section-row"
+            type="button"
+            aria-expanded={!collapsed}
+            onClick={() =>
+              onToggleSection(row.section as Exclude<RefSectionId, "tags">)
+            }
+          >
+            {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+            <span className="branch-section-title">{row.title}</span>
+            <small className="branch-section-count">{row.count}</small>
+          </button>
+        );
+      }
+      return (
+        <div className="branch-section-row static">
+          <ChevronDown size={14} />
+          <span className="branch-section-title">{row.title}</span>
+          <small className="branch-section-count">{row.count}</small>
+        </div>
+      );
+    case "folder":
+      return (
+        <button
+          className="branch-folder-row"
+          type="button"
+          style={{ "--branch-depth": row.depth } as CSSProperties}
+          aria-expanded={!row.collapsed}
+          onClick={() => onToggleFolder(row.folderKey)}
+        >
+          {row.collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+          <Folder size={13} />
+          <span className="branch-row-label">{row.name}</span>
+        </button>
+      );
+    case "branch":
+      return (
+        <button
+          className={row.branch.refName === activeRef ? "branch-row active" : "branch-row"}
+          type="button"
+          style={{ "--branch-depth": row.depth } as CSSProperties}
+          onClick={() => onSelect(row.branch.refName)}
+          onContextMenu={(event) => onBranchContextMenu(event, row.branch)}
+        >
+          <GitBranch size={13} />
+          <span className="branch-row-label">{row.branch.name}</span>
+          <BranchTrackingBadge branch={row.branch} />
+        </button>
+      );
+    case "tag":
+      return (
+        <button
+          type="button"
+          className={row.tag.refName === activeRef ? "branch-row active" : "branch-row"}
+          style={{ "--branch-depth": row.depth } as CSSProperties}
+          onClick={() => onSelect(row.tag.refName)}
+        >
+          <Tag size={13} />
+          <span className="branch-row-label">{row.tag.name}</span>
+        </button>
+      );
+  }
+}
+
+function BranchTrackingBadge({ branch }: { branch: RefLeaf }) {
+  const hasAhead = Boolean(branch.ahead && branch.ahead > 0);
+  const hasBehind = Boolean(branch.behind && branch.behind > 0);
+  const otherLabel = branch.branchType === "remote" ? "remote" : "upstream";
+
+  if (branch.current || hasAhead || hasBehind) {
+    return (
+      <small className="branch-badges">
+        {hasBehind ? (
+          <span className="branch-behind" title={`${otherLabel} has commits not in local`}>
+            ↙ {branch.behind}
+          </span>
+        ) : null}
+        {hasAhead ? (
+          <span className="branch-ahead" title={`Local has commits not in ${otherLabel}`}>
+            ↗ {branch.ahead}
+          </span>
+        ) : null}
+        {branch.current ? <span className="branch-head-badge">HEAD</span> : null}
+      </small>
+    );
+  }
+
+  return null;
+}
+
+function estimateRefRowSize(row: VirtualRefRow | undefined) {
+  if (!row) {
+    return BRANCH_ITEM_ROW_ESTIMATE;
+  }
+
+  switch (row.kind) {
+    case "head":
+      return BRANCH_HEAD_ROW_ESTIMATE;
+    case "section":
+      return BRANCH_SECTION_ROW_ESTIMATE;
+    default:
+      return BRANCH_ITEM_ROW_ESTIMATE;
+  }
+}
+
+function isActiveRefRow(row: VirtualRefRow, activeRef: string | null) {
+  if (!activeRef) {
+    return false;
+  }
+
+  switch (row.kind) {
+    case "head":
+      return row.branch.refName === activeRef;
+    case "branch":
+      return row.branch.refName === activeRef;
+    case "tag":
+      return row.tag.refName === activeRef;
+    default:
+      return false;
+  }
 }

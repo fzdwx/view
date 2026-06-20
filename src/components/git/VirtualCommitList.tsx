@@ -4,7 +4,7 @@ import type {
   MouseEvent as ReactMouseEvent,
 } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { measureElement, useVirtualizer } from "@tanstack/react-virtual";
 import { CheckCircle2, RotateCcw, Search } from "lucide-react";
 import type { BranchInfo, CommitInfo, ReflogEntry } from "../../lib/api";
 import type { GitWriteActions } from "../../hooks/useGitWriteActions";
@@ -15,6 +15,9 @@ import { clamp } from "../../lib/numeric";
 import { LoadingRows } from "../LoadingRows";
 import { CommitGraph, getCommitGraphWidth } from "./CommitGraph";
 import { PushAffordance } from "./PushAffordance";
+
+const COMMIT_ROW_ESTIMATE = 34;
+const REFLOG_ROW_ESTIMATE = 34;
 
 export function VirtualCommitList({
   commits,
@@ -58,6 +61,8 @@ export function VirtualCommitList({
   onSelectWorkingTree(): void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const lastScrolledCommitRef = useRef<string | null>(null);
+  const lastScrolledReflogRef = useRef<string | null>(null);
   const [reflogMenu, setReflogMenu] = useState<{
     readonly entry: ReflogEntry;
     readonly left: number;
@@ -83,23 +88,42 @@ export function VirtualCommitList({
   const tableStyle = {
     "--commit-graph-width": `${commitGraphWidth}px`,
   } as CSSProperties;
-  const commitVirtualizer = useVirtualizer({
+  const commitVirtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: graphRows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 28,
+    directDomUpdates: true,
+    directDomUpdatesMode: "transform",
+    estimateSize: () => COMMIT_ROW_ESTIMATE,
     getItemKey: (index) => graphRows[index]?.commit.hash ?? index,
-    overscan: 16,
+    measureElement,
+    overscan: 18,
+    useAnimationFrameWithResizeObserver: true,
   });
-  const reflogVirtualizer = useVirtualizer({
+  const reflogVirtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: reflogEntries.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 28,
+    directDomUpdates: true,
+    directDomUpdatesMode: "transform",
+    estimateSize: () => REFLOG_ROW_ESTIMATE,
     getItemKey: (index) =>
       `${reflogEntries[index]?.selector ?? index}:${reflogEntries[index]?.hash ?? ""}`,
-    overscan: 12,
+    measureElement,
+    overscan: 14,
+    useAnimationFrameWithResizeObserver: true,
   });
   const activeFilter = isReflogMode ? reflogFilter : filter;
   const activeLoading = isReflogMode ? reflogLoading : loading;
+  const activeCommitIndex = useMemo(
+    () => (activeCommit ? graphRows.findIndex((row) => row.commit.hash === activeCommit) : -1),
+    [activeCommit, graphRows],
+  );
+  const activeReflogIndex = useMemo(
+    () =>
+      activeReflogSelector
+        ? reflogEntries.findIndex((entry) => entry.selector === activeReflogSelector)
+        : -1,
+    [activeReflogSelector, reflogEntries],
+  );
 
   useEffect(() => {
     if (!reflogMenu) {
@@ -127,21 +151,48 @@ export function VirtualCommitList({
 
   useLayoutEffect(() => {
     scrollRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
-    if (isReflogMode) {
-      if (reflogEntries.length > 0) {
-        reflogVirtualizer.scrollToIndex(0, { align: "start" });
-      }
+  }, [activeFilter, isReflogMode]);
+
+  useEffect(() => {
+    if (!activeCommit) {
+      lastScrolledCommitRef.current = null;
       return;
     }
-    if (graphRows.length > 0) {
-      commitVirtualizer.scrollToIndex(0, { align: "start" });
+    if (
+      isReflogMode ||
+      activeCommitIndex < 0 ||
+      lastScrolledCommitRef.current === activeCommit
+    ) {
+      return;
     }
+    commitVirtualizer.scrollToIndex(activeCommitIndex, {
+      align: "auto",
+      behavior: "smooth",
+    });
+    lastScrolledCommitRef.current = activeCommit;
+  }, [activeCommit, activeCommitIndex, commitVirtualizer, isReflogMode]);
+
+  useEffect(() => {
+    if (!activeReflogSelector) {
+      lastScrolledReflogRef.current = null;
+      return;
+    }
+    if (
+      !isReflogMode ||
+      activeReflogIndex < 0 ||
+      lastScrolledReflogRef.current === activeReflogSelector
+    ) {
+      return;
+    }
+    reflogVirtualizer.scrollToIndex(activeReflogIndex, {
+      align: "auto",
+      behavior: "smooth",
+    });
+    lastScrolledReflogRef.current = activeReflogSelector;
   }, [
-    activeFilter,
-    commitVirtualizer,
-    graphRows.length,
+    activeReflogIndex,
+    activeReflogSelector,
     isReflogMode,
-    reflogEntries.length,
     reflogVirtualizer,
   ]);
 
@@ -219,19 +270,16 @@ export function VirtualCommitList({
           onSelectWorkingTree={onSelectWorkingTree}
         />
         <div ref={scrollRef} className="commit-list">
-          <div
-            className="commit-list-spacer"
-            style={{ height: reflogVirtualizer.getTotalSize() } as CSSProperties}
-          >
+          <div ref={reflogVirtualizer.containerRef} className="commit-list-spacer">
             {reflogVirtualizer.getVirtualItems().map((virtualItem) => {
               const entry = reflogEntries[virtualItem.index];
               return (
                 <div
-                  key={`${entry.selector}:${entry.hash}`}
+                  key={virtualItem.key}
                   className="commit-list-virtual-row"
                   data-index={virtualItem.index}
-                  style={{
-                    transform: `translate3d(0, ${virtualItem.start}px, 0)`,
+                  ref={(node) => {
+                    reflogVirtualizer.measureElement(node);
                   }}
                 >
                   <ReflogRow
@@ -284,20 +332,17 @@ export function VirtualCommitList({
         onSelectWorkingTree={onSelectWorkingTree}
       />
       <div ref={scrollRef} className="commit-list">
-        <div
-          className="commit-list-spacer"
-          style={{ height: commitVirtualizer.getTotalSize() } as CSSProperties}
-        >
+        <div ref={commitVirtualizer.containerRef} className="commit-list-spacer">
           {commitVirtualizer.getVirtualItems().map((virtualItem) => {
             const graphRow = graphRows[virtualItem.index];
             const commit = graphRow.commit;
             return (
               <div
-                key={commit.hash}
+                key={virtualItem.key}
                 className="commit-list-virtual-row"
                 data-index={virtualItem.index}
-                style={{
-                  transform: `translate3d(0, ${virtualItem.start}px, 0)`,
+                ref={(node) => {
+                  commitVirtualizer.measureElement(node);
                 }}
               >
                 <CommitRow

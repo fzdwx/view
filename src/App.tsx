@@ -160,6 +160,7 @@ export function App() {
   }, [projects]);
 
   const {
+    changedFiles,
     commandResults,
     commits,
     commitsQuery,
@@ -200,6 +201,9 @@ export function App() {
       await Promise.all([
         queryClient.invalidateQueries({
           queryKey: ["file-content", projectPath, filePath],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["changed-files", projectPath],
         }),
         queryClient.invalidateQueries({
           queryKey: ["project-files", projectPath],
@@ -552,7 +556,7 @@ export function App() {
   });
 
   useSelectedPathGuard({
-    items: payload?.files,
+    items: changedFiles,
     placeholder: repositoryQuery.isPlaceholderData,
     selectedPath: selectedChangePath,
     onClear: clearSelectedChangePath,
@@ -668,6 +672,7 @@ export function App() {
     () => ({
       activeCommit,
       activeReflogSelector,
+      changedFiles,
       commitFilter,
       commits,
       commitsLoading: commitsQuery.isLoading,
@@ -699,6 +704,7 @@ export function App() {
     [
       activeCommit,
       activeReflogSelector,
+      changedFiles,
       changeHistoryMode,
       commitFilter,
       commits,

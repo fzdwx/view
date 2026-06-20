@@ -5,6 +5,7 @@ import {
 } from "@tanstack/react-query";
 
 const durableProjectStateQueryRoots = [
+  "changed-files",
   "commits",
   "project-files",
   "reflog",

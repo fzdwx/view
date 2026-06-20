@@ -477,6 +477,12 @@ fn get_project_files(path: String) -> Result<Vec<TreeFile>, String> {
 }
 
 #[tauri::command]
+fn get_changed_files(path: String, commit: Option<String>) -> Result<Vec<TreeFile>, String> {
+    let root = repository_root(&path)?;
+    changed_files(&root, commit.as_deref())
+}
+
+#[tauri::command]
 fn get_file_content(path: String, file_path: String) -> Result<FileContent, String> {
     let root = workspace_root(&path)?;
     read_file_content(&root, &file_path)
@@ -4137,6 +4143,7 @@ pub fn run() {
             get_commits,
             get_reflog,
             get_project_files,
+            get_changed_files,
             get_file_blob,
             get_file_content,
             get_file_blame,

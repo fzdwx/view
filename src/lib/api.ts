@@ -255,6 +255,16 @@ export async function getProjectFiles(path: string): Promise<TreeFile[]> {
   return invoke<TreeFile[]>("get_project_files", { path });
 }
 
+export async function getChangedFiles(
+  path: string,
+  commit?: string | null,
+): Promise<TreeFile[]> {
+  return invoke<TreeFile[]>("get_changed_files", {
+    path,
+    commit: commit ?? null,
+  });
+}
+
 export async function getFileContent(
   path: string,
   filePath: string,

@@ -40,6 +40,7 @@ export type GitAvailability = "loading" | "git" | "non-git";
 export interface GitPanelDataProps {
   readonly activeCommit: string | null;
   readonly activeReflogSelector: string | null;
+  readonly changedFiles: RepositoryPayload["files"];
   readonly commitFilter: string;
   readonly commits: CommitInfo[];
   readonly commitsLoading: boolean;
@@ -296,6 +297,7 @@ function gitPanelSizeVarName(key: GitPanelSizeVarKey): string {
 export const GitPanelBody = memo(function GitPanelBody({
   activeCommit,
   activeReflogSelector,
+  changedFiles,
   commitFilter,
   commits,
   commitsLoading,
@@ -377,7 +379,7 @@ export const GitPanelBody = memo(function GitPanelBody({
         <CommitInspector
           branchName={selectedGitRefName(payload, selectedBranchRef)}
           commit={selectedCommit}
-          files={payload?.files ?? []}
+          files={changedFiles}
           gitFileActions={gitFileActions}
           gitWriteActions={gitWriteActions}
           historyMode={historyMode}

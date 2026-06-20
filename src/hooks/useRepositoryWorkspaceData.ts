@@ -13,6 +13,7 @@ import {
   type ReflogEntry,
   type RepositoryPayload,
   type TreeFile,
+  getChangedFiles,
   getCommits,
   getFileBlame,
   getFileContent,
@@ -75,6 +76,8 @@ export interface RepositoryProjectDataOptions {
 }
 
 export interface RepositoryProjectData {
+  readonly changedFiles: TreeFile[];
+  readonly changedFilesQuery: UseQueryResult<TreeFile[], Error>;
   readonly commandResults: FileSearchResult[];
   readonly commits: CommitInfo[];
   readonly commitsQuery: UseQueryResult<CommitInfo[], Error>;
@@ -162,11 +165,11 @@ export function useRepositoryProjectData({
   // held as one value per the rule's own false-positive guidance.
   // oxlint-disable-next-line react-doctor/query-destructure-result
   const repositoryQuery = useQuery({
-    queryKey: ["repository", activeProjectPath, activeCommit],
+    queryKey: ["repository", activeProjectPath],
     queryFn: () =>
       loadRepository(
         requireQueryInput(activeProjectPath, "repository path"),
-        activeCommit,
+        null,
         null,
       ),
     enabled: Boolean(activeProjectPath),
@@ -178,6 +181,22 @@ export function useRepositoryProjectData({
       !repositoryQuery.isPlaceholderData &&
       repositoryQuery.data?.summary.isGitRepo,
   );
+
+  // The whole query object is returned to consumers (App.tsx) that read many
+  // fields (data/isFetching/isError/refetch/isPlaceholderData), so it must be
+  // held as one value per the rule's own false-positive guidance.
+  // oxlint-disable-next-line react-doctor/query-destructure-result
+  const changedFilesQuery = useQuery({
+    queryKey: ["changed-files", activeProjectPath, activeCommit],
+    queryFn: () =>
+      getChangedFiles(
+        requireQueryInput(activeProjectPath, "changed files path"),
+        activeCommit,
+      ),
+    enabled: gitQueriesEnabled,
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
 
   // The whole query object is returned to consumers (App.tsx) that read many
   // fields (data/isFetching/isError/refetch/isPlaceholderData), so it must be
@@ -291,6 +310,7 @@ export function useRepositoryProjectData({
     [projectFilesQuery.data, repositoryQuery.data?.files, selectedProjectPath],
   );
   const selectedProjectStatus = selectedProjectFile?.status ?? null;
+  const changedFiles = changedFilesQuery.data ?? payload?.files ?? [];
   const filteredCommits = commitsQuery.data ?? payload?.commits ?? [];
   const reflogEntries = reflogQuery.data ?? [];
   const reflogCommits = useMemo(
@@ -354,6 +374,8 @@ export function useRepositoryProjectData({
       : [];
 
   return {
+    changedFiles,
+    changedFilesQuery,
     commandResults,
     commits,
     commitsQuery,
