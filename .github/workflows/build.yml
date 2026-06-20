@@ -12,6 +12,9 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+permissions:
+  contents: write # needed to create prerelease tags/releases
+
 jobs:
   build-tauri:
     name: build ${{ matrix.platform }}
@@ -68,3 +71,42 @@ jobs:
             src-tauri/target/release/view
             src-tauri/target/release/view.exe
           if-no-files-found: error
+
+  release:
+    name: publish pre-release
+    needs: build-tauri
+    # Publish on main pushes and manual dispatches, but not on PRs (fork PRs
+    # lack token permissions and PR prereleases would be noisy).
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect installers
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          echo "Linux installers:"
+          find artifacts/view-linux/bundle -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) -print -exec cp -t release/ {} +
+          echo "Windows installers:"
+          find artifacts/view-windows/bundle -type f \( -name '*.msi' -o -name '*.exe' \) -print -exec cp -t release/ {} +
+          echo "=== release assets ==="
+          ls -la release/
+
+      - name: Short SHA
+        run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> $GITHUB_ENV
+
+      - name: Create pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0-pre.${{ github.run_number }}
+          name: Pre-release #${{ github.run_number }} (${{ env.SHORT_SHA }})
+          body: |
+            Automated pre-release from CI build #${{ github.run_number }}.
+            Commit: ${{ github.sha }}
+          prerelease: true
+          files: release/*
+          fail_on_unmatched_files: true
