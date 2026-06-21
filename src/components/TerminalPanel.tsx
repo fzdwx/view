@@ -1422,6 +1422,7 @@ export function TerminalPanel({ active, projectPath }: TerminalPanelProps) {
             ) : activeTab ? (
               <div className="terminal-session-layer">
                 <TerminalSessionView
+                  key={activeTab.id}
                   active={active}
                   projectPath={projectPath}
                   session={activeTab.session}
