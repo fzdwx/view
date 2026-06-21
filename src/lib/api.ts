@@ -162,6 +162,19 @@ export interface EditorReplaceResponse {
   selectionEnd: number;
 }
 
+export type TerminalCursorStyle = "block" | "bar" | "underline" | "hollowBlock";
+
+export interface TerminalSpawnOptions {
+  /** Shell executable to launch, or empty for the platform default. */
+  readonly shell: string;
+  /** Scrollback history size in lines. */
+  readonly scrollbackLines: number;
+  /** Cursor shape for the terminal. */
+  readonly cursorStyle: TerminalCursorStyle;
+  /** Whether to emit visual bell events to the frontend. */
+  readonly visualBell: boolean;
+}
+
 export interface TerminalSessionInfo {
   id: string;
   cwd: string;
@@ -510,12 +523,14 @@ export async function terminalSpawn(
   cwd?: string | null,
   cols?: number,
   rows?: number,
+  options?: TerminalSpawnOptions,
 ): Promise<TerminalSessionInfo> {
   return invoke<TerminalSessionInfo>("terminal_spawn", {
     path,
     cwd: cwd ?? null,
     cols: cols ?? null,
     rows: rows ?? null,
+    options: options ?? null,
   });
 }
 
@@ -537,6 +552,17 @@ export async function terminalKill(id: string): Promise<void> {
 
 export async function listSystemFonts(): Promise<SystemFont[]> {
   return invoke<SystemFont[]>("list_system_fonts");
+}
+
+export interface TerminalShell {
+  /** Display label, e.g. "zsh" or "PowerShell". */
+  readonly label: string;
+  /** Absolute path to the shell executable, or empty for the platform default. */
+  readonly path: string;
+}
+
+export async function listTerminalShells(): Promise<TerminalShell[]> {
+  return invoke<TerminalShell[]>("list_terminal_shells");
 }
 
 function replaceEditorTextInBrowser(

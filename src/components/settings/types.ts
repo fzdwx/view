@@ -1,4 +1,4 @@
-export type SettingsSectionId = "fonts" | "shortcuts" | "editor";
+export type SettingsSectionId = "fonts" | "shortcuts" | "editor" | "terminal";
 
 export function settingsSectionTitle(section: SettingsSectionId): string {
   switch (section) {
@@ -8,5 +8,7 @@ export function settingsSectionTitle(section: SettingsSectionId): string {
       return "Keyboard Shortcuts";
     case "editor":
       return "Editor";
+    case "terminal":
+      return "Terminal";
   }
 }

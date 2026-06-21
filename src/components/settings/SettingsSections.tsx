@@ -11,6 +11,7 @@ import {
 } from "../../lib/settings";
 import { ShortcutRecorder, type ShortcutChangeHandler } from "./ShortcutRecorder";
 import { SettingsSlider } from "./SettingsSlider";
+import { SettingsTerminal } from "./SettingsTerminal";
 import {
   CodeFontCard,
   UiFontCard,
@@ -52,6 +53,9 @@ export function SettingsSections({
       ) : null}
       {activeSection === "editor" ? (
         <EditorSettings settings={settings} onChange={onChange} />
+      ) : null}
+      {activeSection === "terminal" ? (
+        <SettingsTerminal settings={settings} onChange={onChange} />
       ) : null}
     </div>
   );

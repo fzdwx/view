@@ -1,6 +1,7 @@
 import {
   type ChangeEvent as ReactChangeEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -15,6 +16,7 @@ import {
 
 export interface SettingsSelectOption {
   readonly disabled?: boolean;
+  readonly icon?: ReactNode;
   readonly label: string;
   readonly value: string;
 }
@@ -178,11 +180,16 @@ export function SettingsSelect({
             disabled={option.disabled}
             onClick={() => selectOption(option)}
           >
-            {option.label}
+            {option.icon != null ? (
+              <span className="settings-select-option-icon" aria-hidden="true">
+                {option.icon}
+              </span>
+            ) : null}
+            <span>{option.label}</span>
           </button>
         ))
       ) : (
-        <div className="settings-select-empty">No fonts found</div>
+        <div className="settings-select-empty">No results found</div>
       )}
     </div>
   );
@@ -206,7 +213,12 @@ export function SettingsSelect({
         onClick={() => setOpen((current) => !current)}
         onKeyDown={handleTriggerKeyDown}
       >
-        <span>{selectedLabel}</span>
+        {selectedOption?.icon != null ? (
+          <span className="settings-select-icon" aria-hidden="true">
+            {selectedOption.icon}
+          </span>
+        ) : null}
+        <span className="settings-select-label">{selectedLabel}</span>
         <span className="settings-select-chevron" aria-hidden="true" />
       </button>
       {open ? (

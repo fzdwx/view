@@ -4,7 +4,9 @@ use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::cell::{Cell, Flags};
 use alacritty_terminal::term::test::TermSize;
 use alacritty_terminal::term::{Config as TerminalConfig, Term, TermMode};
-use alacritty_terminal::vte::ansi::{Color as TerminalColorValue, NamedColor};
+use alacritty_terminal::vte::ansi::{
+    Color as TerminalColorValue, CursorShape, CursorStyle, NamedColor,
+};
 use alacritty_terminal::vte::ansi::{
     Processor as TerminalProcessor, StdSyncHandler as TerminalSyncHandler,
 };
@@ -283,6 +285,68 @@ struct TerminalSessionInfo {
     ws_url: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum TerminalCursorShape {
+    Block,
+    Bar,
+    Underline,
+    HollowBlock,
+}
+
+impl Default for TerminalCursorShape {
+    fn default() -> Self {
+        Self::Block
+    }
+}
+
+impl TerminalCursorShape {
+    fn to_alacritty(self) -> CursorStyle {
+        let shape = match self {
+            Self::Block => CursorShape::Block,
+            Self::Bar => CursorShape::Beam,
+            Self::Underline => CursorShape::Underline,
+            Self::HollowBlock => CursorShape::HollowBlock,
+        };
+        CursorStyle {
+            shape,
+            blinking: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalSpawnOptions {
+    /// Shell executable to launch, or empty for the platform default.
+    #[serde(default)]
+    shell: String,
+    /// Scrollback history size in lines.
+    #[serde(default = "default_terminal_scrollback")]
+    scrollback_lines: usize,
+    /// Cursor shape for the terminal.
+    #[serde(default)]
+    cursor_style: TerminalCursorShape,
+    /// Whether to emit visual bell events to the frontend.
+    #[serde(default)]
+    visual_bell: bool,
+}
+
+fn default_terminal_scrollback() -> usize {
+    10000
+}
+
+impl Default for TerminalSpawnOptions {
+    fn default() -> Self {
+        Self {
+            shell: String::new(),
+            scrollback_lines: default_terminal_scrollback(),
+            cursor_style: TerminalCursorShape::default(),
+            visual_bell: false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SystemFontInfo {
@@ -292,6 +356,7 @@ struct SystemFontInfo {
 
 enum TerminalWsEvent {
     Frame(String),
+    Bell,
     Close(Option<u32>),
 }
 
@@ -312,6 +377,7 @@ enum TerminalParserEvent {
 enum TerminalUiEvent {
     Title(Option<String>),
     SessionMetadata(TerminalSessionMetadata),
+    Bell,
 }
 
 struct TerminalSession {
@@ -355,6 +421,9 @@ impl EventListener for TerminalEventProxy {
             }
             TerminalEvent::ResetTitle => {
                 let _ = self.ui_event_tx.send(TerminalUiEvent::Title(None));
+            }
+            TerminalEvent::Bell => {
+                let _ = self.ui_event_tx.send(TerminalUiEvent::Bell);
             }
             _ => {}
         }
@@ -414,6 +483,7 @@ struct TerminalFrame {
     cursor_row: usize,
     cursor_col: usize,
     cursor_visible: bool,
+    cursor_shape: &'static str,
     modes: TerminalFrameModes,
     lines: Vec<TerminalFrameLine>,
 }
@@ -435,6 +505,114 @@ fn default_start_path() -> Result<String, String> {
 #[tauri::command]
 fn list_system_fonts() -> Vec<SystemFontInfo> {
     system_fonts()
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalShell {
+    /// Display label, e.g. "zsh" or "PowerShell".
+    label: String,
+    /// Absolute path to the shell executable.
+    path: String,
+}
+
+#[tauri::command]
+fn list_terminal_shells() -> Vec<TerminalShell> {
+    detect_terminal_shells()
+}
+
+/// Detect shells installed on the host.
+///
+/// Probes a curated set of well-known shell executables by looking them up on
+/// `PATH` (and a few absolute locations on Windows), returning each resolved
+/// path exactly once. The platform default is represented as an empty path so
+/// the frontend can offer it without duplicating a real entry.
+fn detect_terminal_shells() -> Vec<TerminalShell> {
+    let candidates: &[&str] = &[
+        "bash",
+        "zsh",
+        "fish",
+        "sh",
+        "nu",
+        "pwsh",
+        "powershell",
+        "pwsh.exe",
+        "powershell.exe",
+        "cmd.exe",
+        "elvish",
+        "tcsh",
+        "xonsh",
+    ];
+
+    let mut shells: Vec<TerminalShell> = Vec::new();
+    let mut seen: Vec<std::path::PathBuf> = Vec::new();
+
+    for candidate in candidates {
+        if let Some(path) = which_terminal_shell(candidate) {
+            if seen.iter().any(|seen_path| files_equal(seen_path, &path)) {
+                continue;
+            }
+            seen.push(path.clone());
+            shells.push(TerminalShell {
+                label: shell_label(candidate, &path),
+                path: path.to_string_lossy().to_string(),
+            });
+        }
+    }
+
+    shells
+}
+
+/// Resolve `program` to an absolute executable path using `PATH`.
+fn which_terminal_shell(program: &str) -> Option<std::path::PathBuf> {
+    let exe_suffixes: &[&str] = if cfg!(windows) {
+        &["", ".exe", ".bat", ".cmd"]
+    } else {
+        &[""]
+    };
+
+    // Absolute or relative path: use it directly if it exists.
+    let program_path = Path::new(program);
+    if program_path.is_absolute() || program.contains(std::path::MAIN_SEPARATOR) {
+        return program_path.is_file().then(|| program_path.to_path_buf());
+    }
+
+    let path_env = std::env::var_os("PATH")?;
+    for directory in std::env::split_paths(&path_env) {
+        for suffix in exe_suffixes {
+            let candidate = directory.join(format!("{program}{suffix}"));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    None
+}
+
+fn shell_label(program: &str, path: &Path) -> String {
+    let stem = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or(program);
+    match stem.to_ascii_lowercase().as_str() {
+        "pwsh" => "PowerShell".to_string(),
+        "powershell" => "Windows PowerShell".to_string(),
+        "cmd" => "Command Prompt".to_string(),
+        _ => stem.to_string(),
+    }
+}
+
+#[cfg(windows)]
+fn files_equal(left: &Path, right: &Path) -> bool {
+    left.to_string_lossy()
+        .to_ascii_lowercase()
+        == right.to_string_lossy().to_ascii_lowercase()
+}
+
+#[cfg(not(windows))]
+fn files_equal(left: &Path, right: &Path) -> bool {
+    left == right
 }
 
 #[tauri::command]
@@ -1064,9 +1242,17 @@ fn terminal_spawn(
     cwd: Option<String>,
     cols: Option<u16>,
     rows: Option<u16>,
+    options: Option<TerminalSpawnOptions>,
 ) -> Result<TerminalSessionInfo, String> {
     let root = workspace_root(&path)?;
-    spawn_terminal_session(state.inner(), &root, cwd.as_deref(), cols, rows)
+    spawn_terminal_session_with_options(
+        state.inner(),
+        &root,
+        cwd.as_deref(),
+        cols,
+        rows,
+        options.unwrap_or_default(),
+    )
 }
 
 #[tauri::command]
@@ -2389,6 +2575,25 @@ fn line_for_byte_range(content: &str, start_byte: usize) -> (usize, String) {
     )
 }
 
+/// Build the command used to launch a terminal shell.
+///
+/// When `shell` is provided and resolves to an executable, it is launched with a
+/// login flag so the user's profile is sourced. Otherwise the platform default
+/// program is used, which selects the user's configured shell on Unix and
+/// PowerShell on Windows when available.
+fn build_terminal_command(shell: &str, cwd: &Path) -> CommandBuilder {
+    let trimmed = shell.trim();
+    if !trimmed.is_empty() && Path::new(trimmed).is_file() {
+        let mut command = CommandBuilder::new(trimmed);
+        command.cwd(cwd);
+        return command;
+    }
+
+    let mut command = CommandBuilder::new_default_prog();
+    command.cwd(cwd);
+    command
+}
+
 fn resolve_terminal_cwd(root: &Path, cwd: Option<&str>) -> Result<PathBuf, String> {
     let root = root
         .canonicalize()
@@ -2405,13 +2610,55 @@ fn resolve_terminal_cwd(root: &Path, cwd: Option<&str>) -> Result<PathBuf, Strin
     let canonical = full_path
         .canonicalize()
         .map_err(|error| format!("Failed to resolve terminal cwd: {error}"))?;
-    if !canonical.starts_with(&root) {
+    if !path_starts_with(&canonical, &root) {
         return Err("Terminal cwd must stay inside the project".to_string());
     }
     if !canonical.is_dir() {
         return Err("Terminal cwd is not a directory".to_string());
     }
     Ok(canonical)
+}
+
+/// Whether `child` is the same as or nested below `parent`.
+///
+/// `Path::starts_with` is case-sensitive on Windows, which can reject valid
+/// project subdirectories whose drive letter or casing differs from the
+/// canonicalized root. This compares components, treating the filesystem as
+/// case-insensitive on Windows where path casing is not significant.
+fn path_starts_with(child: &Path, parent: &Path) -> bool {
+    let child_components: Vec<_> = child.components().collect();
+    let parent_components: Vec<_> = parent.components().collect();
+    if child_components.len() < parent_components.len() {
+        return false;
+    }
+    for (child_part, parent_part) in child_components.iter().zip(parent_components.iter()) {
+        if !components_equal(child_part, parent_part) {
+            return false;
+        }
+    }
+    true
+}
+
+#[cfg(windows)]
+fn components_equal(
+    child: &std::path::Component,
+    parent: &std::path::Component,
+) -> bool {
+    let normalize = |component: &std::path::Component| {
+        component
+            .as_os_str()
+            .to_string_lossy()
+            .to_ascii_lowercase()
+    };
+    normalize(child) == normalize(parent)
+}
+
+#[cfg(not(windows))]
+fn components_equal(
+    child: &std::path::Component,
+    parent: &std::path::Component,
+) -> bool {
+    child == parent
 }
 
 fn terminal_named_color(color: NamedColor) -> Option<&'static str> {
@@ -2507,7 +2754,18 @@ fn terminal_frame_modes(mode: TermMode) -> TerminalFrameModes {
     }
 }
 
+fn terminal_cursor_shape_str(shape: CursorShape) -> &'static str {
+    match shape {
+        CursorShape::Block => "block",
+        CursorShape::Underline => "underline",
+        CursorShape::Beam => "bar",
+        CursorShape::HollowBlock => "hollowBlock",
+        CursorShape::Hidden => "block",
+    }
+}
+
 fn terminal_frame(term: &Term<TerminalEventProxy>, title: Option<&str>) -> Result<String, String> {
+    let cursor_shape = term.cursor_style().shape;
     let grid = term.grid();
     let cols = grid.columns();
     let rows = grid.screen_lines();
@@ -2594,6 +2852,7 @@ fn terminal_frame(term: &Term<TerminalEventProxy>, title: Option<&str>) -> Resul
         cursor_row,
         cursor_col,
         cursor_visible,
+        cursor_shape: terminal_cursor_shape_str(cursor_shape),
         modes: terminal_frame_modes(*mode),
         lines,
     })
@@ -2779,8 +3038,9 @@ fn drain_terminal_ui_events(
     ui_event_rx: &mpsc::Receiver<TerminalUiEvent>,
     title: &mut Option<String>,
     metadata: &mut TerminalSessionMetadata,
-) -> bool {
+) -> (bool, bool) {
     let mut changed = false;
+    let mut bell = false;
     while let Ok(event) = ui_event_rx.try_recv() {
         match event {
             TerminalUiEvent::Title(next_title) => {
@@ -2795,17 +3055,43 @@ fn drain_terminal_ui_events(
                     changed = true;
                 }
             }
+            TerminalUiEvent::Bell => {
+                bell = true;
+            }
         }
     }
-    changed
+    (changed, bell)
 }
 
+/// Spawn a terminal session with default options.
+///
+/// Kept as a thin wrapper so existing callers and tests stay readable while
+/// the options-aware variant carries the configuration.
+#[allow(dead_code)]
 fn spawn_terminal_session(
     state: &TerminalState,
     root: &Path,
     cwd: Option<&str>,
     cols: Option<u16>,
     rows: Option<u16>,
+) -> Result<TerminalSessionInfo, String> {
+    spawn_terminal_session_with_options(
+        state,
+        root,
+        cwd,
+        cols,
+        rows,
+        TerminalSpawnOptions::default(),
+    )
+}
+
+fn spawn_terminal_session_with_options(
+    state: &TerminalState,
+    root: &Path,
+    cwd: Option<&str>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    options: TerminalSpawnOptions,
 ) -> Result<TerminalSessionInfo, String> {
     let cwd = resolve_terminal_cwd(root, cwd)?;
     let pty_system = native_pty_system();
@@ -2818,8 +3104,7 @@ fn spawn_terminal_session(
         })
         .map_err(|error| format!("Failed to create terminal PTY: {error}"))?;
     let portable_pty::PtyPair { master, slave } = pair;
-    let mut command = CommandBuilder::new_default_prog();
-    command.cwd(&cwd);
+    let mut command = build_terminal_command(&options.shell, &cwd);
     command.env("TERM", "xterm-256color");
 
     let mut child = slave
@@ -2844,6 +3129,12 @@ fn spawn_terminal_session(
     let (input_tx, input_rx) = mpsc::channel::<Vec<u8>>();
     let (parser_tx, parser_rx) = mpsc::channel::<TerminalParserEvent>();
     let (ui_event_tx, ui_event_rx) = mpsc::channel::<TerminalUiEvent>();
+    let visual_bell = options.visual_bell;
+    let terminal_config = TerminalConfig {
+        scrolling_history: options.scrollback_lines,
+        default_cursor_style: options.cursor_style.to_alacritty(),
+        ..TerminalConfig::default()
+    };
     thread::spawn(move || {
         let mut writer = writer;
         while let Ok(input) = input_rx.recv() {
@@ -2920,7 +3211,7 @@ fn spawn_terminal_session(
         let initial_cols = cols.unwrap_or(80).max(1) as usize;
         let initial_rows = rows.unwrap_or(24).max(1) as usize;
         let mut term = Term::new(
-            TerminalConfig::default(),
+            terminal_config.clone(),
             &TermSize::new(initial_cols, initial_rows),
             TerminalEventProxy {
                 input_tx: parser_input_tx,
@@ -2977,7 +3268,13 @@ fn spawn_terminal_session(
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
-            let ui_changed = drain_terminal_ui_events(&ui_event_rx, &mut title, &mut metadata);
+            let (ui_changed, bell_fired) =
+                drain_terminal_ui_events(&ui_event_rx, &mut title, &mut metadata);
+            if bell_fired && visual_bell {
+                if reader_output_tx.send(TerminalWsEvent::Bell).is_err() {
+                    break;
+                }
+            }
             if !terminal_changed && !ui_changed {
                 continue;
             }
@@ -3181,6 +3478,10 @@ fn write_terminal_ws_event(
     match event {
         TerminalWsEvent::Frame(frame) => {
             websocket.send(Message::Text(frame.clone()))?;
+            Ok(false)
+        }
+        TerminalWsEvent::Bell => {
+            websocket.send(Message::Text(r#"{"type":"bell"}"#.to_string()))?;
             Ok(false)
         }
         TerminalWsEvent::Close(exit_code) => {
@@ -3772,7 +4073,7 @@ mod tests {
         let mut metadata = TerminalSessionMetadata::default();
 
         processor.advance(&mut term, b"\x1b]0;View Title Protocol\x07");
-        drain_terminal_ui_events(&ui_event_rx, &mut title, &mut metadata);
+        let _ = drain_terminal_ui_events(&ui_event_rx, &mut title, &mut metadata);
         let display_title =
             terminal_display_title(Path::new("/tmp/view"), title.as_deref(), &metadata);
         let frame: serde_json::Value = serde_json::from_str(
@@ -3781,6 +4082,110 @@ mod tests {
         .expect("frame json");
 
         assert_eq!(frame["title"], "View Title Protocol");
+    }
+
+    #[test]
+    fn detect_terminal_shells_returns_unique_paths() {
+        let shells = detect_terminal_shells();
+
+        // Paths must be unique; the same executable must not appear twice even
+        // when probed under multiple aliases (e.g. pwsh.exe / powershell.exe).
+        let mut seen: Vec<String> = Vec::new();
+        for shell in &shells {
+            assert!(
+                !seen.iter().any(|seen_path| paths_equal_ci(seen_path, &shell.path)),
+                "duplicate shell path detected: {}",
+                shell.path,
+            );
+            seen.push(shell.path.clone());
+        }
+
+        // sh is almost always available on the test host; if present it should
+        // carry a non-empty label.
+        if let Some(sh) = shells.iter().find(|shell| {
+            Path::new(&shell.path)
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .map(|name| name.eq_ignore_ascii_case("sh"))
+                .unwrap_or(false)
+        }) {
+            assert!(!sh.label.is_empty(), "shell label should not be empty");
+        }
+    }
+
+    #[test]
+    fn terminal_frame_exposes_configured_cursor_shape() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        let (ui_event_tx, _ui_event_rx) = mpsc::channel::<TerminalUiEvent>();
+        let term = Term::new(
+            TerminalConfig {
+                default_cursor_style: CursorStyle {
+                    shape: CursorShape::Beam,
+                    blinking: false,
+                },
+                ..TerminalConfig::default()
+            },
+            &TermSize::new(20, 6),
+            TerminalEventProxy {
+                input_tx,
+                ui_event_tx,
+            },
+        );
+
+        let frame: serde_json::Value =
+            serde_json::from_str(&terminal_frame(&term, None).expect("terminal frame"))
+                .expect("frame json");
+        assert_eq!(frame["cursorShape"], "bar");
+    }
+
+    #[test]
+    fn terminal_bell_event_is_forwarded_to_websocket() {
+        let repo = create_basic_repo();
+        let state = TerminalState::default();
+        let options = TerminalSpawnOptions {
+            visual_bell: true,
+            ..TerminalSpawnOptions::default()
+        };
+        let session = spawn_terminal_session_with_options(
+            &state,
+            &repo,
+            None,
+            Some(80),
+            Some(12),
+            options,
+        )
+        .expect("spawn terminal session");
+        let mut websocket = connect_terminal_websocket(&session);
+
+        // Ring the bell; the parser thread should forward a bell message to the
+        // connected websocket client.
+        websocket
+            .send(Message::Text("printf '\\a'\r".to_string()))
+            .expect("send bell");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut saw_bell = false;
+        while Instant::now() < deadline && !saw_bell {
+            match websocket.read() {
+                Ok(Message::Text(text)) => {
+                    let Ok(frame) = serde_json::from_str::<serde_json::Value>(&text) else {
+                        continue;
+                    };
+                    if frame["type"] == "bell" {
+                        saw_bell = true;
+                    }
+                }
+                Ok(_) => {}
+                Err(WsError::Io(error))
+                    if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
+                Err(error) => panic!("terminal websocket read failed: {error}"),
+            }
+        }
+
+        assert!(saw_bell, "bell should be forwarded to the websocket client");
+        let _ = websocket.close(None);
+        let _ = kill_terminal_session(&state, &session.id);
+        fs::remove_dir_all(repo).ok();
     }
 
     #[test]
@@ -4023,6 +4428,17 @@ mod tests {
         panic!(
             "terminal output {expected_text:?} was not rendered; last frame: {last_frame_text:?}"
         );
+    }
+
+    fn paths_equal_ci(left: &str, right: &str) -> bool {
+        #[cfg(windows)]
+        {
+            left.to_ascii_lowercase() == right.to_ascii_lowercase()
+        }
+        #[cfg(not(windows))]
+        {
+            left == right
+        }
     }
 
     fn terminal_frame_text(frame: &serde_json::Value) -> String {
@@ -4900,6 +5316,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             default_start_path,
             list_system_fonts,
+            list_terminal_shells,
             load_repository,
             get_diff,
             get_file_diff,

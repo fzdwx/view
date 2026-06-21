@@ -29,6 +29,7 @@ const settingsTree: ReadonlyArray<
       { id: "fonts", label: "Fonts" },
       { id: "shortcuts", label: "Keyboard" },
       { id: "editor", label: "Editor" },
+      { id: "terminal", label: "Terminal" },
     ],
   },
 ];

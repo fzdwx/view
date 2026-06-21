@@ -21,7 +21,8 @@ import {
   type TerminalSessionInfo,
   type TerminalWorkspace,
 } from "../lib/terminalSessions";
-import { settingsChangedEvent } from "../lib/settings";
+import { type AppSettings, loadAppSettings, settingsChangedEvent } from "../lib/settings";
+import type { TerminalCursorStyle, TerminalSpawnOptions } from "../lib/api";
 
 interface TerminalPanelProps {
   active: boolean;
@@ -70,6 +71,7 @@ type TerminalFrame = {
   cursorRow: number;
   cursorCol: number;
   cursorVisible: boolean;
+  cursorShape: TerminalCursorStyle;
   modes: TerminalModes;
   lines: TerminalLine[];
 };
@@ -77,6 +79,10 @@ type TerminalFrame = {
 type TerminalClose = {
   type: "close";
   exitCode: number | null;
+};
+
+type TerminalBell = {
+  type: "bell";
 };
 
 type TerminalInput = string | Uint8Array;
@@ -416,6 +422,19 @@ function terminalMouseSequence(
   ]);
 }
 
+function terminalCursorClassName(cursorShape: TerminalCursorStyle): string {
+  switch (cursorShape) {
+    case "bar":
+      return "terminal-cursor terminal-cursor-bar";
+    case "underline":
+      return "terminal-cursor terminal-cursor-underline";
+    case "hollowBlock":
+      return "terminal-cursor terminal-cursor-hollow";
+    default:
+      return "terminal-cursor";
+  }
+}
+
 function runStyle(run: TerminalRun): CSSProperties {
   return {
     color: run.fg ?? undefined,
@@ -539,7 +558,7 @@ function renderRunWithCursor(
   return (
     <span key={`${startCol}-${graphemes.length}`} style={style}>
       {renderTerminalText(before, `${startCol}-before`)}
-      <span className="terminal-cursor">
+      <span className={terminalCursorClassName(frame.cursorShape)}>
         {renderTerminalText([cursor], `${startCol}-cursor`)}
       </span>
       {renderTerminalText(after, `${startCol}-after`)}
@@ -579,11 +598,23 @@ function TerminalRows({ frame }: { frame: TerminalFrame }) {
   );
 }
 
+function toTerminalSpawnOptions(
+  settings: AppSettings["terminal"],
+): TerminalSpawnOptions {
+  return {
+    shell: settings.shell,
+    scrollbackLines: settings.scrollbackLines,
+    cursorStyle: settings.cursorStyle,
+    visualBell: settings.visualBell,
+  };
+}
+
 interface TerminalSessionViewProps {
   active: boolean;
   projectPath: string;
   /** Existing live PTY session to reconnect to, or null to spawn a new one. */
   session: TerminalSessionInfo | null;
+  terminalOptions: TerminalSpawnOptions;
   onTitleChange(title: string | null): void;
   onSessionReady(session: TerminalSessionInfo): void;
   onClosed(exitCode: number | null): void;
@@ -596,6 +627,7 @@ function TerminalSessionView({
   active,
   projectPath,
   session,
+  terminalOptions,
   onTitleChange,
   onSessionReady,
   onClosed,
@@ -636,6 +668,19 @@ function TerminalSessionView({
   const [jumpedScrollbackOffset, setJumpedScrollbackOffset] = useState<
     number | null
   >(null);
+  const visualBellTimerRef = useRef<number | null>(null);
+  const [bellActive, setBellActive] = useState(false);
+
+  const triggerVisualBell = () => {
+    if (visualBellTimerRef.current != null) {
+      window.clearTimeout(visualBellTimerRef.current);
+    }
+    setBellActive(true);
+    visualBellTimerRef.current = window.setTimeout(() => {
+      visualBellTimerRef.current = null;
+      setBellActive(false);
+    }, 180);
+  };
 
   const clearScrollbackHint = () => {
     if (scrollbackHintTimerRef.current != null) {
@@ -1112,8 +1157,14 @@ function TerminalSessionView({
         const session =
           existingSession ??
           (size
-            ? await terminalSpawn(projectPath, null, size.cols, size.rows)
-            : await terminalSpawn(projectPath, null));
+            ? await terminalSpawn(
+                projectPath,
+                null,
+                size.cols,
+                size.rows,
+                terminalOptions,
+              )
+            : await terminalSpawn(projectPath, null, undefined, undefined, terminalOptions));
         if (disposed) {
           // Only kill a freshly spawned session; an existing live session must
           // keep running so it can be reconnected when the panel re-shows.
@@ -1152,10 +1203,14 @@ function TerminalSessionView({
             return;
           }
           try {
-            const message = JSON.parse(event.data) as TerminalFrame | TerminalClose;
+            const message = JSON.parse(
+              event.data,
+            ) as TerminalFrame | TerminalClose | TerminalBell;
             if (message.type === "frame") {
               titleChangeRef.current(message.title ?? null);
               queueFrame(message);
+            } else if (message.type === "bell") {
+              triggerVisualBell();
             } else if (message.type === "close") {
               if (frameFlushRef.current != null) {
                 window.cancelAnimationFrame(frameFlushRef.current);
@@ -1190,6 +1245,7 @@ function TerminalSessionView({
           cursorRow: 0,
           cursorCol: 0,
           cursorVisible: false,
+          cursorShape: "block",
           modes: DEFAULT_TERMINAL_MODES,
           lines: [
             {
@@ -1261,6 +1317,11 @@ function TerminalSessionView({
         window.clearTimeout(scrollbackHintTimerRef.current);
         scrollbackHintTimerRef.current = null;
       }
+      if (visualBellTimerRef.current != null) {
+        window.clearTimeout(visualBellTimerRef.current);
+        visualBellTimerRef.current = null;
+      }
+      setBellActive(false);
       pendingFrameRef.current = null;
       lastSizeRef.current = null;
       frameRef.current = null;
@@ -1278,7 +1339,7 @@ function TerminalSessionView({
     // keyboard focus to relay keystrokes to the PTY; tabIndex is intentional.
     // oxlint-disable-next-line react-doctor/no-noninteractive-tabindex
     <div ref={screenRef} className="terminal-screen" role="application" aria-label="Terminal" tabIndex={0} onMouseDown={() => screenRef.current?.focus({ preventScroll: true })}>
-      <div className="terminal-output">
+      <div className={bellActive ? "terminal-output terminal-bell-flash" : "terminal-output"}>
         {frame ? <TerminalRows frame={frame} /> : null}
         {closed ? (
           <div className="terminal-close-line">
@@ -1320,6 +1381,26 @@ export function TerminalPanel({ active, projectPath }: TerminalPanelProps) {
     () => EMPTY_WORKSPACE,
   );
 
+  // Terminal options are read from the persisted settings so a new tab picks up
+  // the latest shell/scrollback/cursor/bell choices. The settings window can
+  // update these from another webview; subscribe to keep them in sync.
+  const [terminalOptions, setTerminalOptions] = useState<TerminalSpawnOptions>(
+    () => toTerminalSpawnOptions(loadAppSettings().terminal),
+  );
+  const [autoCloseOnExit, setAutoCloseOnExit] = useState(
+    () => loadAppSettings().terminal.autoCloseOnExit,
+  );
+  useEffect(() => {
+    setTerminalOptions(toTerminalSpawnOptions(loadAppSettings().terminal));
+    setAutoCloseOnExit(loadAppSettings().terminal.autoCloseOnExit);
+    const handler = () => {
+      setTerminalOptions(toTerminalSpawnOptions(loadAppSettings().terminal));
+      setAutoCloseOnExit(loadAppSettings().terminal.autoCloseOnExit);
+    };
+    window.addEventListener(settingsChangedEvent, handler);
+    return () => window.removeEventListener(settingsChangedEvent, handler);
+  }, []);
+
   if (!projectPath || !isTauriRuntime()) {
     const unavailableMessage = !projectPath
       ? "Open a folder first."
@@ -1358,6 +1439,13 @@ export function TerminalPanel({ active, projectPath }: TerminalPanelProps) {
     const tab = workspace.tabs.find((entry) => entry.id === tabId);
     if (tab?.session) {
       void terminalKill(tab.session.id).catch(() => undefined);
+    }
+    if (autoCloseOnExit) {
+      // Remove the tab outright so a closed process does not leave an exit-code
+      // stub behind. Kill first (above) so the PTY is released before the tab
+      // disappears from the workspace store.
+      closeTerminalTab(projectPath, tabId, () => undefined);
+      return;
     }
     setTerminalTabClosed(projectPath, tabId, exitCode);
   };
@@ -1426,6 +1514,7 @@ export function TerminalPanel({ active, projectPath }: TerminalPanelProps) {
                   active={active}
                   projectPath={projectPath}
                   session={activeTab.session}
+                  terminalOptions={terminalOptions}
                   onTitleChange={(title) => updateTabTitle(activeTab.id, title)}
                   onSessionReady={(session) => handleSessionReady(activeTab.id, session)}
                   onClosed={(exitCode) => handleClosed(activeTab.id, exitCode)}

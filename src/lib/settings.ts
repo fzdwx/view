@@ -22,6 +22,33 @@ export interface AppSettings {
   shortcuts: Record<ShortcutAction, string>;
 }
 
+import type { TerminalCursorStyle } from "./api";
+export type { TerminalCursorStyle };
+
+export interface TerminalSettings {
+  /** Shell executable to launch, or empty for the platform default. */
+  readonly shell: string;
+  /** Scrollback history size in lines. */
+  readonly scrollbackLines: number;
+  /** Cursor shape for the terminal. */
+  readonly cursorStyle: TerminalCursorStyle;
+  /** Flash the terminal instead of ringing the bell. */
+  readonly visualBell: boolean;
+  /** Remove the terminal tab automatically when its process exits. */
+  readonly autoCloseOnExit: boolean;
+}
+
+export interface AppSettings {
+  uiFontFamily: string;
+  monoFontFamily: string;
+  fontSize: number;
+  fontWeight: string;
+  lineHeight: number;
+  appZoom: number;
+  shortcuts: Record<ShortcutAction, string>;
+  terminal: TerminalSettings;
+}
+
 export interface ShortcutRow {
   readonly action: ShortcutAction;
   readonly label: string;
@@ -42,7 +69,21 @@ export const appZoomMax = 2;
 export const appZoomStep = 0.05;
 export const defaultAppZoom = 1;
 
+export const terminalScrollbackMin = 0;
+export const terminalScrollbackMax = 100000;
+export const terminalScrollbackDefault = 10000;
+export const terminalScrollbackStep = 1000;
+
+export const defaultTerminalSettings: TerminalSettings = {
+  shell: "",
+  scrollbackLines: terminalScrollbackDefault,
+  cursorStyle: "block",
+  visualBell: true,
+  autoCloseOnExit: false,
+};
+
 export const defaultAppSettings: AppSettings = {
+  terminal: defaultTerminalSettings,
   uiFontFamily: defaultUiFontFamily,
   monoFontFamily: defaultMonoFontFamily,
   fontSize: 12,
@@ -167,6 +208,7 @@ function normalizeAppSettings(value: unknown): AppSettings {
   const legacyFontFamily = normalizeFontValue(record.fontFamily);
 
   return {
+    terminal: normalizeTerminalSettings(record.terminal),
     uiFontFamily:
       normalizeFontValue(record.uiFontFamily) ?? defaultAppSettings.uiFontFamily,
     monoFontFamily:
@@ -232,6 +274,42 @@ function normalizeFontWeight(value: unknown): string | null {
   }
 
   return ["300", "400", "500", "600"].includes(value) ? value : null;
+}
+
+function normalizeTerminalSettings(value: unknown): TerminalSettings {
+  const record = isRecord(value) ? value : {};
+  const shell =
+    typeof record.shell === "string" ? record.shell.trim() : "";
+  return {
+    shell,
+    scrollbackLines: normalizeNumber(
+      record.scrollbackLines,
+      defaultTerminalSettings.scrollbackLines,
+      terminalScrollbackMin,
+      terminalScrollbackMax,
+    ),
+    cursorStyle: normalizeTerminalCursorStyle(record.cursorStyle),
+    visualBell:
+      typeof record.visualBell === "boolean"
+        ? record.visualBell
+        : defaultTerminalSettings.visualBell,
+    autoCloseOnExit:
+      typeof record.autoCloseOnExit === "boolean"
+        ? record.autoCloseOnExit
+        : defaultTerminalSettings.autoCloseOnExit,
+  };
+}
+
+function normalizeTerminalCursorStyle(value: unknown): TerminalCursorStyle {
+  switch (value) {
+    case "block":
+    case "bar":
+    case "underline":
+    case "hollowBlock":
+      return value;
+    default:
+      return defaultTerminalSettings.cursorStyle;
+  }
 }
 
 function normalizeNumber(

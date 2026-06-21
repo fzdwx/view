@@ -807,22 +807,63 @@ textarea,
 }
 
 .settings-select-trigger {
-  display: grid;
+  display: flex;
   width: 100%;
-  grid-template-columns: minmax(0, 1fr) 16px;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   text-align: left;
 }
 
-.settings-select-trigger span:first-child {
+.settings-select-label {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.settings-select-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  color: var(--muted);
+}
+
+.settings-select-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 26px;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  overflow: hidden;
+  padding: 0 7px;
+  text-align: left;
+}
+
+.settings-select-option > span:last-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-select-option-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  color: var(--muted);
+}
+
+.settings-select-option.active .settings-select-option-icon {
+  color: var(--accent-foreground);
+}
+
 .settings-select-chevron {
-  justify-self: center;
+  flex: 0 0 auto;
   width: 0;
   height: 0;
   border-top: 5px solid var(--muted);
@@ -901,22 +942,6 @@ textarea,
     --settings-select-search-options-max-height,
     min(424px, calc(100vh - 160px))
   );
-}
-
-.settings-select-option {
-  display: block;
-  min-width: 0;
-  height: 24px;
-  border: 0;
-  border-radius: 2px;
-  background: transparent;
-  color: var(--ink);
-  font-size: 12px;
-  overflow: hidden;
-  padding: 0 7px;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .settings-select-option:hover {
@@ -5124,6 +5149,44 @@ body.is-resizing-y * {
   50% {
     background: transparent;
     color: inherit;
+  }
+}
+
+.terminal-cursor-bar {
+  width: 2px;
+  min-width: 2px;
+  background: var(--ink);
+  color: var(--ink);
+  animation: none;
+}
+
+.terminal-cursor-underline {
+  height: auto;
+  min-width: 1ch;
+  background: transparent;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  animation: none;
+}
+
+.terminal-cursor-hollow {
+  box-shadow: inset 0 0 0 1px var(--ink);
+  background: transparent;
+  color: inherit;
+  animation: none;
+}
+
+.terminal-bell-flash {
+  animation: terminal-bell-flash 0.18s ease-out;
+}
+
+@keyframes terminal-bell-flash {
+  0% {
+    box-shadow: inset 0 0 0 100vmax color-mix(in oklch, var(--ink) 22%, transparent);
+  }
+  100% {
+    box-shadow: inset 0 0 0 0 transparent;
   }
 }
 
