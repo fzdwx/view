@@ -55,6 +55,7 @@ export function useAppKeyboardShortcuts({
         if (canUseProjectCommands) {
           onOpenCommandPanel();
         }
+        return;
       }
 
       if (matchesShortcut(event, shortcuts.findFiles)) {

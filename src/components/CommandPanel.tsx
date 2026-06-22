@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { measureElement, useVirtualizer } from "@tanstack/react-virtual";
 import { Loader2, Search } from "lucide-react";
 import type { FileSearchResult } from "../lib/api";
+import { byteOffsetToUtf16 } from "../lib/editorGitMarkers";
 import { useFileIcon } from "../lib/fileIcons";
 import {
   fileNameFromPath,
@@ -169,7 +170,7 @@ export function CommandPanel({
           <span>
             {mode === "content" ? "Find in files" : "Find files"}
             {hasQuery && results.length > 0 ? ` · ${results.length} results` : ""}
-            {mode === "content" ? " · " : " · "}
+            {" · "}
             {projectName ?? "No project"}
           </span>
           <kbd>Enter</kbd>
@@ -387,10 +388,10 @@ function highlightMatch(text: string, query: string): ReactNode {
 
   return segments;
 }
-
 /**
  * Highlight matched ranges using exact byte offsets from the Rust grep.
  * matchRanges are [start, end) byte offsets within lineText.
+ * Convert to UTF-16 offsets before slicing JS strings.
  */
 function highlightRanges(text: string, ranges: [number, number][]): ReactNode {
   if (ranges.length === 0) return text;
@@ -398,12 +399,14 @@ function highlightRanges(text: string, ranges: [number, number][]): ReactNode {
   const segments: ReactNode[] = [];
   let lastEnd = 0;
 
-  for (const [start, end] of ranges) {
+  for (const [byteStart, byteEnd] of ranges) {
+    const start = byteOffsetToUtf16(text, byteStart);
+    const end = byteOffsetToUtf16(text, byteEnd);
     if (start > lastEnd) {
       segments.push(text.slice(lastEnd, start));
     }
     segments.push(
-      <mark key={start} className="command-match">
+      <mark key={byteStart} className="command-match">
         {text.slice(start, end)}
       </mark>,
     );

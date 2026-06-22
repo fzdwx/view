@@ -64,19 +64,21 @@ export function byteOffsetToUtf16(line: string, byteOffset: number): number {
   let bytes = 0;
   for (let i = 0; i < line.length; i++) {
     const code = line.charCodeAt(i);
-    const charBytes = utf8ByteLength(code, i, line);
+    // Skip low surrogates — their byte count was already counted
+    // together with the high surrogate (4 bytes for the pair).
+    if (code >= 0xdc00 && code <= 0xdfff) continue;
     if (bytes >= byteOffset) return i;
-    bytes += charBytes;
+    bytes += utf8ByteLength(code);
   }
   return line.length;
 }
 
-function utf8ByteLength(code: number, index: number, line: string): number {
+function utf8ByteLength(code: number): number {
   if (code <= 0x7f) return 1;
   if (code <= 0x7ff) return 2;
-  // Surrogate pair (4 bytes UTF-8, 2 UTF-16 code units)
+  // High surrogate — represents a codepoint outside BMP,
+  // encoded as 4 bytes in UTF-8 (2 UTF-16 code units).
   if (code >= 0xd800 && code <= 0xdbff) return 4;
-  if (code >= 0xdc00 && code <= 0xdfff) return 0; // low surrogate, already counted
   return 3;
 }
 
