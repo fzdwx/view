@@ -10,19 +10,17 @@ use alacritty_terminal::vte::ansi::{
 use alacritty_terminal::vte::ansi::{
     Processor as TerminalProcessor, StdSyncHandler as TerminalSyncHandler,
 };
-use arboard::Clipboard;
 use base64::{engine::general_purpose, Engine as _};
 use fff_search::{
     FFFMode, FilePicker, FilePickerOptions, FuzzySearchOptions, GrepConfig, GrepMode,
     GrepSearchOptions, PaginationArgs, QueryParser, SharedFilePicker, SharedFrecency,
 };
-use image::ImageEncoder;
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::env;
 use std::fs;
-use std::io::{Cursor, ErrorKind, Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
 #[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -33,10 +31,11 @@ use std::sync::{
     mpsc, Arc, Mutex,
 };
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tauri::State;
 use tungstenite::{accept, Error as WsError, Message, WebSocket};
 
+mod clipboard_paste;
 mod git_commit_push;
 mod git_pathspec;
 mod git_restore;
@@ -885,250 +884,6 @@ fn create_project_file(path: String, file_path: String) -> Result<String, String
     create_repo_file(&root, &file_path)
 }
 
-/// Write pasted file bytes into the project at a relative path under `dest_dir`.
-/// Used by the file tree's paste (Ctrl/Cmd+V) handler when the system clipboard
-/// carries files copied from Finder/Explorer. `bytes` is a list of (relative
-/// file path, contents) pairs so a multi-file paste is one IPC round-trip.
-#[tauri::command]
-fn write_pasted_files(
-    path: String,
-    dest_dir: Option<String>,
-    files: Vec<PastedFile>,
-) -> Result<Vec<String>, String> {
-    let root = workspace_root(&path)?;
-    let dest_dir = dest_dir
-        .map(|value| normalize_user_repo_path(&value))
-        .transpose()?
-        .unwrap_or_default();
-    let mut written = Vec::with_capacity(files.len());
-    for file in files {
-        let relative = match file.relative_path.split('/').next_back() {
-            Some(name) if !name.is_empty() => name,
-            _ => return Err("Pasted file name is empty".to_string()),
-        };
-        let normalized_name = normalize_user_repo_path(relative)?;
-        let combined = if dest_dir.is_empty() {
-            normalized_name
-        } else {
-            format!("{dest_dir}/{normalized_name}")
-        };
-        let normalized = normalize_user_repo_path(&combined)?;
-        let full_path = resolve_new_repo_child_path(&root, &normalized)?;
-        // Avoid clobbering an existing file: append a numeric suffix.
-        let target = unique_target_path(&full_path);
-        let parent = target
-            .parent()
-            .ok_or_else(|| "Selected file has no parent directory".to_string())?;
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("Failed to create directories: {error}"))?;
-        fs::write(&target, &file.bytes)
-            .map_err(|error| format!("Failed to write pasted file: {error}"))?;
-        let normalized_target = target
-            .strip_prefix(
-                root.canonicalize()
-                    .map_err(|error| format!("Failed to resolve project root: {error}"))?,
-            )
-            .map_err(|error| format!("Failed to resolve pasted file path: {error}"))?
-            .to_string_lossy()
-            .replace("\\", "/");
-        written.push(normalized_target);
-    }
-    Ok(written)
-}
-
-#[tauri::command]
-fn paste_clipboard_into_project(
-    path: String,
-    dest_dir: Option<String>,
-) -> Result<Vec<String>, String> {
-    let root = workspace_root(&path)?;
-    let dest_dir = dest_dir
-        .map(|value| normalize_user_repo_path(&value))
-        .transpose()?
-        .unwrap_or_default();
-    let mut clipboard =
-        Clipboard::new().map_err(|error| format!("Failed to access clipboard: {error}"))?;
-
-    let file_list = read_clipboard_file_list(&mut clipboard);
-    if !file_list.is_empty() {
-        return paste_clipboard_file_list(&root, &dest_dir, &file_list);
-    }
-
-    if let Some(image_bytes) = read_clipboard_image_png(&mut clipboard)? {
-        return write_clipboard_image_file(&root, &dest_dir, &image_bytes);
-    }
-
-    Err("No clipboard files or image found".to_string())
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PastedFile {
-    relative_path: String,
-    bytes: Vec<u8>,
-}
-
-fn read_clipboard_file_list(clipboard: &mut Clipboard) -> Vec<PathBuf> {
-    clipboard
-        .get()
-        .file_list()
-        .map(|paths| paths.into_iter().collect())
-        .unwrap_or_default()
-}
-
-fn read_clipboard_image_png(clipboard: &mut Clipboard) -> Result<Option<Vec<u8>>, String> {
-    let image = match clipboard.get().image() {
-        Ok(image) => image,
-        Err(_) => return Ok(None),
-    };
-    let rgba_bytes = image.bytes.into_owned();
-    let mut encoded = Cursor::new(Vec::new());
-    image::codecs::png::PngEncoder::new(&mut encoded)
-        .write_image(
-            &rgba_bytes,
-            image.width as u32,
-            image.height as u32,
-            image::ColorType::Rgba8.into(),
-        )
-        .map_err(|error| format!("Failed to encode clipboard image: {error}"))?;
-    Ok(Some(encoded.into_inner()))
-}
-
-fn paste_clipboard_file_list(
-    root: &Path,
-    dest_dir: &str,
-    file_list: &[PathBuf],
-) -> Result<Vec<String>, String> {
-    let project_root = root
-        .canonicalize()
-        .map_err(|error| format!("Failed to resolve project root: {error}"))?;
-    let destination_root = resolve_paste_destination_root(&project_root, dest_dir)?;
-    let mut written = Vec::new();
-
-    for source_path in file_list {
-        let canonical_source = source_path
-            .canonicalize()
-            .map_err(|error| format!("Failed to read pasted item: {error}"))?;
-        let file_name = canonical_source
-            .file_name()
-            .ok_or_else(|| "Pasted item has no file name".to_string())?;
-        let target = unique_target_path(&destination_root.join(file_name));
-        copy_pasted_path_into_project(&project_root, &canonical_source, &target, &mut written)?;
-    }
-
-    Ok(written)
-}
-
-fn write_clipboard_image_file(
-    root: &Path,
-    dest_dir: &str,
-    image_bytes: &[u8],
-) -> Result<Vec<String>, String> {
-    let project_root = root
-        .canonicalize()
-        .map_err(|error| format!("Failed to resolve project root: {error}"))?;
-    let destination_root = resolve_paste_destination_root(&project_root, dest_dir)?;
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0);
-    let target =
-        unique_target_path(&destination_root.join(format!("pasted-image-{timestamp}.png")));
-    let parent = target
-        .parent()
-        .ok_or_else(|| "Selected file has no parent directory".to_string())?;
-    fs::create_dir_all(parent).map_err(|error| format!("Failed to create directories: {error}"))?;
-    fs::write(&target, image_bytes)
-        .map_err(|error| format!("Failed to write clipboard image: {error}"))?;
-
-    Ok(vec![project_relative_path(&project_root, &target)?])
-}
-
-fn resolve_paste_destination_root(root: &Path, dest_dir: &str) -> Result<PathBuf, String> {
-    if dest_dir.is_empty() {
-        return Ok(root.to_path_buf());
-    }
-
-    let destination = resolve_new_repo_child_path(root, dest_dir)?;
-    fs::create_dir_all(&destination)
-        .map_err(|error| format!("Failed to create paste destination: {error}"))?;
-    destination
-        .canonicalize()
-        .map_err(|error| format!("Failed to resolve paste destination: {error}"))
-}
-
-fn copy_pasted_path_into_project(
-    project_root: &Path,
-    source: &Path,
-    target: &Path,
-    written: &mut Vec<String>,
-) -> Result<(), String> {
-    let metadata = fs::metadata(source)
-        .map_err(|error| format!("Failed to read pasted item metadata: {error}"))?;
-
-    if metadata.is_dir() {
-        fs::create_dir_all(target)
-            .map_err(|error| format!("Failed to create pasted directory: {error}"))?;
-        let mut entries = fs::read_dir(source)
-            .map_err(|error| format!("Failed to read pasted directory: {error}"))?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| format!("Failed to read pasted directory: {error}"))?;
-        entries.sort_by_key(|entry| entry.path());
-
-        for entry in entries {
-            let child_source = entry.path();
-            let child_target = target.join(entry.file_name());
-            copy_pasted_path_into_project(project_root, &child_source, &child_target, written)?;
-        }
-        return Ok(());
-    }
-
-    if !metadata.is_file() {
-        return Ok(());
-    }
-
-    let parent = target
-        .parent()
-        .ok_or_else(|| "Selected file has no parent directory".to_string())?;
-    fs::create_dir_all(parent).map_err(|error| format!("Failed to create directories: {error}"))?;
-    fs::copy(source, target).map_err(|error| format!("Failed to copy pasted file: {error}"))?;
-    written.push(project_relative_path(project_root, target)?);
-    Ok(())
-}
-
-fn project_relative_path(root: &Path, target: &Path) -> Result<String, String> {
-    target
-        .strip_prefix(root)
-        .map_err(|error| format!("Failed to resolve pasted file path: {error}"))
-        .map(|relative| relative.to_string_lossy().replace('\\', "/"))
-}
-
-/// Return a non-conflicting target path by appending a numeric suffix to the
-/// file stem when `path` already exists.
-fn unique_target_path(path: &Path) -> PathBuf {
-    if !path.exists() {
-        return path.to_path_buf();
-    }
-    let parent = path.parent().unwrap_or_else(|| Path::new(""));
-    let stem = path
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or("file");
-    let ext = path.extension().and_then(|value| value.to_str());
-    let mut index = 1;
-    loop {
-        let candidate_name = match ext {
-            Some(extension) => format!("{stem} ({index}).{extension}"),
-            None => format!("{stem} ({index})"),
-        };
-        let candidate = parent.join(&candidate_name);
-        if !candidate.exists() {
-            return candidate;
-        }
-        index += 1;
-    }
-}
-
 #[tauri::command]
 fn rename_project_file(path: String, from_path: String, to_path: String) -> Result<String, String> {
     let root = workspace_root(&path)?;
@@ -1534,7 +1289,7 @@ fn project_root(path: &str) -> Result<PathBuf, String> {
     Ok(canonical)
 }
 
-fn workspace_root(path: &str) -> Result<PathBuf, String> {
+pub(crate) fn workspace_root(path: &str) -> Result<PathBuf, String> {
     let root = project_root(path)?;
     Ok(discover_repository_root(&root)?.unwrap_or(root))
 }
@@ -2132,7 +1887,7 @@ fn worktree_changed_files(root: &Path) -> Result<Vec<TreeFile>, String> {
     parse_porcelain_v1_z_status(&status)
 }
 
-fn normalize_user_repo_path(path: &str) -> Result<String, String> {
+pub(crate) fn normalize_user_repo_path(path: &str) -> Result<String, String> {
     let trimmed = path.trim().trim_matches('"').replace('\\', "/");
     if trimmed
         .split('/')
@@ -2314,7 +2069,10 @@ fn resolve_repo_child_path(root: &Path, normalized: &str) -> Result<PathBuf, Str
     Ok(full_path)
 }
 
-fn resolve_new_repo_child_path(root: &Path, normalized: &str) -> Result<PathBuf, String> {
+pub(crate) fn resolve_new_repo_child_path(
+    root: &Path,
+    normalized: &str,
+) -> Result<PathBuf, String> {
     if normalized.is_empty() || Path::new(normalized).is_absolute() {
         return Err("Invalid file path".to_string());
     }
@@ -4817,57 +4575,6 @@ mod tests {
     }
 
     #[test]
-    fn write_pasted_files_writes_bytes_under_dest_dir() {
-        let repo = create_basic_repo();
-        fs::create_dir_all(repo.join("docs")).expect("create docs dir");
-
-        let written = write_pasted_files(
-            repo.to_string_lossy().to_string(),
-            Some("docs".to_string()),
-            vec![PastedFile {
-                relative_path: "notes.txt".to_string(),
-                bytes: b"hello paste\n".to_vec(),
-            }],
-        )
-        .expect("write pasted file");
-
-        assert_eq!(written, vec!["docs/notes.txt".to_string()]);
-        let content = fs::read(repo.join("docs").join("notes.txt")).expect("read pasted file");
-        assert_eq!(content, b"hello paste\n");
-
-        fs::remove_dir_all(repo).ok();
-    }
-
-    #[test]
-    fn write_pasted_files_appends_suffix_on_name_collision() {
-        let repo = create_basic_repo();
-        fs::write(repo.join("img.png"), b"original").expect("write existing file");
-
-        let written = write_pasted_files(
-            repo.to_string_lossy().to_string(),
-            None,
-            vec![PastedFile {
-                relative_path: "img.png".to_string(),
-                bytes: b"pasted".to_vec(),
-            }],
-        )
-        .expect("write colliding pasted file");
-
-        assert_eq!(written, vec!["img (1).png".to_string()]);
-        assert_eq!(
-            fs::read(repo.join("img (1).png")).expect("read pasted file"),
-            b"pasted"
-        );
-        // Original is untouched.
-        assert_eq!(
-            fs::read(repo.join("img.png")).expect("read original"),
-            b"original"
-        );
-
-        fs::remove_dir_all(repo).ok();
-    }
-
-    #[test]
     fn rename_repo_file_moves_files_when_destination_parent_exists() {
         let repo = create_basic_repo();
         fs::create_dir_all(repo.join("src")).expect("create src");
@@ -5334,7 +5041,6 @@ mod tests {
             &[
                 ("GIT_AUTHOR_NAME", "Alice Doe"),
                 ("GIT_AUTHOR_EMAIL", "alice@example.test"),
-            search_file_contents,
                 ("GIT_COMMITTER_DATE", "2024-05-20T15:30:00+00:00"),
             ],
         );
@@ -5492,8 +5198,8 @@ pub fn run() {
             get_file_blame,
             save_file_content,
             create_project_file,
-            write_pasted_files,
-            paste_clipboard_into_project,
+            clipboard_paste::write_pasted_files,
+            clipboard_paste::paste_clipboard_into_project,
             rename_project_file,
             delete_project_file,
             search_file_names,
