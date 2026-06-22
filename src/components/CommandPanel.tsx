@@ -214,6 +214,7 @@ export function CommandPanel({
                     lowerQuery={lowerQuery}
                     mode={mode}
                     result={result}
+                    resultIndex={virtualItem.index}
                     refCallback={(node) => {
                       resultsVirtualizer.measureElement(node);
                     }}
@@ -235,6 +236,7 @@ function CommandResultRow({
   lowerQuery,
   mode,
   result,
+  resultIndex,
   refCallback,
   onClick,
   onMouseEnter,
@@ -243,6 +245,7 @@ function CommandResultRow({
   lowerQuery: string;
   mode: "files" | "content";
   result: FileSearchResult;
+  resultIndex: number;
   refCallback(node: HTMLButtonElement | null): void;
   onClick(): void;
   onMouseEnter(): void;
@@ -255,6 +258,7 @@ function CommandResultRow({
     <button
       type="button"
       ref={refCallback}
+      data-index={resultIndex}
       className={[
         "command-result",
         "command-result-virtual-row",
