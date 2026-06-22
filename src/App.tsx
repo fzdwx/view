@@ -45,6 +45,7 @@ import { useGitWriteGuard } from "./hooks/useGitWriteGuard";
 import { useGitWriteActions } from "./hooks/useGitWriteActions";
 import { usePreviewTabs } from "./hooks/usePreviewTabs";
 import { useProjectFileActions } from "./hooks/useProjectFileActions";
+import { useProjectFilesystemPolling } from "./hooks/useProjectFilesystemPolling";
 import { useProjectSelectionActions } from "./hooks/useProjectSelectionActions";
 import { useRepositoryRemotePolling } from "./hooks/useRepositoryRemotePolling";
 import {
@@ -637,6 +638,9 @@ export function App() {
     refetchCommits: commitsQuery.refetch,
     refetchProjectFiles: projectFilesQuery.refetch,
     refetchRepository: repositoryQuery.refetch,
+  });
+  useProjectFilesystemPolling({
+    activeProjectPath,
   });
 
   function openFileSearchResult(result: FileSearchResult) {
