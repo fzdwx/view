@@ -1,4 +1,6 @@
-use super::files::{paste_clipboard_file_list, pasted_file, write_pasted_file_bytes};
+use super::files::{
+    paste_clipboard_file_list, paste_project_file_paths, pasted_file, write_pasted_file_bytes,
+};
 use super::text_paths::clipboard_text_file_list;
 use std::env;
 use std::fs;
@@ -258,6 +260,41 @@ fn paste_clipboard_file_list_rejects_directory_paste_into_itself() {
 
     assert_eq!(error, "Cannot paste a directory into itself");
     assert!(!project.join("copied-dir/nested/copied-dir").exists());
+
+    fs::remove_dir_all(project).ok();
+}
+
+#[test]
+fn paste_project_file_paths_copies_selected_dotfile_with_suffix() {
+    let project = create_plain_workspace();
+    fs::write(project.join(".gitignore"), "target\n").expect("write selected file");
+
+    let written = paste_project_file_paths(&project, &project, "", &[".gitignore".to_string()])
+        .expect("paste copied project file");
+
+    assert_eq!(written, vec![".gitignore (1)".to_string()]);
+    assert_eq!(
+        fs::read_to_string(project.join(".gitignore (1)")).expect("read pasted dotfile"),
+        "target\n"
+    );
+    assert_eq!(
+        fs::read_to_string(project.join(".gitignore")).expect("read original dotfile"),
+        "target\n"
+    );
+
+    fs::remove_dir_all(project).ok();
+}
+
+#[test]
+fn paste_project_file_paths_rejects_source_paths_outside_project() {
+    let project = create_plain_workspace();
+    fs::write(project.join("note.txt"), "note\n").expect("write selected file");
+
+    let error = paste_project_file_paths(&project, &project, "", &["../note.txt".to_string()])
+        .expect_err("reject escaped source path");
+
+    assert_eq!(error, "File path cannot contain ..");
+    assert!(!project.join("note (1).txt").exists());
 
     fs::remove_dir_all(project).ok();
 }

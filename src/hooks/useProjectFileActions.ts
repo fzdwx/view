@@ -1,8 +1,15 @@
-import { useCallback, type Dispatch, type SetStateAction } from "react";
+import {
+  useCallback,
+  useRef,
+  type Dispatch,
+  type MutableRefObject,
+  type SetStateAction,
+} from "react";
 import {
   createProjectFile,
   deleteProjectFile,
   pasteClipboardIntoProject,
+  pasteProjectFiles,
   renameProjectFile,
   writePastedFiles,
   type PastedFile,
@@ -16,6 +23,12 @@ import { useProjectFileStateRefresh } from "./useProjectFileStateRefresh";
 /// Cap pasted file size so a huge file does not flood the IPC channel with a
 /// multi-megabyte JSON number array.
 const MAX_PASTED_FILE_BYTES = 10 * 1024 * 1024;
+
+interface CopiedProjectFiles {
+  readonly clipboardText: string;
+  readonly paths: readonly string[];
+  readonly sourceProjectPath: string;
+}
 
 export interface UseProjectFileActionsOptions {
   readonly activeProject: SavedProject | undefined;
@@ -38,6 +51,7 @@ export interface UseProjectFileActionsOptions {
 }
 
 export interface ProjectFileActions {
+  readonly copyFileFromTree: (path: string | null) => Promise<void>;
   readonly createFileFromTree: (parentPath: string | null) => Promise<void>;
   readonly deleteFileFromTree: (path: string) => Promise<void>;
   readonly pasteClipboardFromTree: (destDir: string | null) => Promise<void>;
@@ -64,6 +78,7 @@ export function useProjectFileActions({
   setSelectedProjectPath,
 }: UseProjectFileActionsOptions): ProjectFileActions {
   const refreshProjectFileState = useProjectFileStateRefresh();
+  const copiedProjectFilesRef = useRef<CopiedProjectFiles | null>(null);
 
   const revealPastedFiles = useCallback(
     async (projectPath: string, written: readonly string[]) => {
@@ -135,6 +150,28 @@ export function useProjectFileActions({
         return;
       }
 
+      const copiedProjectFiles = await copiedProjectFilesForPaste(
+        copiedProjectFilesRef,
+      );
+      if (copiedProjectFiles) {
+        try {
+          const written = await pasteProjectFiles(
+            activeProject.activePath,
+            copiedProjectFiles.sourceProjectPath,
+            copiedProjectFiles.paths,
+            destDir,
+          );
+          await revealPastedFiles(activeProject.activePath, written);
+        } catch (error) {
+          await showNativeMessage(
+            error instanceof Error ? error.message : String(error),
+            { kind: "error" },
+          );
+          await refreshProjectFileState(activeProject.activePath);
+        }
+        return;
+      }
+
       try {
         const written = await pasteClipboardIntoProject(
           activeProject.activePath,
@@ -149,7 +186,32 @@ export function useProjectFileActions({
         });
       }
     },
-    [activeProject, revealPastedFiles],
+    [activeProject, refreshProjectFileState, revealPastedFiles],
+  );
+
+  const copyFileFromTree = useCallback(
+    async (filePath: string | null) => {
+      if (!activeProject || !filePath) {
+        return;
+      }
+
+      const clipboardText = projectFileClipboardText(
+        activeProject.activePath,
+        [filePath],
+      );
+      copiedProjectFilesRef.current = {
+        clipboardText,
+        paths: [filePath],
+        sourceProjectPath: activeProject.activePath,
+      };
+
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard
+          .writeText(clipboardText)
+          .catch(() => undefined);
+      }
+    },
+    [activeProject],
   );
 
   const createFileFromTree = useCallback(
@@ -292,6 +354,7 @@ export function useProjectFileActions({
   );
 
   return {
+    copyFileFromTree,
     createFileFromTree,
     deleteFileFromTree,
     pasteClipboardFromTree,
@@ -299,4 +362,43 @@ export function useProjectFileActions({
     refreshProjectFileState,
     renameFileFromTree,
   };
+}
+
+async function copiedProjectFilesForPaste(
+  copiedProjectFilesRef: MutableRefObject<CopiedProjectFiles | null>,
+): Promise<CopiedProjectFiles | null> {
+  const copiedProjectFiles = copiedProjectFilesRef.current;
+  if (!copiedProjectFiles) {
+    return null;
+  }
+
+  if (!navigator.clipboard?.readText) {
+    return copiedProjectFiles;
+  }
+
+  try {
+    const clipboardText = await navigator.clipboard.readText();
+    if (clipboardText === copiedProjectFiles.clipboardText) {
+      return copiedProjectFiles;
+    }
+    copiedProjectFilesRef.current = null;
+    return null;
+  } catch {
+    return copiedProjectFiles;
+  }
+}
+
+function projectFileClipboardText(
+  projectPath: string,
+  filePaths: readonly string[],
+): string {
+  return filePaths
+    .map((filePath) => absoluteProjectFilePath(projectPath, filePath))
+    .join("\n");
+}
+
+function absoluteProjectFilePath(projectPath: string, filePath: string): string {
+  const root = projectPath.replace(/[\\/]+$/, "");
+  const relative = filePath.replace(/^\/+/, "");
+  return `${root}/${relative}`;
 }

@@ -330,6 +330,7 @@ export function App() {
     setSelectedProjectPath,
   });
   const {
+    copyFileFromTree,
     createFileFromTree,
     deleteFileFromTree,
     pasteClipboardFromTree,
@@ -488,6 +489,9 @@ export function App() {
     },
     [pasteFilesFromTree],
   );
+  const handleProjectTreeCopyFile = useCallback(() => {
+    void copyFileFromTree(selectedProjectFile?.path ?? null);
+  }, [copyFileFromTree, selectedProjectFile?.path]);
   const handleProjectTreeDeleteFile = useCallback((path: string) => {
     void deleteFileFromTree(path);
   }, [deleteFileFromTree]);
@@ -825,26 +829,41 @@ export function App() {
       return;
     }
 
-    function handleNativePasteShortcut(event: globalThis.KeyboardEvent) {
+    function handleProjectFileClipboardShortcut(event: globalThis.KeyboardEvent) {
       if (
         event.defaultPrevented ||
         event.isComposing ||
         isPasteImportBlockedTarget(event.target) ||
         !(event.ctrlKey || event.metaKey) ||
-        event.altKey ||
-        event.key.toLowerCase() !== "v"
+        event.altKey
       ) {
         return;
       }
 
-      event.preventDefault();
-      const destDir = pasteDestinationFromSelectedPath(selectedProjectPath);
-      void pasteClipboardFromTree(destDir);
+      const key = event.key.toLowerCase();
+      if (key === "c" && selectedProjectFile) {
+        event.preventDefault();
+        handleProjectTreeCopyFile();
+        return;
+      }
+
+      if (key === "v") {
+        event.preventDefault();
+        const destDir = pasteDestinationFromSelectedPath(selectedProjectPath);
+        void pasteClipboardFromTree(destDir);
+      }
     }
 
-    window.addEventListener("keydown", handleNativePasteShortcut);
-    return () => window.removeEventListener("keydown", handleNativePasteShortcut);
-  }, [activeProject, pasteClipboardFromTree, selectedProjectPath]);
+    window.addEventListener("keydown", handleProjectFileClipboardShortcut);
+    return () =>
+      window.removeEventListener("keydown", handleProjectFileClipboardShortcut);
+  }, [
+    activeProject,
+    handleProjectTreeCopyFile,
+    pasteClipboardFromTree,
+    selectedProjectFile,
+    selectedProjectPath,
+  ]);
 
   useLayoutEffect(() => {
     syncRailPanelSizeVars(contentGridRef.current, panelSizes);

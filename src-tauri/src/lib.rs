@@ -2047,7 +2047,7 @@ fn resolve_existing_repo_file(root: &Path, file_path: &str) -> Result<(String, P
     Ok((normalized, canonical))
 }
 
-fn resolve_repo_child_path(root: &Path, normalized: &str) -> Result<PathBuf, String> {
+pub(crate) fn resolve_repo_child_path(root: &Path, normalized: &str) -> Result<PathBuf, String> {
     if normalized.is_empty() || Path::new(normalized).is_absolute() {
         return Err("Invalid file path".to_string());
     }
@@ -5200,6 +5200,7 @@ pub fn run() {
             create_project_file,
             clipboard_paste::write_pasted_files,
             clipboard_paste::paste_clipboard_into_project,
+            clipboard_paste::paste_project_files,
             rename_project_file,
             delete_project_file,
             search_file_names,

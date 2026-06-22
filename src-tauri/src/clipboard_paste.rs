@@ -12,7 +12,10 @@ use std::path::PathBuf;
 
 use crate::{normalize_user_repo_path, workspace_root};
 pub(crate) use files::PastedFile;
-use files::{paste_clipboard_file_list, write_clipboard_image_file, write_pasted_file_bytes};
+use files::{
+    paste_clipboard_file_list, paste_project_file_paths, write_clipboard_image_file,
+    write_pasted_file_bytes,
+};
 
 #[tauri::command]
 pub(crate) fn write_pasted_files(
@@ -50,6 +53,19 @@ pub(crate) fn paste_clipboard_into_project(
     }
 
     Err("No clipboard files or image found".to_string())
+}
+
+#[tauri::command]
+pub(crate) fn paste_project_files(
+    path: String,
+    source_path: String,
+    source_files: Vec<String>,
+    dest_dir: Option<String>,
+) -> Result<Vec<String>, String> {
+    let root = workspace_root(&path)?;
+    let source_root = workspace_root(&source_path)?;
+    let dest_dir = normalize_optional_dest_dir(dest_dir)?;
+    paste_project_file_paths(&source_root, &root, &dest_dir, &source_files)
 }
 
 fn normalize_optional_dest_dir(dest_dir: Option<String>) -> Result<String, String> {

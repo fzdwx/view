@@ -7,7 +7,7 @@ use super::target::{
     copy_file_to_new_target, ensure_existing_path_inside_root, ensure_path_inside_root,
     unique_target_path, write_new_file,
 };
-use crate::{normalize_user_repo_path, resolve_new_repo_child_path};
+use crate::{normalize_user_repo_path, resolve_new_repo_child_path, resolve_repo_child_path};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -79,6 +79,20 @@ pub(super) fn paste_clipboard_file_list(
     }
 
     Ok(written)
+}
+
+pub(super) fn paste_project_file_paths(
+    source_root: &Path,
+    destination_root: &Path,
+    dest_dir: &str,
+    source_paths: &[String],
+) -> Result<Vec<String>, String> {
+    let mut source_files = Vec::with_capacity(source_paths.len());
+    for source_path in source_paths {
+        let normalized = normalize_user_repo_path(source_path)?;
+        source_files.push(resolve_repo_child_path(source_root, &normalized)?);
+    }
+    paste_clipboard_file_list(destination_root, dest_dir, &source_files)
 }
 
 pub(super) fn write_clipboard_image_file(

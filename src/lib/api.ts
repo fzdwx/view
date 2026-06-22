@@ -357,6 +357,20 @@ export async function pasteClipboardIntoProject(
   });
 }
 
+export async function pasteProjectFiles(
+  path: string,
+  sourcePath: string,
+  sourceFiles: readonly string[],
+  destDir: string | null,
+): Promise<string[]> {
+  return invoke<string[]>("paste_project_files", {
+    path,
+    sourcePath,
+    sourceFiles,
+    destDir: destDir ?? null,
+  });
+}
+
 export async function renameProjectFile(
   path: string,
   fromPath: string,
