@@ -1,5 +1,5 @@
 import type { KeyboardEvent, ReactNode } from "react";
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { measureElement, useVirtualizer } from "@tanstack/react-virtual";
 import { Loader2, Search } from "lucide-react";
 import type { FileSearchResult } from "../lib/api";
@@ -46,32 +46,6 @@ export function CommandPanel({
   const resultsScrollRef = useRef<HTMLDivElement | null>(null);
   const hasQuery = query.trim().length > 0;
   const lowerQuery = useMemo(() => query.trim().toLowerCase(), [query]);
-  const estimateSize = mode === "content" ? CONTENT_RESULT_ESTIMATE : FILE_RESULT_ESTIMATE;
-  const resultsVirtualizer = useVirtualizer<HTMLDivElement, HTMLButtonElement>({
-    count: results.length,
-    getScrollElement: () => resultsScrollRef.current,
-    directDomUpdates: true,
-    directDomUpdatesMode: "transform",
-    estimateSize: () => estimateSize,
-    getItemKey: (index) => `${results[index]?.path ?? index}:${results[index]?.lineNumber ?? "file"}`,
-    measureElement,
-    overscan: mode === "content" ? 10 : 14,
-    useAnimationFrameWithResizeObserver: true,
-  });
-
-  useEffect(() => {
-    if (!open || !results[activeIndex]) {
-      return;
-    }
-    resultsVirtualizer.scrollToIndex(activeIndex, {
-      align: "auto",
-      behavior: "smooth",
-    });
-  }, [activeIndex, open, results, resultsVirtualizer]);
-
-  useLayoutEffect(() => {
-    resultsScrollRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
-  }, [mode, query]);
 
   useEffect(() => {
     if (!open) {
@@ -153,17 +127,17 @@ export function CommandPanel({
       <section className="command-panel">
         <div className="command-input-row">
           <Search size={17} />
-         <input
-           ref={inputRef}
-           value={query}
+          <input
+            ref={inputRef}
+            value={query}
             aria-label={mode === "content" ? "Search file contents" : "Search files by name or path"}
-           onChange={(event) => onChangeQuery(event.target.value)}
-           placeholder={
-             mode === "content"
-               ? "Search file contents…"
-               : "Search files by name or path…"
-           }
-         />
+            onChange={(event) => onChangeQuery(event.target.value)}
+            placeholder={
+              mode === "content"
+                ? "Search file contents…"
+                : "Search files by name or path…"
+            }
+          />
           {loading ? <Loader2 className="spin" size={16} /> : null}
         </div>
         <div className="command-context">
@@ -205,30 +179,84 @@ export function CommandPanel({
               </div>
             </div>
           ) : (
-            <div ref={resultsVirtualizer.containerRef} className="command-results-spacer">
-              {resultsVirtualizer.getVirtualItems().map((virtualItem) => {
-                const result = results[virtualItem.index];
-                return (
-                  <CommandResultRow
-                    key={virtualItem.key}
-                    active={virtualItem.index === activeIndex}
-                    lowerQuery={lowerQuery}
-                    mode={mode}
-                    result={result}
-                    resultIndex={virtualItem.index}
-                    refCallback={(node) => {
-                      resultsVirtualizer.measureElement(node);
-                    }}
-                    onClick={() => onOpenResult(result)}
-                    onMouseEnter={() => onSelectIndex(virtualItem.index)}
-                  />
-                );
-              })}
-            </div>
+            <CommandResultList
+              key={mode}
+              results={results}
+              activeIndex={activeIndex}
+              lowerQuery={lowerQuery}
+              mode={mode}
+              scrollRef={resultsScrollRef}
+              onOpenResult={onOpenResult}
+              onSelectIndex={onSelectIndex}
+            />
           )}
         </div>
       </section>
     </dialog>
+  );
+}
+
+function CommandResultList({
+  results,
+  activeIndex,
+  lowerQuery,
+  mode,
+  scrollRef,
+  onOpenResult,
+  onSelectIndex,
+}: {
+  results: FileSearchResult[];
+  activeIndex: number;
+  lowerQuery: string;
+  mode: "files" | "content";
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  onOpenResult(result: FileSearchResult): void;
+  onSelectIndex(index: number): void;
+}) {
+  const estimateSize = mode === "content" ? CONTENT_RESULT_ESTIMATE : FILE_RESULT_ESTIMATE;
+  const resultsVirtualizer = useVirtualizer<HTMLDivElement, HTMLButtonElement>({
+    count: results.length,
+    getScrollElement: () => scrollRef.current,
+    directDomUpdates: true,
+    directDomUpdatesMode: "transform",
+    estimateSize: () => estimateSize,
+    getItemKey: (index) => `${results[index]?.path ?? index}:${results[index]?.lineNumber ?? "file"}`,
+    measureElement,
+    overscan: mode === "content" ? 10 : 14,
+    useAnimationFrameWithResizeObserver: true,
+  });
+
+  useEffect(() => {
+    if (!results[activeIndex]) {
+      return;
+    }
+    resultsVirtualizer.scrollToIndex(activeIndex, {
+      align: "auto",
+      behavior: "smooth",
+    });
+  }, [activeIndex, results, resultsVirtualizer]);
+
+  return (
+    <div ref={resultsVirtualizer.containerRef} className="command-results-spacer">
+      {resultsVirtualizer.getVirtualItems().map((virtualItem) => {
+        const result = results[virtualItem.index];
+        return (
+          <CommandResultRow
+            key={virtualItem.key}
+            active={virtualItem.index === activeIndex}
+            lowerQuery={lowerQuery}
+            mode={mode}
+            result={result}
+            resultIndex={virtualItem.index}
+            refCallback={(node) => {
+              resultsVirtualizer.measureElement(node);
+            }}
+            onClick={() => onOpenResult(result)}
+            onMouseEnter={() => onSelectIndex(virtualItem.index)}
+          />
+        );
+      })}
+    </div>
   );
 }
 
@@ -388,6 +416,7 @@ function highlightMatch(text: string, query: string): ReactNode {
 
   return segments;
 }
+
 /**
  * Highlight matched ranges using exact byte offsets from the Rust grep.
  * matchRanges are [start, end) byte offsets within lineText.

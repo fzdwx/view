@@ -3,7 +3,7 @@ import {
   useQuery,
   type UseQueryResult,
 } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   type CommitInfo,
   type FileBlameLine,
@@ -133,6 +133,9 @@ export function useRepositoryProjectData({
   reflogFilter,
   selectedProjectPath,
 }: RepositoryProjectDataOptions): RepositoryProjectData {
+  const prevCommandModeRef = useRef(commandMode);
+  const modeChanged = prevCommandModeRef.current !== commandMode;
+  prevCommandModeRef.current = commandMode;
   const [debouncedCommitFilter, setDebouncedCommitFilter] = useState("");
   const [debouncedReflogFilter, setDebouncedReflogFilter] = useState("");
   const [knownCommitsEntry, setKnownCommitsEntry] = useState<{
@@ -292,7 +295,7 @@ export function useRepositoryProjectData({
     enabled: Boolean(
       activeProjectPath && commandOpen && debouncedCommandQuery.trim(),
     ),
-    placeholderData: keepPreviousData,
+    placeholderData: modeChanged ? undefined : keepPreviousData,
     retry: false,
   });
 
