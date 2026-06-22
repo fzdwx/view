@@ -10,7 +10,8 @@ export type ShortcutAction =
   | "prevTab"
   | "jumpToDiffFile"
   | "findFiles"
-  | "findInFiles";
+  | "findInFiles"
+  | "openFileTree";
 
 export interface AppSettings {
   uiFontFamily: string;
@@ -103,6 +104,7 @@ export const defaultAppSettings: AppSettings = {
     jumpToDiffFile: "F4",
     findFiles: "Mod+Shift+O",
     findInFiles: "Mod+Shift+F",
+    openFileTree: "Alt+1",
   },
 };
 
@@ -166,6 +168,11 @@ export const shortcutRows: readonly ShortcutRow[] = [
     action: "findInFiles",
     label: "Find in files",
     description: "Search file contents",
+  },
+  {
+    action: "openFileTree",
+    label: "Open file tree",
+    description: "Focus the file tree panel",
   },
 ];
 

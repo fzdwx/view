@@ -102,6 +102,14 @@ export function useAppKeyboardShortcuts({
         return;
       }
 
+      if (matchesShortcut(event, shortcuts.openFileTree)) {
+        event.preventDefault();
+        if (canUseProjectCommands) {
+          onSelectToolPanelView("project");
+        }
+        return;
+      }
+
       if (matchesShortcut(event, shortcuts.openTerminal)) {
         event.preventDefault();
         if (canUseProjectCommands) {
