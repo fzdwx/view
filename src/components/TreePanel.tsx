@@ -50,6 +50,7 @@ interface TreePanelProps {
   onDeleteFile?(path: string): void;
   onPasteFiles?(files: File[], destDir: string | null): void;
   onRenameFile?(fromPath: string, toPath: string): void;
+  onRunScript?(): void;
   gitFileActions?: TreeGitFileActions;
   onSelectPath(path: string): void;
 }
@@ -68,6 +69,7 @@ export const TreePanel = memo(function TreePanel({
   onDeleteFile,
   onPasteFiles,
   onRenameFile,
+  onRunScript,
   gitFileActions,
   onSelectPath,
 }: TreePanelProps) {
@@ -250,6 +252,7 @@ export const TreePanel = memo(function TreePanel({
           gitFileActions,
           onCreateFile,
           onDeleteFile,
+          onRunScript,
         })
           ? (item, context) => (
               <TreeContextMenu
@@ -263,9 +266,10 @@ export const TreePanel = memo(function TreePanel({
                 gitFileActions={gitFileActions}
                 onCreateFile={onCreateFile}
                 onDeleteFile={onDeleteFile}
+                onRunScript={onRunScript}
                 onStartRename={
                   onRenameFile
-                    ? (path) => {
+                    ? (path: string) => {
                         context.close({ restoreFocus: false });
                         model.startRenaming(path);
                       }

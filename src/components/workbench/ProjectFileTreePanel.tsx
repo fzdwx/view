@@ -17,6 +17,7 @@ export interface ProjectFileTreePanelProps {
   readonly onPasteFiles?: (files: File[], destDir: string | null) => void;
   readonly onDragStart?: (event: DragEvent<HTMLDivElement>) => void;
   readonly onRenameFile: (fromPath: string, toPath: string) => void;
+  readonly onRunScript?: () => void;
   readonly onSelectPath: (path: string) => void;
 }
 
@@ -33,6 +34,7 @@ export function ProjectFileTreePanel({
   onDragStart,
   onPasteFiles,
   onRenameFile,
+  onRunScript,
   onSelectPath,
 }: ProjectFileTreePanelProps) {
   return (
@@ -52,6 +54,7 @@ export function ProjectFileTreePanel({
           onDeleteFile={onDeleteFile}
           onPasteFiles={onPasteFiles}
           onRenameFile={onRenameFile}
+          onRunScript={onRunScript}
           onSelectPath={onSelectPath}
         />
       ) : (

@@ -6,6 +6,7 @@ import {
   FilePlus2,
   Minus,
   Pencil,
+  Play,
   Plus,
   RotateCcw,
   Trash2,
@@ -25,7 +26,6 @@ export interface TreeGitFileActions {
   readonly onStageFile?: (path: string) => void;
   readonly onUnstageFile?: (path: string) => void;
 }
-
 interface TreeContextMenuProps {
   readonly context: ContextMenuOpenContext;
   readonly file: TreeFile | null;
@@ -34,6 +34,7 @@ interface TreeContextMenuProps {
   readonly onCreateFile?: (parentPath: string | null) => void;
   readonly onDeleteFile?: (path: string) => void;
   readonly onStartRename?: (path: string) => void;
+  readonly onRunScript?: () => void;
 }
 
 interface GitContextMenuAction {
@@ -50,6 +51,7 @@ interface TreeContextMenuActionOptions {
   readonly gitFileActions?: TreeGitFileActions;
   readonly onCreateFile?: (parentPath: string | null) => void;
   readonly onDeleteFile?: (path: string) => void;
+  readonly onRunScript?: () => void;
 }
 
 // Pure helper co-located with the component for its callers; Fast Refresh is
@@ -60,11 +62,13 @@ export function hasTreeContextMenuActions({
   gitFileActions,
   onCreateFile,
   onDeleteFile,
+  onRunScript,
 }: TreeContextMenuActionOptions): boolean {
   return Boolean(
     onCreateFile ||
       onDeleteFile ||
       canStartRename ||
+      onRunScript ||
       gitFileActions?.onRestoreFile ||
       gitFileActions?.onStageFile ||
       gitFileActions?.onUnstageFile,
@@ -79,13 +83,14 @@ export function TreeContextMenu({
   onCreateFile,
   onDeleteFile,
   onStartRename,
+  onRunScript,
 }: TreeContextMenuProps) {
   const parentPath =
     item.kind === "directory" ? item.path : parentPathFromTreePath(item.path);
   const gitActions = buildGitContextMenuActions(file, gitFileActions, context);
   const hasFileActions = Boolean(onCreateFile || onStartRename || onDeleteFile);
 
-  if (!hasFileActions && gitActions.length === 0) {
+  if (!hasFileActions && gitActions.length === 0 && !onRunScript) {
     return null;
   }
 
@@ -108,6 +113,19 @@ export function TreeContextMenu({
           {action.label}
         </button>
       ))}
+      {onRunScript ? (
+        <button
+          role="menuitem"
+          type="button"
+          onClick={() => {
+            context.close();
+            onRunScript();
+          }}
+        >
+          <Play size={13} />
+          Run…
+        </button>
+      ) : null}
       {onCreateFile ? (
         <button
           role="menuitem"

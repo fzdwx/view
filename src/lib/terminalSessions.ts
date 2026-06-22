@@ -22,6 +22,8 @@ export interface TerminalTab {
   /** Set when the PTY exits so the tab can render a closed state. */
   readonly closed: boolean;
   readonly exitCode: number | null;
+  /** Command to run once the PTY session is ready. */
+  readonly pendingCommand: string | null;
 }
 
 export interface TerminalWorkspace {
@@ -75,6 +77,7 @@ export function createInitialTerminalWorkspace(
         session: null,
         closed: false,
         exitCode: null,
+        pendingCommand: null,
       },
     ],
     activeTabId: "terminal-1",
@@ -111,6 +114,7 @@ export function addTerminalTab(projectPath: string): void {
       session: null,
       closed: false,
       exitCode: null,
+      pendingCommand: null,
     };
     return {
       tabs: [...workspace.tabs, tab],
@@ -118,6 +122,44 @@ export function addTerminalTab(projectPath: string): void {
       nextTabIndex: nextIndex,
     };
   });
+}
+
+/**
+ * Create a new terminal tab with a command to execute once the PTY is ready.
+ * The TerminalPanel reads pendingCommand after the session spawns and writes
+ * it to the PTY via the WebSocket input channel.
+ */
+export function runInTerminal(projectPath: string, command: string, label?: string): void {
+  updateTerminalWorkspace(projectPath, (workspace) => {
+    const nextIndex = workspace.nextTabIndex + 1;
+    const baseTitle = label ?? defaultTerminalBaseTitle(projectPath, nextIndex);
+    const tab: TerminalTab = {
+      id: `terminal-${Date.now()}-${nextIndex}`,
+      baseTitle,
+      title: baseTitle,
+      session: null,
+      closed: false,
+      exitCode: null,
+      pendingCommand: command,
+    };
+    return {
+      tabs: [...workspace.tabs, tab],
+      activeTabId: tab.id,
+      nextTabIndex: nextIndex,
+    };
+  });
+}
+
+/**
+ * Clear the pending command after it has been sent to the PTY.
+ */
+export function clearPendingCommand(projectPath: string, tabId: string): void {
+  updateTerminalWorkspace(projectPath, (workspace) => ({
+    ...workspace,
+    tabs: workspace.tabs.map((tab) =>
+      tab.id === tabId ? { ...tab, pendingCommand: null } : tab,
+    ),
+  }));
 }
 
 export function selectTerminalTab(projectPath: string, tabId: string): void {

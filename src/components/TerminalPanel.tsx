@@ -615,6 +615,8 @@ interface TerminalSessionViewProps {
   /** Existing live PTY session to reconnect to, or null to spawn a new one. */
   session: TerminalSessionInfo | null;
   terminalOptions: TerminalSpawnOptions;
+  /** Command to send to the PTY once the WebSocket is open. */
+  pendingCommand: string | null;
   onTitleChange(title: string | null): void;
   onSessionReady(session: TerminalSessionInfo): void;
   onClosed(exitCode: number | null): void;
@@ -628,6 +630,7 @@ function TerminalSessionView({
   projectPath,
   session,
   terminalOptions,
+  pendingCommand,
   onTitleChange,
   onSessionReady,
   onClosed,
@@ -635,6 +638,7 @@ function TerminalSessionView({
   const screenRef = useRef<HTMLDivElement | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const sessionIdRef = useRef<string | null>(null);
+  const pendingCommandSentRef = useRef(false);
   const pendingInputRef = useRef<TerminalInput[]>([]);
   const pendingInputBytesRef = useRef(0);
   const inputFlushTimerRef = useRef<number | null>(null);
@@ -1195,6 +1199,12 @@ function TerminalSessionView({
             if (activeRef.current) {
               screenElement.focus({ preventScroll: true });
             }
+            // Send any pending command (from runInTerminal) once the WebSocket
+            // is open. The command is followed by Enter to execute it.
+            if (pendingCommand && !pendingCommandSentRef.current) {
+              pendingCommandSentRef.current = true;
+              pendingInputRef.current.push(`${pendingCommand}\n`);
+            }
             flushInput();
           }
         };
@@ -1515,6 +1525,7 @@ export function TerminalPanel({ active, projectPath }: TerminalPanelProps) {
                   projectPath={projectPath}
                   session={activeTab.session}
                   terminalOptions={terminalOptions}
+                  pendingCommand={activeTab.pendingCommand}
                   onTitleChange={(title) => updateTabTitle(activeTab.id, title)}
                   onSessionReady={(session) => handleSessionReady(activeTab.id, session)}
                   onClosed={(exitCode) => handleClosed(activeTab.id, exitCode)}

@@ -53,7 +53,7 @@ import {
 } from "./hooks/useRepositoryWorkspaceData";
 import { useSelectedPathGuard } from "./hooks/useSelectedPathGuard";
 import { useWorkbenchDock } from "./hooks/useWorkbenchDock";
-import { type FileSearchResult, type ReflogEntry } from "./lib/api";
+import { type FileSearchResult, type ProjectScript, detectProjectScripts, type ReflogEntry } from "./lib/api";
 import { pasteDestinationFromSelectedPath } from "./lib/clipboardFiles";
 import {
   type SavedProject,
@@ -67,6 +67,7 @@ import {
   buildRailBottomPanelsStyle,
   buildRailWorkbenchGridStyle,
 } from "./lib/workbenchLayout";
+import { runInTerminal } from "./lib/terminalSessions";
 import type {
   RailItemId,
   RailLayout,
@@ -502,6 +503,53 @@ export function App() {
     },
     [openPreviewTab],
   );
+  const [runScriptState, setRunScriptState] = useState<{
+    loading: boolean;
+    scripts: ProjectScript[];
+    error: string | null;
+  }>({ loading: false, scripts: [], error: null });
+
+  const handleRunScript = useCallback(() => {
+    if (!activeProjectPath) {
+      return;
+    }
+    setRunScriptState({ loading: true, scripts: [], error: null });
+    detectProjectScripts(activeProjectPath)
+      .then((scripts) => {
+        if (scripts.length === 0) {
+          setRunScriptState({
+            loading: false,
+            scripts: [],
+            error: "No project scripts found. Open a project with package.json, Cargo.toml, Makefile, deno.json, or go.mod.",
+          });
+          return;
+        }
+        setRunScriptState({ loading: false, scripts, error: null });
+      })
+      .catch((error) => {
+        setRunScriptState({
+          loading: false,
+          scripts: [],
+          error: String(error ?? "Failed to detect project scripts"),
+        });
+      });
+  }, [activeProjectPath]);
+
+  const handleSelectScript = useCallback(
+    (script: ProjectScript) => {
+      if (!activeProjectPath) {
+        return;
+      }
+      runInTerminal(activeProjectPath, script.command, script.label);
+      setRunScriptState({ loading: false, scripts: [], error: null });
+      // Switch to terminal panel
+      const placement = findRailItemPlacement(railLayout, "terminal");
+      if (placement) {
+        selectRailItem(placement.side, placement.slot, "terminal");
+      }
+    },
+    [activeProjectPath, railLayout, selectRailItem],
+  );
   const clearSelectedProjectPath = useCallback(() => {
     setSelectedProjectPath(null);
   }, []);
@@ -767,6 +815,7 @@ export function App() {
       onDeleteFile={handleProjectTreeDeleteFile}
       onPasteFiles={handleProjectTreePasteFiles}
       onRenameFile={handleProjectTreeRenameFile}
+      onRunScript={handleRunScript}
       onSelectPath={handleProjectTreeSelectPath}
     />
   );
@@ -968,6 +1017,50 @@ export function App() {
           onCancel={closePullChoice}
           onPull={(mode) => void performPull(mode)}
         />
+      ) : null}
+
+      {runScriptState.loading || runScriptState.scripts.length > 0 || runScriptState.error ? (
+        <div
+          className="command-overlay"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setRunScriptState({ loading: false, scripts: [], error: null });
+            }
+          }}
+        >
+          <section className="command-panel" style={{ maxHeight: "min(420px, calc(100vh - 72px))" }}>
+            <div className="command-context">
+              <span>Run project scripts</span>
+              <kbd>Esc</kbd>
+            </div>
+            <div className="command-results">
+              {runScriptState.loading ? (
+                <div className="command-empty">
+                  <div className="empty-title">Detecting scripts…</div>
+                </div>
+              ) : runScriptState.error ? (
+                <div className="command-empty">
+                  <div className="empty-title">No scripts found</div>
+                  <div className="empty-copy">{runScriptState.error}</div>
+                </div>
+              ) : (
+                runScriptState.scripts.map((script) => (
+                  <button
+                    key={`${script.source}:${script.label}`}
+                    className="command-result command-result-file"
+                    type="button"
+                    onClick={() => handleSelectScript(script)}
+                  >
+                    <span className="command-result-main">
+                      <span>{script.label}</span>
+                      <small>{script.command}</small>
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          </section>
+        </div>
       ) : null}
 
       <section className="workspace">

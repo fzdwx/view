@@ -565,6 +565,16 @@ export async function listTerminalShells(): Promise<TerminalShell[]> {
   return invoke<TerminalShell[]>("list_terminal_shells");
 }
 
+export interface ProjectScript {
+  readonly label: string;
+  readonly command: string;
+  readonly source: string;
+}
+
+export async function detectProjectScripts(path: string): Promise<ProjectScript[]> {
+  return invoke<ProjectScript[]>("detect_project_scripts", { path });
+}
+
 function replaceEditorTextInBrowser(
   content: string,
   query: string,

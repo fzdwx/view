@@ -216,6 +216,169 @@ struct FileSearchResult {
     match_ranges: Vec<(u32, u32)>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectScript {
+    /// Display label, e.g. "dev", "build", "test".
+    label: String,
+    /// Full command to execute, e.g. "npm run dev", "cargo build".
+    command: String,
+    /// Source type, e.g. "npm", "cargo", "make", "deno", "go".
+    source: String,
+}
+
+#[tauri::command]
+fn detect_project_scripts(path: String) -> Result<Vec<ProjectScript>, String> {
+    let root = workspace_root(&path)?;
+    let mut scripts = Vec::new();
+
+    // package.json — npm/yarn/pnpm scripts
+    let pkg_path = root.join("package.json");
+    if pkg_path.is_file() {
+        if let Ok(content) = fs::read_to_string(&pkg_path) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(scripts_obj) = json.get("scripts").and_then(|v| v.as_object()) {
+                    for (name, value) in scripts_obj {
+                        if let Some(_cmd) = value.as_str() {
+                            let pkg_manager = detect_package_manager(&root);
+                            let run_cmd = if pkg_manager == "yarn" {
+                                format!("yarn {name}")
+                            } else if pkg_manager == "pnpm" {
+                                format!("pnpm {name}")
+                            } else {
+                                format!("npm run {name}")
+                            };
+                            scripts.push(ProjectScript {
+                                label: name.clone(),
+                                command: run_cmd,
+                                source: "npm".to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Cargo.toml — cargo subcommands
+    let cargo_path = root.join("Cargo.toml");
+    if cargo_path.is_file() {
+        let cargo_scripts = [
+            ("build", "cargo build"),
+            ("run", "cargo run"),
+            ("test", "cargo test"),
+            ("check", "cargo check"),
+            ("clippy", "cargo clippy"),
+            ("fmt", "cargo fmt"),
+            ("doc", "cargo doc"),
+        ];
+        for (label, cmd) in cargo_scripts {
+            scripts.push(ProjectScript {
+                label: label.to_string(),
+                command: cmd.to_string(),
+                source: "cargo".to_string(),
+            });
+        }
+    }
+
+    // Makefile — make targets
+    let makefile_path = root.join("Makefile");
+    if makefile_path.is_file() {
+        if let Ok(content) = fs::read_to_string(&makefile_path) {
+            for line in content.lines() {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with('#') || trimmed.is_empty() {
+                    continue;
+                }
+                if let Some(colon_pos) = trimmed.find(':') {
+                    let target = trimmed[..colon_pos].trim();
+                    // Skip pattern rules and special targets
+                    if target.is_empty()
+                        || target.contains('%')
+                        || target.starts_with('.')
+                    {
+                        continue;
+                    }
+                    scripts.push(ProjectScript {
+                        label: target.to_string(),
+                        command: format!("make {target}"),
+                        source: "make".to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    // deno.json — deno tasks
+    let deno_path = root.join("deno.json");
+    if !deno_path.is_file() {
+        let deno_path2 = root.join("deno.jsonc");
+        if deno_path2.is_file() {
+            if let Ok(content) = fs::read_to_string(&deno_path2) {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(tasks) = json.get("tasks").and_then(|v| v.as_object()) {
+                        for (name, value) in tasks {
+                            if let Some(_cmd) = value.as_str() {
+                                scripts.push(ProjectScript {
+                                    label: name.clone(),
+                                    command: format!("deno task {name}"),
+                                    source: "deno".to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else if let Ok(content) = fs::read_to_string(&deno_path) {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+            if let Some(tasks) = json.get("tasks").and_then(|v| v.as_object()) {
+                for (name, value) in tasks {
+                    if let Some(_cmd) = value.as_str() {
+                        scripts.push(ProjectScript {
+                            label: name.clone(),
+                            command: format!("deno task {name}"),
+                            source: "deno".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // go.mod — go commands
+    let gomod_path = root.join("go.mod");
+    if gomod_path.is_file() {
+        let go_scripts = [
+            ("run", "go run ."),
+            ("build", "go build"),
+            ("test", "go test ./..."),
+            ("fmt", "go fmt ./..."),
+            ("vet", "go vet ./..."),
+            ("mod tidy", "go mod tidy"),
+        ];
+        for (label, cmd) in go_scripts {
+            scripts.push(ProjectScript {
+                label: label.to_string(),
+                command: cmd.to_string(),
+                source: "go".to_string(),
+            });
+        }
+    }
+
+    Ok(scripts)
+}
+
+fn detect_package_manager(root: &Path) -> &'static str {
+    if root.join("pnpm-lock.yaml").is_file() {
+        "pnpm"
+    } else if root.join("yarn.lock").is_file() {
+        "yarn"
+    } else {
+        "npm"
+    }
+}
+
 #[derive(Clone)]
 struct EditorTextMatchRange {
     start_byte: usize,
@@ -5171,7 +5334,7 @@ mod tests {
             &[
                 ("GIT_AUTHOR_NAME", "Alice Doe"),
                 ("GIT_AUTHOR_EMAIL", "alice@example.test"),
-                ("GIT_AUTHOR_DATE", "2024-05-20T15:30:00+00:00"),
+            search_file_contents,
                 ("GIT_COMMITTER_DATE", "2024-05-20T15:30:00+00:00"),
             ],
         );
@@ -5335,6 +5498,7 @@ pub fn run() {
             delete_project_file,
             search_file_names,
             search_file_contents,
+            detect_project_scripts,
             search_editor_text,
             replace_editor_text,
             fetch_remotes,
