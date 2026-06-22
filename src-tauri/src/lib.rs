@@ -2507,11 +2507,13 @@ fn build_terminal_command(shell: &str, cwd: &Path) -> CommandBuilder {
     if !trimmed.is_empty() && Path::new(trimmed).is_file() {
         let mut command = CommandBuilder::new(trimmed);
         command.cwd(cwd);
+        command.env_remove("NO_COLOR");
         return command;
     }
 
     let mut command = CommandBuilder::new_default_prog();
     command.cwd(cwd);
+    command.env_remove("NO_COLOR");
     command
 }
 
@@ -4057,6 +4059,22 @@ mod tests {
             serde_json::from_str(&terminal_frame(&term, None).expect("terminal frame"))
                 .expect("frame json");
         assert_eq!(frame["cursorShape"], "bar");
+    }
+
+    #[test]
+    fn terminal_command_removes_host_no_color_env() {
+        let repo = create_basic_repo();
+        let original_no_color = std::env::var_os("NO_COLOR");
+        std::env::set_var("NO_COLOR", "1");
+
+        let command = build_terminal_command("", repo.as_path());
+
+        if let Some(value) = original_no_color {
+            std::env::set_var("NO_COLOR", value);
+        } else {
+            std::env::remove_var("NO_COLOR");
+        }
+        assert_eq!(command.get_env("NO_COLOR"), None);
     }
 
     #[test]
