@@ -1,4 +1,11 @@
 import { clamp } from "./numeric";
+import {
+  railBottomInnerPanelMin,
+  railBottomPanelFallbackMax,
+  railBottomPanelMin,
+  railPanelFallbackMax,
+  railSidePanelMin,
+} from "./workbenchPanelSizing";
 import { isGitPanelId } from "./workbenchGrid";
 import {
   defaultGitPanelOrder,
@@ -273,28 +280,28 @@ function normalizePanelSizes(value: unknown): PanelSizes {
     leftTop: normalizePanelSize(
       record.leftTop,
       typeof record.tree === "number" ? record.tree : defaultPanelSizes.leftTop,
-      220,
-      560,
+      railSidePanelMin,
+      railPanelFallbackMax,
     ),
     rightTop: normalizePanelSize(
       record.rightTop,
       typeof record.sideDock === "number"
         ? record.sideDock
         : defaultPanelSizes.rightTop,
-      220,
-      560,
+      railSidePanelMin,
+      railPanelFallbackMax,
     ),
     bottom: normalizePanelSize(
       record.bottom,
       typeof record.log === "number" ? record.log : defaultPanelSizes.bottom,
-      180,
-      560,
+      railBottomPanelMin,
+      railBottomPanelFallbackMax,
     ),
     bottomLeft: normalizePanelSize(
       record.bottomLeft,
       defaultPanelSizes.bottomLeft,
-      260,
-      1400,
+      railBottomInnerPanelMin,
+      railPanelFallbackMax,
     ),
   };
 }

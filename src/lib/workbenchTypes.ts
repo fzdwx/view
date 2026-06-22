@@ -10,6 +10,8 @@ export type RailSide = "left" | "right";
 
 export type RailSlot = "top" | "bottom";
 
+export type RailPanelSizeKey = "leftTop" | "rightTop" | "bottom" | "bottomLeft";
+
 export interface RailPlacement {
   readonly side: RailSide;
   readonly slot: RailSlot;

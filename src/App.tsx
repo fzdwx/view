@@ -46,6 +46,7 @@ import { useGitWriteActions } from "./hooks/useGitWriteActions";
 import { usePreviewTabs } from "./hooks/usePreviewTabs";
 import { useProjectFileActions } from "./hooks/useProjectFileActions";
 import { useProjectFilesystemPolling } from "./hooks/useProjectFilesystemPolling";
+import { useRailPanelResize } from "./hooks/useRailPanelResize";
 import { useProjectSelectionActions } from "./hooks/useProjectSelectionActions";
 import { useRepositoryRemotePolling } from "./hooks/useRepositoryRemotePolling";
 import {
@@ -72,13 +73,12 @@ import { runInTerminal } from "./lib/terminalSessions";
 import type {
   RailItemId,
   RailLayout,
+  RailPanelSizeKey,
   RailSlot,
   RailSide,
   PanelSizes,
   ToolPanelId,
 } from "./lib/workbenchTypes";
-
-type RailPanelSizeKey = "leftTop" | "rightTop" | "bottom" | "bottomLeft";
 
 type RailGridStyle = CSSProperties & {
   readonly "--rail-left-top-width": string;
@@ -908,54 +908,27 @@ export function App() {
     [resizePanel],
   );
 
-  const handleResizeLeftTop = useCallback(
-    (delta: number) => {
-      previewRailPanelResize("leftTop", delta, 220, 560);
-    },
-    [previewRailPanelResize],
-  );
-  const handleResizeLeftTopEnd = useCallback(
-    (delta: number) => {
-      commitRailPanelResize("leftTop", delta, 220, 560);
-    },
-    [commitRailPanelResize],
-  );
-  const handleResizeRightTop = useCallback(
-    (delta: number) => {
-      previewRailPanelResize("rightTop", -delta, 220, 560);
-    },
-    [previewRailPanelResize],
-  );
-  const handleResizeRightTopEnd = useCallback(
-    (delta: number) => {
-      commitRailPanelResize("rightTop", -delta, 220, 560);
-    },
-    [commitRailPanelResize],
-  );
-  const handleResizeBottom = useCallback(
-    (delta: number) => {
-      previewRailPanelResize("bottom", -delta, 180, 560);
-    },
-    [previewRailPanelResize],
-  );
-  const handleResizeBottomEnd = useCallback(
-    (delta: number) => {
-      commitRailPanelResize("bottom", -delta, 180, 560);
-    },
-    [commitRailPanelResize],
-  );
-  const handleResizeBottomLeft = useCallback(
-    (delta: number) => {
-      previewRailPanelResize("bottomLeft", delta, 260, 1400);
-    },
-    [previewRailPanelResize],
-  );
-  const handleResizeBottomLeftEnd = useCallback(
-    (delta: number) => {
-      commitRailPanelResize("bottomLeft", delta, 260, 1400);
-    },
-    [commitRailPanelResize],
-  );
+  const {
+    handleResizeLeftTop,
+    handleResizeLeftTopEnd,
+    handleResizeRightTop,
+    handleResizeRightTopEnd,
+    handleResizeBottom,
+    handleResizeBottomEnd,
+    handleResizeBottomLeft,
+    handleResizeBottomLeftEnd,
+  } = useRailPanelResize({
+    contentGridRef,
+    panelSizesRef,
+    hasBottomPanels,
+    hasLeftBottomPanel,
+    hasLeftTopPanel,
+    hasRightBottomPanel,
+    hasRightTopPanel,
+    previewRailPanelResize,
+    commitRailPanelResize,
+    resizePanel,
+  });
 
   const isRailItemActive = useCallback(
     (side: "left" | "right") => (item: RailItemId) => {
