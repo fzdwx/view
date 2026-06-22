@@ -2,30 +2,20 @@ import type {
   ContextMenuItem,
   ContextMenuOpenContext,
 } from "@pierre/trees";
-import {
-  FilePlus2,
-  Minus,
-  Pencil,
-  Play,
-  Plus,
-  RotateCcw,
-  Trash2,
-  X,
-} from "lucide-react";
-import type { ReactNode } from "react";
+import { FilePlus2, Pencil, Play, Trash2 } from "lucide-react";
+import { useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { TreeFile } from "../lib/api";
+import { clamp } from "../lib/numeric";
+import {
+  buildGitContextMenuActions,
+  type TreeGitFileActions,
+} from "./treeGitContextMenuActions";
 
-export type TreeGitFileActionKind = "restore" | "stage" | "unstage";
-
-export interface TreeGitFileActions {
-  readonly canRun: boolean;
-  readonly pendingKind: TreeGitFileActionKind | null;
-  readonly pendingPath: string | null;
-  readonly pendingTitle: string | null;
-  readonly onRestoreFile?: (path: string) => void;
-  readonly onStageFile?: (path: string) => void;
-  readonly onUnstageFile?: (path: string) => void;
-}
+export type {
+  TreeGitFileActionKind,
+  TreeGitFileActions,
+} from "./treeGitContextMenuActions";
 interface TreeContextMenuProps {
   readonly context: ContextMenuOpenContext;
   readonly file: TreeFile | null;
@@ -37,15 +27,6 @@ interface TreeContextMenuProps {
   readonly onRunScript?: () => void;
 }
 
-interface GitContextMenuAction {
-  readonly disabled: boolean;
-  readonly icon: ReactNode;
-  readonly key: TreeGitFileActionKind;
-  readonly label: string;
-  readonly title: string;
-  readonly onSelect: () => void;
-}
-
 interface TreeContextMenuActionOptions {
   readonly canStartRename?: boolean;
   readonly gitFileActions?: TreeGitFileActions;
@@ -53,6 +34,15 @@ interface TreeContextMenuActionOptions {
   readonly onDeleteFile?: (path: string) => void;
   readonly onRunScript?: () => void;
 }
+
+interface TreeContextMenuPosition {
+  readonly left: number;
+  readonly top: number;
+}
+
+const treeContextMenuViewportPadding = 8;
+const treeContextMenuGap = 8;
+const treeContextMenuEstimatedWidth = 152;
 
 // Pure helper co-located with the component for its callers; Fast Refresh is
 // not a concern for this non-component export.
@@ -85,20 +75,48 @@ export function TreeContextMenu({
   onStartRename,
   onRunScript,
 }: TreeContextMenuProps) {
+  const { anchorRect } = context;
   const parentPath =
     item.kind === "directory" ? item.path : parentPathFromTreePath(item.path);
   const gitActions = buildGitContextMenuActions(file, gitFileActions, context);
   const hasFileActions = Boolean(onCreateFile || onStartRename || onDeleteFile);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const [menuPosition, setMenuPosition] = useState(() =>
+    initialTreeContextMenuPosition(anchorRect),
+  );
+
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (!menu) {
+      return;
+    }
+    const rect = menu.getBoundingClientRect();
+    const nextPosition = placeTreeContextMenu(anchorRect, {
+      height: rect.height,
+      width: rect.width,
+    });
+    setMenuPosition((previousPosition) =>
+      previousPosition.left === nextPosition.left &&
+      previousPosition.top === nextPosition.top
+        ? previousPosition
+        : nextPosition,
+    );
+  }, [anchorRect]);
 
   if (!hasFileActions && gitActions.length === 0 && !onRunScript) {
     return null;
   }
 
-  return (
+  const menu = (
     <div
+      ref={menuRef}
       className="tree-context-menu"
       data-file-tree-context-menu-root="true"
       role="menu"
+      style={{
+        left: `${menuPosition.left}px`,
+        top: `${menuPosition.top}px`,
+      }}
     >
       {gitActions.map((action) => (
         <button
@@ -164,115 +182,49 @@ export function TreeContextMenu({
           Delete
         </button>
       ) : null}
-      <button role="menuitem" type="button" onClick={() => context.close()}>
-        <X size={13} />
-        Close
-      </button>
     </div>
   );
+
+  if (typeof document === "undefined") {
+    return menu;
+  }
+
+  return createPortal(menu, document.body);
 }
 
-function buildGitContextMenuActions(
-  file: TreeFile | null,
-  gitFileActions: TreeGitFileActions | undefined,
-  context: ContextMenuOpenContext,
-): GitContextMenuAction[] {
-  if (!file || !gitFileActions) {
-    return [];
-  }
-
-  const pendingTitle = pendingGitActionTitle(gitFileActions);
-  const conflict = file.conflict === true;
-  const actions: GitContextMenuAction[] = [];
-
-  if (hasStageableWorktreeChange(file) && gitFileActions.onStageFile) {
-    actions.push({
-      disabled: conflict || !gitFileActions.canRun,
-      icon: <Plus size={13} />,
-      key: "stage",
-      label: "Stage",
-      title:
-        pendingTitle ??
-        (conflict
-          ? "Resolve the conflict before staging this file."
-          : "Stage this file"),
-      onSelect: () => {
-        context.close();
-        gitFileActions.onStageFile?.(file.path);
-      },
-    });
-  }
-
-  if (file.staged === true && gitFileActions.onUnstageFile) {
-    actions.push({
-      disabled: conflict || !gitFileActions.canRun,
-      icon: <Minus size={13} />,
-      key: "unstage",
-      label: "Unstage",
-      title:
-        pendingTitle ??
-        (conflict
-          ? "Resolve the conflict before unstaging this file."
-          : "Unstage this file"),
-      onSelect: () => {
-        context.close();
-        gitFileActions.onUnstageFile?.(file.path);
-      },
-    });
-  }
-
-  if (
-    (hasRestorableWorktreeChange(file) || conflict) &&
-    gitFileActions.onRestoreFile
-  ) {
-    actions.push({
-      disabled: conflict || !gitFileActions.canRun,
-      icon: <RotateCcw size={13} />,
-      key: "restore",
-      label: "Restore/Discard",
-      title:
-        pendingTitle ??
-        (conflict
-          ? "Resolve the conflict before discarding changes."
-          : "Discard worktree changes in this file"),
-      onSelect: () => {
-        context.close();
-        gitFileActions.onRestoreFile?.(file.path);
-      },
-    });
-  }
-
-  return actions;
-}
-
-function hasStageableWorktreeChange(file: TreeFile): boolean {
-  return (
-    file.unstaged === true ||
-    file.untracked === true ||
-    (file.deleted === true && file.worktreeStatus === "D")
+function initialTreeContextMenuPosition(
+  anchorRect: ContextMenuOpenContext["anchorRect"],
+): TreeContextMenuPosition {
+  const left = Math.max(
+    treeContextMenuViewportPadding,
+    anchorRect.left - treeContextMenuEstimatedWidth - treeContextMenuGap,
   );
+  const top = Math.max(treeContextMenuViewportPadding, anchorRect.top);
+  return { left, top };
 }
 
-function hasRestorableWorktreeChange(file: TreeFile): boolean {
-  return file.unstaged === true || file.untracked === true;
-}
+function placeTreeContextMenu(
+  anchorRect: ContextMenuOpenContext["anchorRect"],
+  menuRect: { readonly height: number; readonly width: number },
+): TreeContextMenuPosition {
+  const maxLeft = Math.max(
+    treeContextMenuViewportPadding,
+    window.innerWidth - menuRect.width - treeContextMenuViewportPadding,
+  );
+  const preferredLeft = anchorRect.left - menuRect.width - treeContextMenuGap;
+  const fallbackRight = anchorRect.right + treeContextMenuGap;
+  const left =
+    preferredLeft >= treeContextMenuViewportPadding
+      ? preferredLeft
+      : clamp(fallbackRight, treeContextMenuViewportPadding, maxLeft);
 
-function pendingGitActionTitle(
-  gitFileActions: TreeGitFileActions,
-): string | null {
-  if (gitFileActions.canRun) {
-    return null;
-  }
+  const maxTop = Math.max(
+    treeContextMenuViewportPadding,
+    window.innerHeight - menuRect.height - treeContextMenuViewportPadding,
+  );
+  const top = clamp(anchorRect.top, treeContextMenuViewportPadding, maxTop);
 
-  if (gitFileActions.pendingTitle) {
-    return gitFileActions.pendingTitle;
-  }
-
-  if (gitFileActions.pendingPath) {
-    return `A Git ${gitFileActions.pendingKind ?? "file"} action is already running for ${gitFileActions.pendingPath}.`;
-  }
-
-  return "A Git write action is already running.";
+  return { left, top };
 }
 
 function parentPathFromTreePath(path: string): string | null {
