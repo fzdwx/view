@@ -579,6 +579,10 @@ export async function listTerminalShells(): Promise<TerminalShell[]> {
   return invoke<TerminalShell[]>("list_terminal_shells");
 }
 
+export async function openExternalUrl(url: string): Promise<void> {
+  return invoke<void>("open_external_url", { url });
+}
+
 export interface ProjectScript {
   readonly label: string;
   readonly command: string;

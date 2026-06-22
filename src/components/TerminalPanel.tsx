@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import type { CSSProperties } from "react";
+import type {
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  ReactNode,
+} from "react";
 import { Plus, TerminalSquare, X } from "lucide-react";
 import {
   isTauriRuntime,
+  openExternalUrl,
   terminalKill,
   terminalResize,
   terminalScroll,
@@ -23,6 +29,13 @@ import {
 } from "../lib/terminalSessions";
 import { type AppSettings, loadAppSettings, settingsChangedEvent } from "../lib/settings";
 import type { TerminalCursorStyle, TerminalSpawnOptions } from "../lib/api";
+import {
+  terminalBlockRects,
+  terminalBoxSegments,
+  type TerminalBlockRect,
+  type TerminalBoxSegments,
+} from "../lib/terminalGlyphs";
+import { terminalRunStyle } from "../lib/terminalRunStyle";
 
 interface TerminalPanelProps {
   active: boolean;
@@ -33,6 +46,7 @@ type TerminalRun = {
   text: string;
   fg?: string | null;
   bg?: string | null;
+  href?: string | null;
   bold: boolean;
   dim: boolean;
   italic: boolean;
@@ -129,6 +143,18 @@ function parsePixelSize(value: string | null | undefined): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+function snapTerminalMetricToDevicePixel(value: number | null): number | null {
+  if (value == null || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+
+  const devicePixelRatio =
+    Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0
+      ? window.devicePixelRatio
+      : 1;
+  return Math.max(1 / devicePixelRatio, Math.round(value * devicePixelRatio) / devicePixelRatio);
+}
+
 function measureTerminalCellMetrics(element: HTMLElement): TerminalCellMetrics {
   const computed = window.getComputedStyle(element);
   const probe = document.createElement("span");
@@ -146,7 +172,6 @@ function measureTerminalCellMetrics(element: HTMLElement): TerminalCellMetrics {
   probe.style.fontSize = computed.fontSize;
   probe.style.fontWeight = computed.fontWeight;
   probe.style.fontStyle = computed.fontStyle;
-  probe.style.fontStretch = computed.fontStretch;
   probe.style.lineHeight = computed.lineHeight;
   probe.style.letterSpacing = computed.letterSpacing;
   probe.style.fontVariantLigatures = "none";
@@ -156,16 +181,14 @@ function measureTerminalCellMetrics(element: HTMLElement): TerminalCellMetrics {
   const rect = probe.getBoundingClientRect();
   probe.remove();
 
-  const measuredWidth = rect.width / sample.length;
-  const measuredHeight =
+  const measuredWidth = snapTerminalMetricToDevicePixel(rect.width / sample.length);
+  const measuredHeight = snapTerminalMetricToDevicePixel(
     parsePixelSize(computed.lineHeight) ??
-    (Number.isFinite(rect.height) && rect.height > 0 ? rect.height : null);
+      (Number.isFinite(rect.height) && rect.height > 0 ? rect.height : null),
+  );
 
   return {
-    width:
-      Number.isFinite(measuredWidth) && measuredWidth > 0
-        ? measuredWidth
-        : DEFAULT_TERMINAL_CELL_METRICS.width,
+    width: measuredWidth ?? DEFAULT_TERMINAL_CELL_METRICS.width,
     height: measuredHeight ?? DEFAULT_TERMINAL_CELL_METRICS.height,
   };
 }
@@ -435,16 +458,86 @@ function terminalCursorClassName(cursorShape: TerminalCursorStyle): string {
   }
 }
 
-function runStyle(run: TerminalRun): CSSProperties {
-  return {
-    color: run.fg ?? undefined,
-    backgroundColor: run.bg ?? undefined,
-    fontWeight: run.bold ? 760 : undefined,
-    fontStyle: run.italic ? "italic" : undefined,
-    opacity: run.dim ? 0.72 : undefined,
-    textDecoration: run.underline ? "underline" : undefined,
-    filter: run.inverse ? "invert(1)" : undefined,
+async function openTerminalHyperlink(href: string): Promise<void> {
+  if (isTauriRuntime()) {
+    await openExternalUrl(href);
+    return;
+  }
+
+  window.open(href, "_blank", "noopener,noreferrer");
+}
+
+function reportTerminalHyperlinkError(error: unknown): void {
+  if (error instanceof Error) {
+    console.warn("Failed to open terminal hyperlink", error);
+    return;
+  }
+  console.warn("Failed to open terminal hyperlink with non-Error rejection", error);
+}
+
+function openTerminalHyperlinkFromEvent(href: string): void {
+  void openTerminalHyperlink(href).catch(reportTerminalHyperlinkError);
+}
+
+function isTerminalHyperlinkEventTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest(".terminal-hyperlink") != null;
+}
+
+function terminalHyperlinkClickHandler(
+  href: string,
+  event: ReactMouseEvent<HTMLAnchorElement>,
+): void {
+  event.preventDefault();
+  event.stopPropagation();
+  openTerminalHyperlinkFromEvent(href);
+}
+
+function terminalHyperlinkKeyDownHandler(
+  href: string,
+  event: ReactKeyboardEvent<HTMLAnchorElement>,
+): void {
+  event.stopPropagation();
+  if (event.key === " ") {
+    event.preventDefault();
+    openTerminalHyperlinkFromEvent(href);
+  }
+}
+
+function renderTerminalRunContainer(
+  run: TerminalRun,
+  key: string,
+  style: CSSProperties,
+  columns: number,
+  children: ReactNode,
+) {
+  const href = run.href?.trim();
+  const styleWithWidth: CSSProperties = {
+    ...style,
+    width: `calc(${columns} * var(--terminal-cell-width, ${DEFAULT_TERMINAL_CELL_METRICS.width}px))`,
   };
+  if (!href) {
+    return (
+      <span key={key} className="terminal-run" style={styleWithWidth}>
+        {children}
+      </span>
+    );
+  }
+
+  return (
+    <a
+      key={key}
+      className="terminal-run terminal-hyperlink"
+      href={href}
+      onClick={(event) => terminalHyperlinkClickHandler(href, event)}
+      onKeyDown={(event) => terminalHyperlinkKeyDownHandler(href, event)}
+      onMouseDown={(event) => event.stopPropagation()}
+      onMouseUp={(event) => event.stopPropagation()}
+      style={styleWithWidth}
+      title={href}
+    >
+      {children}
+    </a>
+  );
 }
 
 function splitTerminalGraphemes(text: string): string[] {
@@ -474,6 +567,14 @@ function terminalTextColumns(graphemes: readonly string[]): number {
   );
 }
 
+function terminalCellStyle(columns: number): CSSProperties | undefined {
+  return columns === 1
+    ? undefined
+    : {
+        width: `calc(${columns} * var(--terminal-cell-width, ${DEFAULT_TERMINAL_CELL_METRICS.width}px))`,
+      };
+}
+
 function terminalCursorGraphemeIndex(
   graphemes: readonly string[],
   columnOffset: number,
@@ -491,37 +592,100 @@ function terminalCursorGraphemeIndex(
   return Math.max(0, graphemes.length - 1);
 }
 
-function buildTerminalTextSegments(
-  graphemes: readonly string[],
-): Array<{ text: string; emoji: boolean }> {
-  const segments: Array<{ text: string; emoji: boolean }> = [];
-
-  for (const grapheme of graphemes) {
-    const emoji = EMOJI_GRAPHEME_PATTERN.test(grapheme);
-    const lastSegment = segments.at(-1);
-    if (lastSegment && lastSegment.emoji === emoji) {
-      lastSegment.text += grapheme;
-      continue;
-    }
-
-    segments.push({ text: grapheme, emoji });
-  }
-
-  return segments;
+interface TerminalBoxGlyphProps {
+  readonly grapheme: string;
+  readonly segments: TerminalBoxSegments;
 }
 
-function renderTerminalText(
-  graphemes: readonly string[],
-  keyPrefix: string,
-) {
-  return buildTerminalTextSegments(graphemes).map((segment, index) => (
-    <span
-      key={`${keyPrefix}-${index}`}
-      className={segment.emoji ? "terminal-emoji-run" : undefined}
-    >
-      {segment.text}
+function TerminalBoxGlyph({ grapheme, segments }: TerminalBoxGlyphProps) {
+  return (
+    <span className="terminal-box-glyph">
+      <span className="terminal-glyph-text">{grapheme}</span>
+      {segments.top ? (
+        <span className="terminal-box-segment terminal-box-segment-top" />
+      ) : null}
+      {segments.right ? (
+        <span className="terminal-box-segment terminal-box-segment-right" />
+      ) : null}
+      {segments.bottom ? (
+        <span className="terminal-box-segment terminal-box-segment-bottom" />
+      ) : null}
+      {segments.left ? (
+        <span className="terminal-box-segment terminal-box-segment-left" />
+      ) : null}
     </span>
-  ));
+  );
+}
+
+interface TerminalBlockGlyphProps {
+  readonly grapheme: string;
+  readonly rects: readonly TerminalBlockRect[];
+}
+
+function TerminalBlockGlyph({ grapheme, rects }: TerminalBlockGlyphProps) {
+  return (
+    <span className="terminal-block-glyph">
+      <span className="terminal-glyph-text">{grapheme}</span>
+      {rects.map((rect, index) => (
+        <span
+          key={`${rect.top}-${rect.right}-${rect.bottom}-${rect.left}-${index}`}
+          className="terminal-block-rect"
+          style={{
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+            left: rect.left,
+          }}
+        />
+      ))}
+    </span>
+  );
+}
+
+interface TerminalCellsProps {
+  readonly graphemes: readonly string[];
+  readonly keyPrefix: string;
+  readonly cursorIndex: number | null;
+  readonly cursorShape: TerminalCursorStyle;
+}
+
+function TerminalCells({
+  graphemes,
+  keyPrefix,
+  cursorIndex,
+  cursorShape,
+}: TerminalCellsProps) {
+  let column = 0;
+
+  return graphemes.map((grapheme) => {
+    const columns = terminalGraphemeColumns(grapheme);
+    const key = `${keyPrefix}-${column}`;
+    const boxSegments = terminalBoxSegments(grapheme);
+    const blockRects = terminalBlockRects(grapheme);
+    const classNames = ["terminal-cell"];
+    if (EMOJI_GRAPHEME_PATTERN.test(grapheme)) {
+      classNames.push("terminal-emoji-run");
+    }
+    if (boxSegments || blockRects) {
+      classNames.push("terminal-box-cell");
+    }
+    if (cursorIndex != null && terminalCursorGraphemeIndex(graphemes, column) === cursorIndex) {
+      classNames.push(...terminalCursorClassName(cursorShape).split(" "));
+    }
+    column += columns;
+
+    return (
+      <span key={key} className={classNames.join(" ")} style={terminalCellStyle(columns)}>
+        {blockRects ? (
+          <TerminalBlockGlyph grapheme={grapheme} rects={blockRects} />
+        ) : boxSegments ? (
+          <TerminalBoxGlyph grapheme={grapheme} segments={boxSegments} />
+        ) : (
+          grapheme
+        )}
+      </span>
+    );
+  });
 }
 
 function renderRunWithCursor(
@@ -537,31 +701,65 @@ function renderRunWithCursor(
     frame.cursorRow === row &&
     frame.cursorCol >= startCol &&
     frame.cursorCol < startCol + textColumns;
-  const style = runStyle(run);
+  const style = terminalRunStyle(run);
+  const key = `${startCol}-${graphemes.length}`;
 
   if (!cursorInRun) {
-    return (
-      <span key={`${startCol}-${graphemes.length}`} style={style}>
-        {renderTerminalText(graphemes, `${startCol}`)}
-      </span>
+    return renderTerminalRunContainer(
+      run,
+      key,
+      style,
+      textColumns,
+      <TerminalCells
+        graphemes={graphemes}
+        keyPrefix={`${startCol}`}
+        cursorIndex={null}
+        cursorShape={frame.cursorShape}
+      />,
     );
   }
 
-  const cursorIndex = terminalCursorGraphemeIndex(
-    graphemes,
-    frame.cursorCol - startCol,
+  const cursorIndex = terminalCursorGraphemeIndex(graphemes, frame.cursorCol - startCol);
+
+  return renderTerminalRunContainer(
+    run,
+    key,
+    style,
+    textColumns,
+    <TerminalCells
+      graphemes={graphemes}
+      keyPrefix={`${startCol}`}
+      cursorIndex={cursorIndex}
+      cursorShape={frame.cursorShape}
+    />,
   );
-  const before = graphemes.slice(0, cursorIndex);
-  const cursor = graphemes[cursorIndex] ?? " ";
-  const after = graphemes.slice(cursorIndex + 1);
+}
+
+interface TrailingCursorProps {
+  readonly row: number;
+  readonly frame: TerminalFrame;
+  readonly renderedColumns: number;
+}
+
+function TrailingCursor({ row, frame, renderedColumns }: TrailingCursorProps) {
+  if (!frame.cursorVisible || frame.cursorRow !== row || frame.cursorCol < renderedColumns) {
+    return null;
+  }
+
+  const missingColumns = Math.max(1, frame.cursorCol - renderedColumns + 1);
+  const paddingCells = Array.from({ length: missingColumns }, () => " ");
+  const style: CSSProperties = {
+    width: `calc(${missingColumns} * var(--terminal-cell-width, ${DEFAULT_TERMINAL_CELL_METRICS.width}px))`,
+  };
 
   return (
-    <span key={`${startCol}-${graphemes.length}`} style={style}>
-      {renderTerminalText(before, `${startCol}-before`)}
-      <span className={terminalCursorClassName(frame.cursorShape)}>
-        {renderTerminalText([cursor], `${startCol}-cursor`)}
-      </span>
-      {renderTerminalText(after, `${startCol}-after`)}
+    <span key="trailing-cursor" className="terminal-run" style={style}>
+      <TerminalCells
+        graphemes={paddingCells}
+        keyPrefix={`${row}-trailing-cursor`}
+        cursorIndex={missingColumns - 1}
+        cursorShape={frame.cursorShape}
+      />
     </span>
   );
 }
@@ -585,12 +783,7 @@ function TerminalRows({ frame }: { frame: TerminalFrame }) {
                 graphemes,
               );
             })}
-            {frame.cursorVisible && frame.cursorRow === row && frame.cursorCol >= column ? (
-              <>
-                {" ".repeat(frame.cursorCol - column)}
-                <span className="terminal-cursor"> </span>
-              </>
-            ) : null}
+            <TrailingCursor row={row} frame={frame} renderedColumns={column} />
           </div>
         );
       })}
@@ -786,6 +979,8 @@ function TerminalSessionView({
     const syncCellMetrics = () => {
       const nextMetrics = measureTerminalCellMetrics(screenElement);
       cellMetricsRef.current = nextMetrics;
+      screenElement.style.setProperty("--terminal-cell-width", `${nextMetrics.width}px`);
+      screenElement.style.setProperty("--terminal-cell-height", `${nextMetrics.height}px`);
       return nextMetrics;
     };
 
@@ -952,6 +1147,9 @@ function TerminalSessionView({
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (isTerminalHyperlinkEventTarget(event.target)) {
+        return;
+      }
       const key = event.key.toLowerCase();
       const usesClipboardShortcut = (event.ctrlKey || event.metaKey) && event.shiftKey;
       if (usesClipboardShortcut && key === "c") {
@@ -1004,6 +1202,9 @@ function TerminalSessionView({
     };
 
     const handleMouseDown = (event: MouseEvent) => {
+      if (isTerminalHyperlinkEventTarget(event.target)) {
+        return;
+      }
       if (!terminalMouseEnabled(modesRef.current)) {
         return;
       }
@@ -1031,6 +1232,9 @@ function TerminalSessionView({
     };
 
     const handleMouseUp = (event: MouseEvent) => {
+      if (isTerminalHyperlinkEventTarget(event.target)) {
+        return;
+      }
       if (!terminalMouseEnabled(modesRef.current)) {
         return;
       }
@@ -1513,11 +1717,7 @@ export function TerminalPanel({ active, projectPath }: TerminalPanelProps) {
             </div>
           </div>
           <div className="terminal-session-stack">
-            {activeProjectWorkspace.tabs.length === 0 ? (
-              <button type="button" className="terminal-new-empty" onClick={addTab}>
-                New terminal
-              </button>
-            ) : activeTab ? (
+            {activeTab ? (
               <div className="terminal-session-layer">
                 <TerminalSessionView
                   key={activeTab.id}

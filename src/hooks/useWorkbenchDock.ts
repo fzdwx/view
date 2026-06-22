@@ -4,6 +4,7 @@ import {
   loadWorkbenchLayout,
   saveWorkbenchLayout,
 } from "../lib/workbenchLayout";
+import { terminalWorkspaceEmptyEvent } from "../lib/terminalSessions";
 import type {
   GitPanelId,
   PanelSizes,
@@ -144,6 +145,26 @@ export function useWorkbenchDock(): WorkbenchDockController {
     };
   }, []);
 
+  useEffect(() => {
+    const handleTerminalWorkspaceEmpty = () => {
+      const layout = latestLayoutRef.current.railLayout;
+      setRailActiveItems((current: RailActiveItems) =>
+        hideTerminalRailItem(current, layout),
+      );
+    };
+
+    window.addEventListener(
+      terminalWorkspaceEmptyEvent,
+      handleTerminalWorkspaceEmpty,
+    );
+    return () => {
+      window.removeEventListener(
+        terminalWorkspaceEmptyEvent,
+        handleTerminalWorkspaceEmpty,
+      );
+    };
+  }, []);
+
   const resizePanel = useCallback(
     (key: keyof PanelSizes, delta: number, min: number, max: number) => {
       setPanelSizes((current: PanelSizes) => {
@@ -265,6 +286,31 @@ export function useWorkbenchDock(): WorkbenchDockController {
     resizePanel,
     startGitPanelDrag,
   };
+}
+
+function hideTerminalRailItem(
+  currentActiveItems: RailActiveItems,
+  railLayout: RailLayout,
+): RailActiveItems {
+  const nextActiveItems: RailActiveItems = {
+    left: { ...currentActiveItems.left },
+    right: { ...currentActiveItems.right },
+  };
+  let changed = false;
+
+  for (const side of railSides) {
+    for (const slot of railSlots) {
+      if (
+        currentActiveItems[side][slot] === "terminal" &&
+        railLayout[side][slot].includes("terminal")
+      ) {
+        nextActiveItems[side][slot] = null;
+        changed = true;
+      }
+    }
+  }
+
+  return changed ? nextActiveItems : currentActiveItems;
 }
 
 function cloneRailLayout(layout: RailLayout): RailLayout {

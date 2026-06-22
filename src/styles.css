@@ -4967,6 +4967,8 @@ body.is-resizing-y * {
 
 .terminal-screen {
   position: relative;
+  --terminal-cell-width: 8px;
+  --terminal-cell-height: var(--editor-line-height, 16px);
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -5016,18 +5018,99 @@ body.is-resizing-y * {
 }
 
 .terminal-line {
-  min-height: var(--editor-line-height, 16px);
-  line-height: var(--editor-line-height, 16px);
+  display: flex;
+  width: max-content;
+  height: var(--terminal-cell-height, var(--editor-line-height, 16px));
+  min-height: var(--terminal-cell-height, var(--editor-line-height, 16px));
+  line-height: var(--terminal-cell-height, var(--editor-line-height, 16px));
   overflow: hidden;
   white-space: pre;
 }
 
-.terminal-bold {
-  font-weight: 760;
+.terminal-run {
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 100%;
+  min-height: 100%;
+  line-height: inherit;
+  vertical-align: top;
+  overflow: hidden;
 }
 
-.terminal-dim {
-  opacity: 0.72;
+.terminal-cell {
+  position: relative;
+  display: inline-flex;
+  width: var(--terminal-cell-width, 8px);
+  height: 100%;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  line-height: inherit;
+  white-space: pre;
+  overflow: hidden;
+  vertical-align: top;
+}
+
+.terminal-box-cell {
+  font-family: var(--mono);
+}
+
+.terminal-box-glyph,
+.terminal-block-glyph {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  color: var(--terminal-run-fg, currentColor);
+  z-index: 1;
+}
+
+.terminal-glyph-text {
+  color: transparent;
+}
+
+.terminal-box-segment,
+.terminal-block-rect {
+  position: absolute;
+  display: block;
+  background: currentColor;
+  pointer-events: none;
+}
+
+.terminal-box-segment-top {
+  top: 0;
+  bottom: 50%;
+  left: 50%;
+  width: 2px;
+  margin-left: -1px;
+}
+
+.terminal-box-segment-right {
+  top: 50%;
+  right: 0;
+  left: 50%;
+  height: 2px;
+  margin-top: -1px;
+}
+
+.terminal-box-segment-bottom {
+  top: 50%;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  margin-left: -1px;
+}
+
+.terminal-box-segment-left {
+  top: 50%;
+  right: 50%;
+  left: 0;
+  height: 2px;
+  margin-top: -1px;
+}
+
+.terminal-bold {
+  font-weight: 760;
 }
 
 .terminal-emoji-run {
@@ -5036,6 +5119,20 @@ body.is-resizing-y * {
     "Twemoji Mozilla", emoji;
   font-style: normal;
   font-weight: 400;
+}
+
+.terminal-hyperlink {
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklch, currentColor 72%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.terminal-hyperlink:hover,
+.terminal-hyperlink:focus-visible {
+  color: var(--accent-strong);
 }
 
 .terminal-fg-black {
@@ -5103,13 +5200,9 @@ body.is-resizing-y * {
 }
 
 .terminal-cursor {
-  display: inline-block;
-  min-width: 1ch;
-  height: var(--editor-line-height, 16px);
   background: var(--ink);
   color: var(--surface-0);
   animation: terminal-cursor-blink 1.1s steps(2, jump-none) infinite;
-  vertical-align: top;
 }
 
 .terminal-close-line {
@@ -5160,21 +5253,35 @@ body.is-resizing-y * {
 }
 
 .terminal-cursor-bar {
-  width: 2px;
-  min-width: 2px;
-  background: var(--ink);
-  color: var(--ink);
+  background: transparent;
+  color: inherit;
   animation: none;
 }
 
+.terminal-cursor-bar::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: var(--ink);
+  content: "";
+}
+
 .terminal-cursor-underline {
-  height: auto;
-  min-width: 1ch;
   background: transparent;
   color: inherit;
-  text-decoration: underline;
-  text-underline-offset: 2px;
   animation: none;
+}
+
+.terminal-cursor-underline::after {
+  position: absolute;
+  right: 0;
+  bottom: 1px;
+  left: 0;
+  height: 1px;
+  background: var(--ink);
+  content: "";
 }
 
 .terminal-cursor-hollow {

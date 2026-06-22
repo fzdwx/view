@@ -37,6 +37,12 @@ type Listener = () => void;
 const workspaces = new Map<string, TerminalWorkspace>();
 const listeners = new Set<Listener>();
 
+export const terminalWorkspaceEmptyEvent = "view:terminal-workspace-empty";
+
+export interface TerminalWorkspaceEmptyEventDetail {
+  readonly projectPath: string;
+}
+
 function emit(): void {
   for (const listener of listeners) {
     listener();
@@ -44,6 +50,18 @@ function emit(): void {
       return;
     }
   }
+}
+
+function emitTerminalWorkspaceEmpty(projectPath: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.dispatchEvent(
+    new CustomEvent<TerminalWorkspaceEmptyEventDetail>(
+      terminalWorkspaceEmptyEvent,
+      { detail: { projectPath } },
+    ),
+  );
 }
 
 function ensureWorkspace(projectPath: string): TerminalWorkspace {
@@ -176,6 +194,7 @@ export function closeTerminalTab(
   tabId: string,
   onKillSession: (session: TerminalSessionInfo) => void,
 ): void {
+  let closedLastTab = false;
   updateTerminalWorkspace(projectPath, (workspace) => {
     const index = workspace.tabs.findIndex((tab) => tab.id === tabId);
     if (index < 0) {
@@ -186,6 +205,7 @@ export function closeTerminalTab(
       onKillSession(removed.session);
     }
     const nextTabs = workspace.tabs.filter((tab) => tab.id !== tabId);
+    closedLastTab = nextTabs.length === 0;
     const fallback = nextTabs[Math.max(0, index - 1)] ?? nextTabs[0] ?? null;
     return {
       tabs: nextTabs,
@@ -194,6 +214,9 @@ export function closeTerminalTab(
       nextTabIndex: workspace.nextTabIndex,
     };
   });
+  if (closedLastTab) {
+    emitTerminalWorkspaceEmpty(projectPath);
+  }
 }
 
 export function setTerminalTabSession(

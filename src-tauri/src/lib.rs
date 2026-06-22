@@ -292,10 +292,7 @@ fn detect_project_scripts(path: String) -> Result<Vec<ProjectScript>, String> {
                 if let Some(colon_pos) = trimmed.find(':') {
                     let target = trimmed[..colon_pos].trim();
                     // Skip pattern rules and special targets
-                    if target.is_empty()
-                        || target.contains('%')
-                        || target.starts_with('.')
-                    {
+                    if target.is_empty() || target.contains('%') || target.starts_with('.') {
                         continue;
                     }
                     scripts.push(ProjectScript {
@@ -597,6 +594,7 @@ impl EventListener for TerminalEventProxy {
 struct TerminalRunStyle {
     fg: Option<String>,
     bg: Option<String>,
+    href: Option<String>,
     bold: bool,
     dim: bool,
     italic: bool,
@@ -683,6 +681,64 @@ fn list_terminal_shells() -> Vec<TerminalShell> {
     detect_terminal_shells()
 }
 
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    let url = validated_external_url(&url)?;
+    spawn_external_url_opener(url)
+}
+
+fn validated_external_url(url: &str) -> Result<&str, String> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Err("URL cannot be empty".to_string());
+    }
+    if trimmed.len() > 4096 {
+        return Err("URL is too long".to_string());
+    }
+    if trimmed.chars().any(|character| character.is_control()) {
+        return Err("URL cannot contain control characters".to_string());
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("file://")
+        || lower.starts_with("mailto:")
+    {
+        return Ok(trimmed);
+    }
+
+    Err("URL scheme is not allowed".to_string())
+}
+
+fn spawn_external_url_opener(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = Command::new("open");
+        command.arg(url);
+        command
+    };
+
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = Command::new("explorer");
+        command.arg(url);
+        command
+    };
+
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    let mut command = {
+        let mut command = Command::new("xdg-open");
+        command.arg(url);
+        command
+    };
+
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("Failed to open URL: {error}"))
+}
+
 /// Detect shells installed on the host.
 ///
 /// Probes a curated set of well-known shell executables by looking them up on
@@ -767,9 +823,7 @@ fn shell_label(program: &str, path: &Path) -> String {
 
 #[cfg(windows)]
 fn files_equal(left: &Path, right: &Path) -> bool {
-    left.to_string_lossy()
-        .to_ascii_lowercase()
-        == right.to_string_lossy().to_ascii_lowercase()
+    left.to_string_lossy().to_ascii_lowercase() == right.to_string_lossy().to_ascii_lowercase()
 }
 
 #[cfg(not(windows))]
@@ -2563,24 +2617,15 @@ fn path_starts_with(child: &Path, parent: &Path) -> bool {
 }
 
 #[cfg(windows)]
-fn components_equal(
-    child: &std::path::Component,
-    parent: &std::path::Component,
-) -> bool {
+fn components_equal(child: &std::path::Component, parent: &std::path::Component) -> bool {
     let normalize = |component: &std::path::Component| {
-        component
-            .as_os_str()
-            .to_string_lossy()
-            .to_ascii_lowercase()
+        component.as_os_str().to_string_lossy().to_ascii_lowercase()
     };
     normalize(child) == normalize(parent)
 }
 
 #[cfg(not(windows))]
-fn components_equal(
-    child: &std::path::Component,
-    parent: &std::path::Component,
-) -> bool {
+fn components_equal(child: &std::path::Component, parent: &std::path::Component) -> bool {
     child == parent
 }
 
@@ -2592,7 +2637,7 @@ fn terminal_named_color(color: NamedColor) -> Option<&'static str> {
         NamedColor::Yellow => Some("#d9b45f"),
         NamedColor::Blue => Some("#72a7ff"),
         NamedColor::Magenta => Some("#d783d7"),
-        NamedColor::Cyan => Some("#65cfd3"),
+        NamedColor::Cyan => Some("#00ced1"),
         NamedColor::White => Some("#d7dde2"),
         NamedColor::BrightBlack => Some("#6b7480"),
         NamedColor::BrightRed => Some("#ff8f87"),
@@ -2600,7 +2645,7 @@ fn terminal_named_color(color: NamedColor) -> Option<&'static str> {
         NamedColor::BrightYellow => Some("#edcc75"),
         NamedColor::BrightBlue => Some("#90bbff"),
         NamedColor::BrightMagenta => Some("#ec9dea"),
-        NamedColor::BrightCyan => Some("#84e4e7"),
+        NamedColor::BrightCyan => Some("#00ffff"),
         NamedColor::BrightWhite => Some("#f7fafc"),
         NamedColor::DimBlack => Some("#111827"),
         NamedColor::DimRed => Some("#9f4a48"),
@@ -2616,10 +2661,27 @@ fn terminal_named_color(color: NamedColor) -> Option<&'static str> {
     }
 }
 
+fn terminal_styled_named_color(
+    color: NamedColor,
+    flags: Flags,
+    preserve_dimmed_accent: bool,
+) -> NamedColor {
+    let color = if flags.contains(Flags::BOLD) {
+        color.to_bright()
+    } else {
+        color
+    };
+    if flags.contains(Flags::DIM) && !preserve_dimmed_accent {
+        color.to_dim()
+    } else {
+        color
+    }
+}
+
 fn terminal_indexed_color(value: u8) -> String {
     const BASIC: [&str; 16] = [
-        "#1f2933", "#ef6f6c", "#6dd58c", "#d9b45f", "#72a7ff", "#d783d7", "#65cfd3", "#d7dde2",
-        "#6b7480", "#ff8f87", "#88e0a1", "#edcc75", "#90bbff", "#ec9dea", "#84e4e7", "#f7fafc",
+        "#1f2933", "#ef6f6c", "#6dd58c", "#d9b45f", "#72a7ff", "#d783d7", "#00ced1", "#d7dde2",
+        "#6b7480", "#ff8f87", "#88e0a1", "#edcc75", "#90bbff", "#ec9dea", "#00ffff", "#f7fafc",
     ];
     if let Some(color) = BASIC.get(value as usize) {
         return (*color).to_string();
@@ -2649,11 +2711,31 @@ fn terminal_color(color: TerminalColorValue) -> Option<String> {
     }
 }
 
+fn terminal_foreground_color(
+    color: TerminalColorValue,
+    flags: Flags,
+    preserve_dimmed_accent: bool,
+) -> Option<String> {
+    match color {
+        TerminalColorValue::Named(color) => {
+            let named_color = terminal_styled_named_color(color, flags, preserve_dimmed_accent);
+            terminal_named_color(named_color).map(str::to_string)
+        }
+        TerminalColorValue::Indexed(value) => Some(terminal_indexed_color(value)),
+        TerminalColorValue::Spec(rgb) => Some(format!("rgb({} {} {})", rgb.r, rgb.g, rgb.b)),
+    }
+}
+
 fn terminal_cell_style(cell: &Cell) -> TerminalRunStyle {
     let flags = cell.flags;
+    let preserve_dimmed_accent = flags.contains(Flags::INVERSE)
+        || !matches!(cell.bg, TerminalColorValue::Named(NamedColor::Background));
     TerminalRunStyle {
-        fg: terminal_color(cell.fg),
+        fg: terminal_foreground_color(cell.fg, flags, preserve_dimmed_accent),
         bg: terminal_color(cell.bg),
+        href: cell
+            .hyperlink()
+            .map(|hyperlink| hyperlink.uri().to_string()),
         bold: flags.contains(Flags::BOLD),
         dim: flags.contains(Flags::DIM),
         italic: flags.contains(Flags::ITALIC),
@@ -2702,6 +2784,7 @@ fn terminal_frame(term: &Term<TerminalEventProxy>, title: Option<&str>) -> Resul
     let default_style = TerminalRunStyle {
         fg: None,
         bg: None,
+        href: None,
         bold: false,
         dim: false,
         italic: false,
@@ -2715,26 +2798,8 @@ fn terminal_frame(term: &Term<TerminalEventProxy>, title: Option<&str>) -> Resul
         let mut styled_cells = Vec::new();
         let mut current_text = String::new();
         let mut current_style = default_style.clone();
-        let mut last_content_col = 0usize;
 
         for col in 0..cols {
-            let cell = &grid[line_index][Column(col)];
-            let style = terminal_cell_style(cell);
-            let is_cursor = cursor_visible && row == cursor_row && col == cursor_col;
-            if !cell.flags.contains(Flags::WIDE_CHAR_SPACER)
-                && (cell.c != ' ' || style != default_style || is_cursor)
-            {
-                last_content_col = col;
-            }
-        }
-
-        let render_cols = if cursor_visible && row == cursor_row {
-            last_content_col.max(cursor_col) + 1
-        } else {
-            last_content_col + 1
-        };
-
-        for col in 0..render_cols.min(cols) {
             let cell = &grid[line_index][Column(col)];
             let style = terminal_cell_style(cell);
             if col == 0 {
@@ -2747,11 +2812,15 @@ fn terminal_frame(term: &Term<TerminalEventProxy>, title: Option<&str>) -> Resul
                 current_style = style.clone();
             }
 
-            if cell.flags.contains(Flags::WIDE_CHAR_SPACER) || cell.flags.contains(Flags::HIDDEN) {
+            if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
                 continue;
             }
 
-            current_text.push(cell.c);
+            current_text.push(if cell.flags.contains(Flags::HIDDEN) {
+                ' '
+            } else {
+                cell.c
+            });
             if let Some(zerowidth) = cell.zerowidth() {
                 current_text.extend(zerowidth);
             }
@@ -3938,6 +4007,64 @@ mod tests {
     }
 
     #[test]
+    fn terminal_frame_preserves_full_row_width_for_tui_backgrounds() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        let mut term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(10, 3),
+            test_terminal_event_proxy(input_tx),
+        );
+        let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
+
+        processor.advance(&mut term, b"\x1b[48;5;57mHi");
+
+        let frame: serde_json::Value =
+            serde_json::from_str(&terminal_frame(&term, None).expect("terminal frame"))
+                .expect("frame json");
+        let first_line_text = frame["lines"][0]["cells"]
+            .as_array()
+            .expect("first line cells")
+            .iter()
+            .filter_map(|cell| cell["text"].as_str())
+            .collect::<String>();
+
+        assert_eq!(first_line_text.chars().count(), 10);
+        assert!(
+            first_line_text.starts_with("Hi"),
+            "full-width terminal rows should preserve visible text: {first_line_text:?}"
+        );
+    }
+
+    #[test]
+    fn terminal_frame_preserves_hidden_cells_as_blank_columns() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        let mut term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(5, 2),
+            test_terminal_event_proxy(input_tx),
+        );
+        let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
+
+        processor.advance(&mut term, b"A\x1b[8mB\x1b[28mC");
+
+        let frame: serde_json::Value =
+            serde_json::from_str(&terminal_frame(&term, None).expect("terminal frame"))
+                .expect("frame json");
+        let first_line_text = frame["lines"][0]["cells"]
+            .as_array()
+            .expect("first line cells")
+            .iter()
+            .filter_map(|cell| cell["text"].as_str())
+            .collect::<String>();
+
+        assert_eq!(first_line_text.chars().count(), 5);
+        assert!(
+            first_line_text.starts_with("A C"),
+            "hidden characters should occupy blank terminal columns: {first_line_text:?}"
+        );
+    }
+
+    #[test]
     fn terminal_event_proxy_writes_alacritty_terminal_responses_to_pty() {
         let (input_tx, input_rx) = mpsc::channel::<Vec<u8>>();
         let mut term = Term::new(
@@ -4008,6 +4135,212 @@ mod tests {
     }
 
     #[test]
+    fn terminal_frame_maps_bold_default_foreground_to_bright() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        let mut term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(10, 2),
+            test_terminal_event_proxy(input_tx),
+        );
+        let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
+
+        processor.advance(&mut term, b"\x1b[1mB");
+
+        let frame: serde_json::Value =
+            serde_json::from_str(&terminal_frame(&term, None).expect("terminal frame"))
+                .expect("frame json");
+        let first_run = &frame["lines"][0]["cells"][0];
+
+        assert_eq!(first_run["bold"], true);
+        assert_eq!(first_run["fg"], "#f7fafc");
+    }
+
+    #[test]
+    fn terminal_frame_maps_bold_basic_ansi_foreground_to_bright() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        let mut term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(10, 2),
+            test_terminal_event_proxy(input_tx),
+        );
+        let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
+
+        processor.advance(&mut term, b"\x1b[1;31mR");
+
+        let frame: serde_json::Value =
+            serde_json::from_str(&terminal_frame(&term, None).expect("terminal frame"))
+                .expect("frame json");
+        let first_run = &frame["lines"][0]["cells"][0];
+
+        assert_eq!(first_run["bold"], true);
+        assert_eq!(first_run["fg"], "#ff8f87");
+    }
+
+    #[test]
+    fn terminal_frame_uses_bright_cyan_for_basic_ansi_cyan() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        let mut term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(10, 2),
+            test_terminal_event_proxy(input_tx),
+        );
+        let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
+
+        processor.advance(&mut term, b"\x1b[36mC");
+
+        let frame: serde_json::Value =
+            serde_json::from_str(&terminal_frame(&term, None).expect("terminal frame"))
+                .expect("frame json");
+        let first_run = &frame["lines"][0]["cells"][0];
+
+        assert_eq!(first_run["fg"], "#00ced1");
+    }
+
+    #[test]
+    fn terminal_frame_uses_bright_cyan_for_indexed_ansi_cyan() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        let mut term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(10, 2),
+            test_terminal_event_proxy(input_tx),
+        );
+        let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
+
+        processor.advance(&mut term, b"\x1b[38;5;6mC");
+
+        let frame: serde_json::Value =
+            serde_json::from_str(&terminal_frame(&term, None).expect("terminal frame"))
+                .expect("frame json");
+        let first_run = &frame["lines"][0]["cells"][0];
+
+        assert_eq!(first_run["fg"], "#00ced1");
+    }
+
+    #[test]
+    fn terminal_frame_maps_dim_default_foreground_to_dim_color() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        let mut term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(10, 2),
+            test_terminal_event_proxy(input_tx),
+        );
+        let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
+
+        processor.advance(&mut term, b"\x1b[2mD");
+
+        let frame: serde_json::Value =
+            serde_json::from_str(&terminal_frame(&term, None).expect("terminal frame"))
+                .expect("frame json");
+        let first_run = &frame["lines"][0]["cells"][0];
+
+        assert_eq!(first_run["dim"], true);
+        assert_eq!(first_run["fg"], "#9ca3af");
+    }
+
+    #[test]
+    fn terminal_frame_maps_dim_basic_ansi_foreground_to_dim_color() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        let mut term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(10, 2),
+            test_terminal_event_proxy(input_tx),
+        );
+        let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
+
+        processor.advance(&mut term, b"\x1b[2;36mC");
+
+        let frame: serde_json::Value =
+            serde_json::from_str(&terminal_frame(&term, None).expect("terminal frame"))
+                .expect("frame json");
+        let first_run = &frame["lines"][0]["cells"][0];
+
+        assert_eq!(first_run["dim"], true);
+        assert_eq!(first_run["fg"], "#4b989b");
+    }
+
+    #[test]
+    fn terminal_frame_preserves_dim_ansi_foreground_on_highlight_background() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        let mut term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(10, 2),
+            test_terminal_event_proxy(input_tx),
+        );
+        let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
+
+        processor.advance(&mut term, b"\x1b[2;36;48;5;235m|");
+
+        let frame: serde_json::Value =
+            serde_json::from_str(&terminal_frame(&term, None).expect("terminal frame"))
+                .expect("frame json");
+        let first_run = &frame["lines"][0]["cells"][0];
+
+        assert_eq!(first_run["dim"], true);
+        assert_eq!(first_run["fg"], "#00ced1");
+        assert_eq!(first_run["bg"], "rgb(38 38 38)");
+    }
+
+    #[test]
+    fn terminal_frame_preserves_dim_ansi_foreground_on_inverse_highlight() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        let mut term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(10, 2),
+            test_terminal_event_proxy(input_tx),
+        );
+        let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
+
+        processor.advance(&mut term, b"\x1b[2;36;7m|");
+
+        let frame: serde_json::Value =
+            serde_json::from_str(&terminal_frame(&term, None).expect("terminal frame"))
+                .expect("frame json");
+        let first_run = &frame["lines"][0]["cells"][0];
+
+        assert_eq!(first_run["dim"], true);
+        assert_eq!(first_run["inverse"], true);
+        assert_eq!(first_run["fg"], "#00ced1");
+    }
+
+    #[test]
+    fn terminal_frame_exposes_osc8_hyperlinks() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        let mut term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(40, 4),
+            test_terminal_event_proxy(input_tx),
+        );
+        let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
+
+        processor.advance(
+            &mut term,
+            b"\x1b]8;;https://example.com/docs\x07docs\x1b]8;;\x07 plain",
+        );
+
+        let frame: serde_json::Value =
+            serde_json::from_str(&terminal_frame(&term, None).expect("terminal frame"))
+                .expect("frame json");
+        let cells = frame["lines"][0]["cells"]
+            .as_array()
+            .expect("first terminal line cells");
+        let linked_run = cells
+            .iter()
+            .find(|run| run["text"] == "docs")
+            .expect("linked run");
+        let plain_run = cells
+            .iter()
+            .find(|run| {
+                run["text"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("plain"))
+            })
+            .expect("plain run after hyperlink reset");
+
+        assert_eq!(linked_run["href"], "https://example.com/docs");
+        assert_eq!(plain_run["href"], serde_json::Value::Null);
+    }
+
+    #[test]
     fn detect_terminal_shells_returns_unique_paths() {
         let shells = detect_terminal_shells();
 
@@ -4016,7 +4349,9 @@ mod tests {
         let mut seen: Vec<String> = Vec::new();
         for shell in &shells {
             assert!(
-                !seen.iter().any(|seen_path| paths_equal_ci(seen_path, &shell.path)),
+                !seen
+                    .iter()
+                    .any(|seen_path| paths_equal_ci(seen_path, &shell.path)),
                 "duplicate shell path detected: {}",
                 shell.path,
             );
@@ -4034,6 +4369,29 @@ mod tests {
         }) {
             assert!(!sh.label.is_empty(), "shell label should not be empty");
         }
+    }
+
+    #[test]
+    fn external_url_validation_allows_safe_terminal_link_schemes() {
+        assert_eq!(
+            validated_external_url("https://example.com/docs"),
+            Ok("https://example.com/docs")
+        );
+        assert_eq!(
+            validated_external_url(" file:///tmp/view.txt "),
+            Ok("file:///tmp/view.txt")
+        );
+        assert_eq!(
+            validated_external_url("mailto:dev@example.com"),
+            Ok("mailto:dev@example.com")
+        );
+    }
+
+    #[test]
+    fn external_url_validation_rejects_unsafe_terminal_link_schemes() {
+        assert!(validated_external_url("javascript:alert(1)").is_err());
+        assert!(validated_external_url("https://example.com/\nnext").is_err());
+        assert!(validated_external_url("").is_err());
     }
 
     #[test]
@@ -4085,15 +4443,9 @@ mod tests {
             visual_bell: true,
             ..TerminalSpawnOptions::default()
         };
-        let session = spawn_terminal_session_with_options(
-            &state,
-            &repo,
-            None,
-            Some(80),
-            Some(12),
-            options,
-        )
-        .expect("spawn terminal session");
+        let session =
+            spawn_terminal_session_with_options(&state, &repo, None, Some(80), Some(12), options)
+                .expect("spawn terminal session");
         let mut websocket = connect_terminal_websocket(&session);
 
         // Ring the bell; the parser thread should forward a bell message to the
@@ -5204,6 +5556,7 @@ pub fn run() {
             default_start_path,
             list_system_fonts,
             list_terminal_shells,
+            open_external_url,
             load_repository,
             get_diff,
             get_file_diff,
