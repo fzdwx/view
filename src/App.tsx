@@ -3,19 +3,16 @@ import {
   memo,
   useCallback,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import {
-  FolderOpen,
-  Loader2,
-} from "lucide-react";
+import { FolderOpen } from "lucide-react";
+import { AppTitleBar } from "./components/AppTitleBar";
 import { CommandPanel } from "./components/CommandPanel";
-import { DiffPanel } from "./components/DiffPanel";
-import { PreviewTabBar } from "./components/PreviewTabBar";
 import { ProjectRail } from "./components/ProjectRail";
 import { RailDockOverlay } from "./components/RailDockOverlay";
 import { ProjectSideRail } from "./components/ProjectSideRail";
@@ -24,7 +21,7 @@ import { PullChoiceDialog } from "./components/PullChoiceDialog";
 import { ResizeHandle } from "./components/ResizeHandle";
 import { WindowControls } from "./components/WindowControls";
 import type { TreeGitFileActions } from "./components/TreeContextMenu";
-import { CodeMirrorFilePreview } from "./components/editor/CodeMirrorFilePreview";
+import { EditorPaneGrid } from "./components/editor/EditorPaneGrid";
 import { PreviewDebugPage } from "./components/editor/PreviewDebugPage";
 import {
   type GitAvailability,
@@ -43,16 +40,13 @@ import { useGitActions } from "./hooks/useGitActions";
 import { useGitFileActions } from "./hooks/useGitFileActions";
 import { useGitWriteGuard } from "./hooks/useGitWriteGuard";
 import { useGitWriteActions } from "./hooks/useGitWriteActions";
-import { usePreviewTabs } from "./hooks/usePreviewTabs";
+import { usePreviewPanes } from "./hooks/usePreviewPanes";
 import { useProjectFileActions } from "./hooks/useProjectFileActions";
 import { useProjectFilesystemPolling } from "./hooks/useProjectFilesystemPolling";
 import { useRailPanelResize } from "./hooks/useRailPanelResize";
 import { useProjectSelectionActions } from "./hooks/useProjectSelectionActions";
 import { useRepositoryRemotePolling } from "./hooks/useRepositoryRemotePolling";
-import {
-  useRepositoryPreviewData,
-  useRepositoryProjectData,
-} from "./hooks/useRepositoryWorkspaceData";
+import { useRepositoryProjectData } from "./hooks/useRepositoryWorkspaceData";
 import { useSelectedPathGuard } from "./hooks/useSelectedPathGuard";
 import { useWorkbenchDock } from "./hooks/useWorkbenchDock";
 import { type FileSearchResult, type ProjectScript, detectProjectScripts, type ReflogEntry } from "./lib/api";
@@ -168,7 +162,6 @@ export function App() {
     commits,
     commitsQuery,
     currentFileContent,
-    fileContentQuery,
     fileSearchQuery,
     filteredCommits,
     payload,
@@ -180,7 +173,6 @@ export function App() {
     selectedBranchRef,
     selectedCommit,
     selectedProjectFile,
-    selectedProjectStatus,
   } = useRepositoryProjectData({
     activeBranchRef,
     activeCommit,
@@ -240,15 +232,19 @@ export function App() {
     onFileSaved: handleFileSaved,
   });
   const {
+    activePaneId,
+    activePreviewTab,
     activePreviewTabId,
     dirtyPreviewTabIds,
+    layout: previewPaneLayout,
     previewMode,
     previewTabs,
-    previewTarget,
     activateAdjacentTab,
+    activatePane,
     activatePreviewTab,
     clearPreviewTabs,
     closeAllTabs,
+    closeActivePreviewTab,
     closeOtherTabs,
     closePreviewTab,
     movePreviewTabPath,
@@ -256,11 +252,11 @@ export function App() {
     removePreviewTabsForPath,
     reorderPreviewTabs,
     showDiffSelection,
-  } = usePreviewTabs({
+    splitTab,
+  } = usePreviewPanes({
     activeCommit,
     activeProjectPath,
     editorDrafts,
-    selectedProjectPath,
     onDiscardDraft: discardDraftByKey,
     onSelectChangePath: setSelectedChangePath,
     onSelectCommit: setActiveCommit,
@@ -291,26 +287,13 @@ export function App() {
     hasGitRepository,
     repositoryPayload: payload,
   });
-  const {
-    currentFileBlame,
-    currentFileDiff,
-    diffStats,
-    editorGitMarkers,
-    fileBlameQuery,
-    fileDiffQuery,
-    fileWorktreeDiffQuery,
-    parsedDiff,
-    visibleDiffFiles,
-  } = useRepositoryPreviewData({
-    activeCommit,
-    activeProjectPath,
-    fileContentReady: currentFileContent !== null,
-    hasGitRepository,
-    previewMode,
-    selectedChangePath,
-    selectedProjectPath,
-    selectedProjectStatus,
-  });
+  const refetchFileWorktreeDiff = useCallback(
+    () =>
+      queryClient.invalidateQueries({
+        queryKey: ["file-worktree-diff", activeProjectPath],
+      }),
+    [activeProjectPath, queryClient],
+  );
   const {
     chooseRepository,
     removeProject,
@@ -365,15 +348,15 @@ export function App() {
     hasGitRepository,
     refetchCommits: commitsQuery.refetch,
     refetchReflog: reflogQuery.refetch,
-    refetchFileWorktreeDiff: fileWorktreeDiffQuery.refetch,
+    refetchFileWorktreeDiff,
     refetchProjectFiles: projectFilesQuery.refetch,
-      refetchRepository: repositoryQuery.refetch,
-      refreshProjectFileState,
-      setActiveBranchRef,
-      setActiveCommit,
+    refetchRepository: repositoryQuery.refetch,
+    refreshProjectFileState,
+    setActiveBranchRef,
+    setActiveCommit,
     setSelectedChangePath,
     showDiffSelection,
-    });
+  });
 
   // Reset the reflog selection when the project changes; the selector has no
   // stable identity across projects so it's cleared rather than derived.
@@ -493,6 +476,12 @@ export function App() {
   const handleProjectTreeCopyFile = useCallback(() => {
     void copyFileFromTree(selectedProjectFile?.path ?? null);
   }, [copyFileFromTree, selectedProjectFile?.path]);
+  const copySelectedProjectFileEvent = useEffectEvent(() => {
+    void copyFileFromTree(selectedProjectFile?.path ?? null);
+  });
+  const pasteClipboardFromTreeEvent = useEffectEvent((destDir: string | null) => {
+    void pasteClipboardFromTree(destDir);
+  });
   const handleProjectTreeDeleteFile = useCallback((path: string) => {
     void deleteFileFromTree(path);
   }, [deleteFileFromTree]);
@@ -595,7 +584,7 @@ export function App() {
     previewMode,
     shortcuts: appSettings.shortcuts,
     onCloseActiveTab: () => {
-      if (activePreviewTabId) closePreviewTab(activePreviewTabId);
+      closeActivePreviewTab();
     },
     onCloseCommandPanel: closeCommandPanel,
     onClosePullChoice: closePullChoice,
@@ -619,9 +608,8 @@ export function App() {
     onSwitchTab: activateAdjacentTab,
     onToggleProjectSwitcher: toggleProjectSwitcher,
     onJumpToDiffFile: () => {
-      const activeTab = previewTabs.find((tab) => tab.id === activePreviewTabId);
-      if (activeTab?.mode === "diff") {
-        openPreviewTab("file", activeTab.path);
+      if (activePreviewTab?.mode === "diff") {
+        openPreviewTab("file", activePreviewTab.path);
       }
     },
   });
@@ -847,14 +835,14 @@ export function App() {
       const key = event.key.toLowerCase();
       if (key === "c" && selectedProjectFile) {
         event.preventDefault();
-        handleProjectTreeCopyFile();
+        copySelectedProjectFileEvent();
         return;
       }
 
       if (key === "v") {
         event.preventDefault();
         const destDir = pasteDestinationFromSelectedPath(selectedProjectPath);
-        void pasteClipboardFromTree(destDir);
+        pasteClipboardFromTreeEvent(destDir);
       }
     }
 
@@ -863,8 +851,6 @@ export function App() {
       window.removeEventListener("keydown", handleProjectFileClipboardShortcut);
   }, [
     activeProject,
-    handleProjectTreeCopyFile,
-    pasteClipboardFromTree,
     selectedProjectFile,
     selectedProjectPath,
   ]);
@@ -962,30 +948,7 @@ export function App() {
 
   return (
     <main className="app-shell" style={shellStyle}>
-      {activeProject ? (
-        <PreviewTabBar
-          activeTabId={activePreviewTabId}
-          diffStats={diffStats}
-          loading={
-            repositoryQuery.isFetching ||
-            fileDiffQuery.isFetching ||
-            fileWorktreeDiffQuery.isFetching ||
-            fileContentQuery.isFetching
-          }
-          onCloseTab={closePreviewTab}
-          onCloseOtherTabs={closeOtherTabs}
-          onCloseAllTabs={closeAllTabs}
-          onReorderTabs={reorderPreviewTabs}
-          onSelectTab={activatePreviewTab}
-          previewMode={previewMode}
-          projectPath={activeProject.activePath}
-          selectedPath={
-            previewMode === "diff" ? selectedChangePath : selectedProjectPath
-          }
-          tabs={previewTabs}
-          dirtyTabIds={dirtyPreviewTabIds}
-        />
-      ) : null}
+      {activeProject ? <AppTitleBar projectPath={activeProject.activePath} /> : null}
       <ProjectRail
         activeProjectId={activeProjectId}
         activeProjectName={activeProject?.name ?? null}
@@ -1018,6 +981,7 @@ export function App() {
       {runScriptState.loading || runScriptState.scripts.length > 0 || runScriptState.error ? (
         <div
           className="command-overlay"
+          role="presentation"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
               setRunScriptState({ loading: false, scripts: [], error: null });
@@ -1127,83 +1091,32 @@ export function App() {
             ) : null}
 
             <section className="diff-panel rail-editor-panel">
-             {previewMode === "file" ? (
-                  <CodeMirrorFilePreview
-                    blameError={
-                      fileBlameQuery.isError
-                        ? String(fileBlameQuery.error.message)
-                        : null
-                    }
-                    blameLines={currentFileBlame}
-                    blameLoading={Boolean(
-                      selectedProjectPath &&
-                        previewMode === "file" &&
-                        fileBlameQuery.isFetching,
-                    )}
-                    draft={activeEditorDraft}
-                    editorSessionKey={activePreviewTabId}
-                    error={
-                      fileContentQuery.isError
-                        ? String(fileContentQuery.error.message)
-                        : null
-                    }
-                    file={currentFileContent}
-                    gitConflictStatus={selectedProjectFile?.conflict ?? null}
-                    gitMarkers={editorGitMarkers}
-                    loading={Boolean(
-                      selectedProjectPath &&
-                        fileContentQuery.isFetching &&
-                        !currentFileContent,
-                    )}
-                    saveError={saveError}
-                    saving={savingActiveFile}
-                    selectedPath={selectedProjectPath}
-                    target={previewTarget}
-                    onChangeDraft={updateEditorDraft}
-                    onDiscardConflict={discardConflictToDisk}
-                    onSave={saveActivePreviewFile}
-                    onSetConflictDraftContent={setConflictDraftContent}
-                  />
-              ) : gitAvailability === "loading" ? (
-                <div className="diff-loading">
-                  <Loader2 className="spin" size={18} />
-                </div>
-              ) : !hasGitRepository ? (
-                <div className="empty-state">
-                  <div className="empty-title">Git Diff Unavailable</div>
-                  <div className="empty-copy">
-                    This folder is not inside a Git repository.
-                  </div>
-                </div>
-              ) : payload && !selectedChangePath ? (
-                <div className="empty-state">
-                  <div className="empty-title">Select a changed file</div>
-                  <div className="empty-copy">
-                    Choose a file from Changes to render its diff.
-                  </div>
-                </div>
-              ) : payload && fileDiffQuery.isFetching && !currentFileDiff ? (
-                <div className="diff-loading">
-                  <Loader2 className="spin" size={18} />
-                </div>
-              ) : payload ? (
-                <DiffPanel
-                  error={
-                    parsedDiff.error ??
-                    (fileDiffQuery.isError
-                      ? String(fileDiffQuery.error.message)
-                      : null)
-                  }
-                  files={visibleDiffFiles}
-                  title={selectedChangePath ?? "Repository diff"}
-                  projectPath={activeProject?.activePath ?? null}
-                  commit={activeCommit}
-                />
-              ) : (
-                <div className="diff-loading">
-                  <Loader2 className="spin" size={18} />
-                </div>
-              )}
+              <EditorPaneGrid
+                activeCommit={activeCommit}
+                activePaneId={activePaneId}
+                activeProjectPath={activeProjectPath}
+                dirtyTabIds={dirtyPreviewTabIds}
+                editorDrafts={editorDrafts}
+                gitAvailability={gitAvailability}
+                hasGitRepository={hasGitRepository}
+                layout={previewPaneLayout}
+                projectFiles={projectFilesQuery.data ?? payload?.files ?? []}
+                repositoryLoading={repositoryQuery.isFetching}
+                repositoryReady={Boolean(payload)}
+                saveError={saveError}
+                savingActiveFile={savingActiveFile}
+                onActivatePane={activatePane}
+                onChangeDraft={updateEditorDraft}
+                onCloseAllTabs={closeAllTabs}
+                onCloseOtherTabs={closeOtherTabs}
+                onCloseTab={closePreviewTab}
+                onDiscardConflict={discardConflictToDisk}
+                onReorderTabs={reorderPreviewTabs}
+                onSave={saveActivePreviewFile}
+                onSelectTab={activatePreviewTab}
+                onSetConflictDraftContent={setConflictDraftContent}
+                onSplitTab={splitTab}
+              />
             </section>
             {hasRightTopPanel ? (
               <>
