@@ -1,23 +1,63 @@
 import { useMemo } from "react";
 import type { ChangeEvent } from "react";
-import { GitBranch, GitCommitHorizontal, Loader2 } from "lucide-react";
+import {
+  GitBranch,
+  GitCommitHorizontal,
+  Loader2,
+  Minus,
+  Plus,
+} from "lucide-react";
 import type { TreeFile } from "../../lib/api";
+import {
+  stageableFilePaths,
+  unstageableFilePaths,
+} from "../../lib/gitBatchFileActions";
 import type { GitWriteActions } from "../../hooks/useGitWriteActions";
+import type { TreeGitFileActions } from "../TreeContextMenu";
 
 export interface CommitFormProps {
   readonly branchName?: string;
   readonly files: readonly TreeFile[];
+  readonly gitFileActions?: TreeGitFileActions;
   readonly gitWriteActions: GitWriteActions;
 }
 
 export function CommitForm({
   branchName,
   files,
+  gitFileActions,
   gitWriteActions,
 }: CommitFormProps) {
   const unstagedCount = useMemo(() => countUnstagedFiles(files), [files]);
+  const stageablePaths = useMemo(() => stageableFilePaths(files), [files]);
+  const unstageablePaths = useMemo(() => unstageableFilePaths(files), [files]);
   const commitButtonTitle =
     gitWriteActions.commitDisabledReason ?? "Commit staged changes";
+  const pendingTitle =
+    gitFileActions?.pendingTitle ?? gitWriteActions.gitWritePendingReason;
+  const stageAllTitle =
+    pendingTitle ??
+    batchActionTitle(
+      "Stage",
+      stageablePaths.length,
+      "No unstaged changes to stage.",
+    );
+  const unstageAllTitle =
+    pendingTitle ??
+    batchActionTitle(
+      "Unstage",
+      unstageablePaths.length,
+      "No staged changes to unstage.",
+    );
+  const canRunBatchAction = gitFileActions?.canRun === true;
+  const canStageAll =
+    canRunBatchAction &&
+    stageablePaths.length > 0 &&
+    Boolean(gitFileActions?.onStageFiles);
+  const canUnstageAll =
+    canRunBatchAction &&
+    unstageablePaths.length > 0 &&
+    Boolean(gitFileActions?.onUnstageFiles);
 
   function handleMessageChange(event: ChangeEvent<HTMLTextAreaElement>) {
     gitWriteActions.setCommitMessage(event.target.value);
@@ -28,6 +68,20 @@ export function CommitForm({
       return;
     }
     void gitWriteActions.commitStagedChanges();
+  }
+
+  function stageAll() {
+    if (!canStageAll) {
+      return;
+    }
+    gitFileActions?.onStageFiles?.(stageablePaths);
+  }
+
+  function unstageAll() {
+    if (!canUnstageAll) {
+      return;
+    }
+    gitFileActions?.onUnstageFiles?.(unstageablePaths);
   }
 
   return (
@@ -43,7 +97,10 @@ export function CommitForm({
           <GitBranch size={13} />
           <strong>{branchName ?? "current"}</strong>
         </div>
-        <div className="commit-form-counts" aria-label="Working tree change counts">
+        <div
+          className="commit-form-counts"
+          aria-label="Working tree change counts"
+        >
           <span className="commit-count-pill staged">
             <strong>{gitWriteActions.stagedCount}</strong>
             staged
@@ -58,6 +115,26 @@ export function CommitForm({
               conflicted
             </span>
           ) : null}
+          <button
+            className="commit-batch-button stage"
+            type="button"
+            disabled={!canStageAll}
+            title={stageAllTitle}
+            onClick={stageAll}
+          >
+            <Plus size={12} />
+            <span>Stage all</span>
+          </button>
+          <button
+            className="commit-batch-button"
+            type="button"
+            disabled={!canUnstageAll}
+            title={unstageAllTitle}
+            onClick={unstageAll}
+          >
+            <Minus size={12} />
+            <span>Unstage all</span>
+          </button>
         </div>
       </header>
       <label className="commit-message-field" aria-label="Commit message">
@@ -109,4 +186,16 @@ export function CommitForm({
 function countUnstagedFiles(files: readonly TreeFile[]): number {
   return files.filter((file) => file.unstaged === true || file.untracked === true)
     .length;
+}
+
+function batchActionTitle(
+  verb: string,
+  fileCount: number,
+  emptyTitle: string,
+): string {
+  if (fileCount === 0) {
+    return emptyTitle;
+  }
+
+  return `${verb} ${fileCount} file${fileCount === 1 ? "" : "s"}`;
 }

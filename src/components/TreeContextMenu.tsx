@@ -18,7 +18,7 @@ export type {
 } from "./treeGitContextMenuActions";
 interface TreeContextMenuProps {
   readonly context: ContextMenuOpenContext;
-  readonly file: TreeFile | null;
+  readonly files: readonly TreeFile[];
   readonly gitFileActions?: TreeGitFileActions;
   readonly item: ContextMenuItem;
   readonly onCreateFile?: (parentPath: string | null) => void;
@@ -67,7 +67,7 @@ export function hasTreeContextMenuActions({
 
 export function TreeContextMenu({
   context,
-  file,
+  files,
   gitFileActions,
   item,
   onCreateFile,
@@ -78,7 +78,7 @@ export function TreeContextMenu({
   const { anchorRect } = context;
   const parentPath =
     item.kind === "directory" ? item.path : parentPathFromTreePath(item.path);
-  const gitActions = buildGitContextMenuActions(file, gitFileActions, context);
+  const gitActions = buildGitContextMenuActions(files, gitFileActions, context);
   const hasFileActions = Boolean(onCreateFile || onStartRename || onDeleteFile);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [menuPosition, setMenuPosition] = useState(() =>

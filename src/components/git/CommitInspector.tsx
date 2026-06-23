@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 import { GitBranch, RotateCcw } from "lucide-react";
 import type { CommitInfo, ReflogEntry, RepositoryPayload } from "../../lib/api";
 import { formatDate } from "../../lib/dateFormat";
@@ -109,6 +109,7 @@ export function CommitInspector({
         branchName={branchName}
         commit={commit}
         files={files}
+        gitFileActions={gitFileActions}
         gitWriteActions={gitWriteActions}
         historyMode={historyMode}
         selectedReflogEntry={selectedReflogEntry}
@@ -122,6 +123,7 @@ const CommitDetails = memo(function CommitDetails({
   commit,
   branchName,
   files,
+  gitFileActions,
   gitWriteActions,
   historyMode,
   selectedReflogEntry,
@@ -130,6 +132,7 @@ const CommitDetails = memo(function CommitDetails({
   commit: CommitInfo | null;
   branchName?: string;
   files: RepositoryPayload["files"];
+  gitFileActions?: TreeGitFileActions;
   gitWriteActions: GitWriteActions;
   historyMode: "commits" | "reflog";
   selectedReflogEntry: ReflogEntry | null;
@@ -145,6 +148,7 @@ const CommitDetails = memo(function CommitDetails({
         <CommitForm
           branchName={branchName}
           files={files}
+          gitFileActions={gitFileActions}
           gitWriteActions={gitWriteActions}
         />
       </section>

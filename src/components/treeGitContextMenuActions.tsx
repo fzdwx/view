@@ -2,6 +2,10 @@ import type { ContextMenuOpenContext } from "@pierre/trees";
 import { Minus, Plus, RotateCcw } from "lucide-react";
 import type { ReactNode } from "react";
 import type { TreeFile } from "../lib/api";
+import {
+  stageableFilePaths,
+  unstageableFilePaths,
+} from "../lib/gitBatchFileActions";
 
 export type TreeGitFileActionKind = "restore" | "stage" | "unstage";
 
@@ -12,7 +16,9 @@ export interface TreeGitFileActions {
   readonly pendingTitle: string | null;
   readonly onRestoreFile?: (path: string) => void;
   readonly onStageFile?: (path: string) => void;
+  readonly onStageFiles?: (paths: readonly string[]) => void;
   readonly onUnstageFile?: (path: string) => void;
+  readonly onUnstageFiles?: (paths: readonly string[]) => void;
 }
 
 export interface TreeGitContextMenuAction {
@@ -25,11 +31,20 @@ export interface TreeGitContextMenuAction {
 }
 
 export function buildGitContextMenuActions(
-  file: TreeFile | null,
+  files: readonly TreeFile[],
   gitFileActions: TreeGitFileActions | undefined,
   context: ContextMenuOpenContext,
 ): TreeGitContextMenuAction[] {
-  if (!file || !gitFileActions) {
+  if (files.length === 0 || !gitFileActions) {
+    return [];
+  }
+
+  if (files.length > 1) {
+    return buildBatchGitContextMenuActions(files, gitFileActions, context);
+  }
+
+  const file = files[0];
+  if (!file) {
     return [];
   }
 
@@ -90,6 +105,51 @@ export function buildGitContextMenuActions(
       onSelect: () => {
         context.close();
         gitFileActions.onRestoreFile?.(file.path);
+      },
+    });
+  }
+
+  return actions;
+}
+
+function buildBatchGitContextMenuActions(
+  files: readonly TreeFile[],
+  gitFileActions: TreeGitFileActions,
+  context: ContextMenuOpenContext,
+): TreeGitContextMenuAction[] {
+  const pendingTitle = pendingGitActionTitle(gitFileActions);
+  const stageablePaths = stageableFilePaths(files);
+  const unstageablePaths = unstageableFilePaths(files);
+  const actions: TreeGitContextMenuAction[] = [];
+
+  if (stageablePaths.length > 0 && gitFileActions.onStageFiles) {
+    actions.push({
+      disabled: !gitFileActions.canRun,
+      icon: <Plus size={13} />,
+      key: "stage",
+      label: "Stage selected",
+      title:
+        pendingTitle ??
+        `Stage ${stageablePaths.length} selected file${stageablePaths.length === 1 ? "" : "s"}`,
+      onSelect: () => {
+        context.close();
+        gitFileActions.onStageFiles?.(stageablePaths);
+      },
+    });
+  }
+
+  if (unstageablePaths.length > 0 && gitFileActions.onUnstageFiles) {
+    actions.push({
+      disabled: !gitFileActions.canRun,
+      icon: <Minus size={13} />,
+      key: "unstage",
+      label: "Unstage selected",
+      title:
+        pendingTitle ??
+        `Unstage ${unstageablePaths.length} selected file${unstageablePaths.length === 1 ? "" : "s"}`,
+      onSelect: () => {
+        context.close();
+        gitFileActions.onUnstageFiles?.(unstageablePaths);
       },
     });
   }

@@ -1,13 +1,11 @@
 import { FileTree, useFileTree } from "@pierre/trees/react";
 import type {
-  FileTreeDirectoryHandle,
   FileTreeInitialExpansion,
-  FileTreeItemHandle,
+  FileTreeRowDecorationContext,
 } from "@pierre/trees";
 import {
   type ClipboardEvent,
   type DragEvent,
-  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   memo,
   useCallback,
@@ -18,23 +16,22 @@ import {
 import type { TreeFile } from "../lib/api";
 import { clipboardFilesFromEvent } from "../lib/clipboardFiles";
 import { parentPathFromPath } from "../lib/pathLabels";
-import {
-  TreeContextMenu,
-  type TreeGitFileActions,
-  hasTreeContextMenuActions,
-} from "./TreeContextMenu";
+import type { TreeGitFileActions } from "./TreeContextMenu";
+import { hasTreeContextMenuActions } from "./TreeContextMenu";
 import { TreeEmptyState, TreePanelHeader } from "./TreePanelChrome";
+import { TreePanelContextMenuHost } from "./TreePanelContextMenuHost";
+import { treeGitStageDecoration } from "./treePanelGitDecorations";
+import { buildTreePanelData, directoryPathsFor } from "./treePanelData";
 import {
-  ancestorDirectoryPaths,
-  buildTreePanelData,
-  directoryPathsFor,
-} from "./treePanelData";
-import { getClickedFilePath } from "./treePanelPointer";
+  isDirectoryHandle,
+  syncTreePanelSelectedPath,
+} from "./treePanelSelection";
 import {
   fileTreeIcons,
   treeContentAlignmentCss,
   treeDarkThemeStyles,
 } from "./treePanelTheme";
+import { useTreePanelInputHandlers } from "./useTreePanelInputHandlers";
 
 interface TreePanelProps {
   files: TreeFile[];
@@ -77,14 +74,25 @@ export const TreePanel = memo(function TreePanel({
 
   const { paths, preparedInput, selectablePaths, fileByPath, gitStatus } =
     treeData;
+  const fileByPathRef = useRef(fileByPath);
   const selectablePathsRef = useRef(selectablePaths);
   const lastTreeSelectionPathRef = useRef(selectedPath);
   const onSelectPathRef = useRef(onSelectPath);
   const selectedPathRef = useRef(selectedPath);
+  const treeSelectedPathsRef = useRef<readonly string[]>(
+    selectedPath ? [selectedPath] : [],
+  );
 
+  fileByPathRef.current = fileByPath;
   selectablePathsRef.current = selectablePaths;
   onSelectPathRef.current = onSelectPath;
   selectedPathRef.current = selectedPath;
+
+  const renderTreeGitStageDecoration = useCallback(
+    (context: FileTreeRowDecorationContext) =>
+      treeGitStageDecoration(fileByPathRef.current.get(context.item.path) ?? null),
+    [],
+  );
 
   const { model } = useFileTree({
     preparedInput,
@@ -107,7 +115,10 @@ export const TreePanel = memo(function TreePanel({
       : false,
     search: true,
     stickyFolders: true,
-    onSelectionChange: ([path]) => {
+    renderRowDecoration: renderTreeGitStageDecoration,
+    onSelectionChange: (selectedPaths) => {
+      treeSelectedPathsRef.current = selectedPaths;
+      const path = selectedPaths[0] ?? null;
       lastTreeSelectionPathRef.current = path ?? null;
       if (path && selectablePathsRef.current.has(path)) {
         onSelectPathRef.current(path);
@@ -116,61 +127,22 @@ export const TreePanel = memo(function TreePanel({
   });
 
   const syncSelectedPath = useCallback(() => {
-    const selectedPaths = model.getSelectedPaths();
-    if (!selectedPath || !selectablePaths.has(selectedPath)) {
-      for (const selected of selectedPaths) {
-        model.getItem(selected)?.deselect();
-      }
-      return;
-    }
-
-    for (const directoryPath of ancestorDirectoryPaths(selectedPath)) {
-      const item = model.getItem(directoryPath);
-      if (item && isDirectoryHandle(item)) {
-        item.expand();
-      }
-    }
-
-    const selectedAlready =
-      selectedPaths.length === 1 && selectedPaths[0] === selectedPath;
-    if (!selectedAlready) {
-      for (const selected of selectedPaths) {
-        model.getItem(selected)?.deselect();
-      }
-      model.getItem(selectedPath)?.select();
-    }
-    model.scrollToPath(selectedPath);
+    syncTreePanelSelectedPath({ model, selectablePaths, selectedPath });
+    treeSelectedPathsRef.current = model.getSelectedPaths();
   }, [model, selectablePaths, selectedPath]);
 
-  const handleTreeClickCapture = useCallback(
-    (event: ReactMouseEvent<HTMLElement>) => {
-      const clickedFile = getClickedFilePath(event);
-      if (!clickedFile || !selectablePathsRef.current.has(clickedFile.path)) {
-        return;
-      }
-      if (
-        !clickedFile.selected ||
-        selectedPathRef.current === clickedFile.path ||
-        lastTreeSelectionPathRef.current === clickedFile.path
-      ) {
-        return;
-      }
-
-      const path = clickedFile.path;
-      window.requestAnimationFrame(() => {
-        if (
-          selectedPathRef.current === path ||
-          lastTreeSelectionPathRef.current === path ||
-          !selectablePathsRef.current.has(path)
-        ) {
-          return;
-        }
-
-        onSelectPathRef.current(path);
-      });
-    },
-    [],
-  );
+  const {
+    handleTreeClickCapture,
+    handleTreeContextMenuCapture,
+    handleTreeKeyDownCapture,
+  } = useTreePanelInputHandlers({
+    lastTreeSelectionPathRef,
+    model,
+    onSelectPathRef,
+    selectablePathsRef,
+    selectedPathRef,
+    treeSelectedPathsRef,
+  });
   const handleCreateRootFile = useCallback(() => {
     onCreateFile?.(null);
   }, [onCreateFile]);
@@ -194,7 +166,7 @@ export const TreePanel = memo(function TreePanel({
       let destDir: string | null = null;
       if (current) {
         const item = model.getItem(current);
-        destDir = item?.isDirectory()
+        destDir = isDirectoryHandle(item)
           ? current.replace(/\/$/, "")
           : parentDirectoryFromTreePath(current);
       }
@@ -234,6 +206,8 @@ export const TreePanel = memo(function TreePanel({
       model={model}
       style={treeDarkThemeStyles}
       onClickCapture={handleTreeClickCapture}
+      onContextMenuCapture={handleTreeContextMenuCapture}
+      onKeyDownCapture={handleTreeKeyDownCapture}
       onPaste={onPasteFiles ? handleTreePaste : undefined}
       header={
         showHeader ? (
@@ -255,26 +229,17 @@ export const TreePanel = memo(function TreePanel({
           onRunScript,
         })
           ? (item, context) => (
-              <TreeContextMenu
-                item={item}
+              <TreePanelContextMenuHost
+                canRename={Boolean(onRenameFile)}
                 context={context}
-                file={
-                  item.kind === "directory"
-                    ? null
-                    : (fileByPath.get(item.path) ?? null)
-                }
+                fileByPath={fileByPath}
                 gitFileActions={gitFileActions}
+                item={item}
+                model={model}
                 onCreateFile={onCreateFile}
                 onDeleteFile={onDeleteFile}
                 onRunScript={onRunScript}
-                onStartRename={
-                  onRenameFile
-                    ? (path: string) => {
-                        context.close({ restoreFocus: false });
-                        model.startRenaming(path);
-                      }
-                    : undefined
-                }
+                selectedPaths={treeSelectedPathsRef.current}
               />
             )
           : undefined
@@ -282,12 +247,6 @@ export const TreePanel = memo(function TreePanel({
     />
   );
 });
-
-function isDirectoryHandle(
-  item: FileTreeItemHandle,
-): item is FileTreeDirectoryHandle {
-  return item.isDirectory();
-}
 
 /// Parent directory of a tree path, or null for a root-level entry.
 function parentDirectoryFromTreePath(path: string): string | null {

@@ -6,15 +6,14 @@ import {
 } from "react";
 import {
   restoreFiles,
-  saveFileContent,
   stageFiles,
   unstageFiles,
   type RestoreMode,
 } from "../lib/api";
-import { editorDraftKey, isDraftDirty } from "../lib/editorDrafts";
 import type { EditorDraft } from "../lib/editorTypes";
 import { confirmNativeDialog, showNativeMessage } from "../lib/nativeDialogs";
 import type { SavedProject } from "../lib/projects";
+import { saveDirtyDraftBeforeStage } from "./saveDirtyDraftBeforeStage";
 import {
   gitWriteOperationPendingTitle,
   type GitFileActionKind,
@@ -51,7 +50,9 @@ export interface GitFileActions {
     mode?: RestoreMode,
   ) => Promise<boolean>;
   readonly stageFile: (filePath: string) => Promise<boolean>;
+  readonly stageFilePaths: (filePaths: readonly string[]) => Promise<boolean>;
   readonly unstageFile: (filePath: string) => Promise<boolean>;
+  readonly unstageFilePaths: (filePaths: readonly string[]) => Promise<boolean>;
 }
 
 type GitFileActionRunner = (projectPath: string) => Promise<boolean>;
@@ -127,46 +128,15 @@ export function useGitFileActions({
     ],
   );
 
-  const saveDirtyDraftBeforeStage = useCallback(
+  const saveStageDraft = useCallback(
     async (projectPath: string, filePath: string): Promise<boolean> => {
-      const draft = editorDrafts[editorDraftKey(projectPath, filePath)];
-      if (!isDraftDirty(draft)) {
-        return true;
-      }
-
-      const confirmed = await confirmNativeDialog(
-        `${filePath} has unsaved editor changes. Save it before staging?`,
-        {
-          cancelLabel: "Cancel",
-          kind: "warning",
-          okLabel: "Save",
-        },
-      );
-      if (!confirmed) {
-        return false;
-      }
-
-      const baseContent = draft.conflict
-        ? draft.conflict.currentContent
-        : draft.baseContent;
-      const response = await saveFileContent(
-        projectPath,
+      return saveDirtyDraftBeforeStage({
+        discardDraftForPath,
+        editorDrafts,
         filePath,
-        baseContent,
-        draft.content,
-      );
-
-      if (response.status === "conflict") {
-        await refreshProjectFileState(projectPath);
-        await showNativeMessage(
-          `${filePath} changed on disk. Resolve the save conflict before staging.`,
-          { kind: "warning" },
-        );
-        return false;
-      }
-
-      discardDraftForPath(projectPath, filePath);
-      return true;
+        projectPath,
+        refreshProjectFileState,
+      });
     },
     [discardDraftForPath, editorDrafts, refreshProjectFileState],
   );
@@ -174,7 +144,7 @@ export function useGitFileActions({
   const stageFile = useCallback(
     (filePath: string) =>
       runGitFileAction("stage", filePath, async (projectPath) => {
-        const canStage = await saveDirtyDraftBeforeStage(projectPath, filePath);
+        const canStage = await saveStageDraft(projectPath, filePath);
         if (!canStage) {
           return false;
         }
@@ -182,7 +152,29 @@ export function useGitFileActions({
         await stageFiles({ path: projectPath, paths: [filePath] });
         return true;
       }),
-    [runGitFileAction, saveDirtyDraftBeforeStage],
+    [runGitFileAction, saveStageDraft],
+  );
+
+  const stageFilePaths = useCallback(
+    (filePaths: readonly string[]) =>
+      filePaths.length === 0
+        ? Promise.resolve(false)
+        : runGitFileAction(
+            "stage",
+            batchPathLabel(filePaths),
+            async (projectPath) => {
+              for (const filePath of filePaths) {
+                const canStage = await saveStageDraft(projectPath, filePath);
+                if (!canStage) {
+                  return false;
+                }
+              }
+
+              await stageFiles({ path: projectPath, paths: filePaths });
+              return true;
+            },
+          ),
+    [runGitFileAction, saveStageDraft],
   );
 
   const unstageFile = useCallback(
@@ -191,6 +183,21 @@ export function useGitFileActions({
         await unstageFiles({ path: projectPath, paths: [filePath] });
         return true;
       }),
+    [runGitFileAction],
+  );
+
+  const unstageFilePaths = useCallback(
+    (filePaths: readonly string[]) =>
+      filePaths.length === 0
+        ? Promise.resolve(false)
+        : runGitFileAction(
+            "unstage",
+            batchPathLabel(filePaths),
+            async (projectPath) => {
+              await unstageFiles({ path: projectPath, paths: filePaths });
+              return true;
+            },
+          ),
     [runGitFileAction],
   );
 
@@ -227,14 +234,24 @@ export function useGitFileActions({
   );
 
   return {
-    canRunGitFileAction: Boolean(activeProject && hasGitRepository && !pendingOperation),
+    canRunGitFileAction: Boolean(
+      activeProject && hasGitRepository && !pendingOperation,
+    ),
     gitFileActionError,
     gitFileActionPending,
     gitFileActionPendingTitle,
     restoreFile,
     stageFile,
+    stageFilePaths,
     unstageFile,
+    unstageFilePaths,
   };
+}
+
+function batchPathLabel(filePaths: readonly string[]): string {
+  return filePaths.length === 1
+    ? (filePaths[0] ?? "1 file")
+    : `${filePaths.length} files`;
 }
 
 function errorMessage(error: unknown): string {

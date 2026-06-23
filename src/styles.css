@@ -2877,10 +2877,10 @@ body.is-resizing-y * {
   display: grid;
   grid-template-columns:
     var(--commit-graph-width, 30px)
-    minmax(120px, 1fr)
-    minmax(56px, 92px)
-    minmax(58px, 92px)
-    minmax(54px, 70px);
+    minmax(104px, 1fr)
+    minmax(54px, 88px)
+    minmax(104px, 110px)
+    minmax(56px, 72px);
   align-items: center;
   border-bottom: 1px solid var(--line);
   background: var(--surface-1);
@@ -3143,10 +3143,10 @@ body.is-resizing-y * {
   position: relative;
   grid-template-columns:
     var(--commit-graph-width, 30px)
-    minmax(120px, 1fr)
-    minmax(56px, 92px)
-    minmax(58px, 92px)
-    minmax(54px, 70px);
+    minmax(104px, 1fr)
+    minmax(54px, 88px)
+    minmax(104px, 110px)
+    minmax(56px, 72px);
   align-items: stretch;
   width: 100%;
   min-width: 0;
@@ -3197,9 +3197,9 @@ body.is-resizing-y * {
   grid-template-columns:
     minmax(72px, 94px)
     minmax(150px, 1fr)
-    minmax(72px, 110px)
-    minmax(72px, 110px)
-    minmax(54px, 70px);
+    minmax(64px, 96px)
+    minmax(108px, 118px)
+    minmax(56px, 72px);
 }
 
 .commit-subject {
@@ -3434,6 +3434,7 @@ body.is-resizing-y * {
 .commit-author,
 .commit-date,
 .commit-hash {
+  padding-inline: 6px;
   min-width: 0;
   color: var(--muted);
   font-size: 12px;
@@ -3869,6 +3870,7 @@ body.is-resizing-y * {
 .commit-form-header {
   display: flex;
   min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -3894,11 +3896,12 @@ body.is-resizing-y * {
 
 .commit-form-counts {
   display: flex;
-  flex: 0 0 auto;
+  flex: 1 1 180px;
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 5px;
+  min-width: 0;
 }
 
 .commit-count-pill {
@@ -3933,6 +3936,44 @@ body.is-resizing-y * {
 .commit-count-pill.conflict {
   border-color: color-mix(in oklch, var(--danger) 42%, var(--line));
   color: var(--danger);
+}
+
+.commit-batch-button {
+  display: inline-flex;
+  height: 20px;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+  padding: 0 6px;
+  white-space: nowrap;
+}
+
+.commit-batch-button:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--surface-3);
+  color: var(--ink);
+}
+
+.commit-batch-button.stage {
+  border-color: color-mix(in oklch, var(--success) 30%, var(--line));
+  background: color-mix(in oklch, var(--success) 10%, var(--surface-2));
+  color: var(--ink);
+}
+
+.commit-batch-button.stage:hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--success) 48%, var(--line));
+  background: color-mix(in oklch, var(--success) 16%, var(--surface-2));
+}
+
+.commit-batch-button:disabled {
+  border-color: var(--line);
+  background: var(--surface-2);
+  color: var(--faint);
 }
 
 .commit-message-field {
@@ -5731,12 +5772,16 @@ body.is-resizing-y * {
 
   .commit-list-header,
   .commit-row {
-    grid-template-columns: var(--commit-graph-width, 34px) minmax(140px, 1fr) 86px 86px;
+    grid-template-columns:
+      var(--commit-graph-width, 34px)
+      minmax(124px, 1fr)
+      78px
+      104px;
   }
 
   .reflog-table .commit-list-header,
   .reflog-row {
-    grid-template-columns: 88px minmax(140px, 1fr) 86px 86px;
+    grid-template-columns: 88px minmax(140px, 1fr) 82px 108px;
   }
 
   .commit-list-header > span:last-child,

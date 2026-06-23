@@ -296,7 +296,9 @@ export function App() {
     gitFileActionPendingTitle,
     restoreFile,
     stageFile,
+    stageFilePaths,
     unstageFile,
+    unstageFilePaths,
   } = useGitFileActions({
     activeProject,
     discardDraftForPath,
@@ -737,8 +739,14 @@ export function App() {
       onStageFile: (path: string) => {
         void stageFile(path);
       },
+      onStageFiles: (paths: readonly string[]) => {
+        void stageFilePaths(paths);
+      },
       onUnstageFile: (path: string) => {
         void unstageFile(path);
+      },
+      onUnstageFiles: (paths: readonly string[]) => {
+        void unstageFilePaths(paths);
       },
     }),
     [
@@ -748,7 +756,9 @@ export function App() {
       gitFileActionPendingTitle,
       restoreFile,
       stageFile,
+      stageFilePaths,
       unstageFile,
+      unstageFilePaths,
     ],
   );
   const activeTreeGitFileActions = hasGitRepository

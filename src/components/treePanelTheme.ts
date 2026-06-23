@@ -34,6 +34,14 @@ export const fileTreeIcons: FileTreeIcons = {
 
 export const treeContentAlignmentCss = `
   :host {
+    --view-tree-conflict-color: var(--danger, #ff2e3f);
+    --view-tree-staged-color: var(--success, #07c480);
+    --view-tree-unstaged-color: color-mix(
+      in oklch,
+      var(--warning, #ffca00) 58%,
+      var(--muted, #858585)
+    );
+
     text-rendering: auto;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: auto;
@@ -81,5 +89,64 @@ export const treeContentAlignmentCss = `
 
   [data-item-flattened-subitem] > [data-truncate-container] {
     margin-block: 0;
+  }
+
+  [data-item-section='decoration'] > span[title='Conflicted change'],
+  [data-item-section='decoration'] > span[title='Staged change'],
+  [data-item-section='decoration'] > span[title='Unstaged change'],
+  [data-item-section='decoration'] > span[title='Staged and unstaged changes'] {
+    min-width: 15px;
+    max-width: none;
+    height: 14px;
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    font-family: var(--trees-font-family);
+    font-size: 9px;
+    font-weight: 600;
+    line-height: 12px;
+    padding: 0 3px;
+    justify-content: center;
+    opacity: 0.95;
+  }
+
+  [data-item-section='decoration'] > span[title='Conflicted change'] {
+    color: var(--view-tree-conflict-color);
+    background: color-mix(
+      in oklch,
+      var(--view-tree-conflict-color) 13%,
+      transparent
+    );
+  }
+
+  [data-item-section='decoration'] > span[title='Staged change'] {
+    color: var(--view-tree-staged-color);
+    background: color-mix(
+      in oklch,
+      var(--view-tree-staged-color) 13%,
+      transparent
+    );
+  }
+
+  [data-item-section='decoration'] > span[title='Unstaged change'] {
+    color: var(--view-tree-unstaged-color);
+    background: color-mix(
+      in oklch,
+      var(--view-tree-unstaged-color) 11%,
+      transparent
+    );
+  }
+
+  [data-item-section='decoration'] > span[title='Staged and unstaged changes'] {
+    color: var(--view-tree-staged-color);
+    border-color: color-mix(
+      in oklch,
+      var(--view-tree-staged-color) 58%,
+      var(--view-tree-unstaged-color)
+    );
+    background: linear-gradient(
+      90deg,
+      color-mix(in oklch, var(--view-tree-staged-color) 15%, transparent) 0 50%,
+      color-mix(in oklch, var(--view-tree-unstaged-color) 15%, transparent) 50%
+    );
   }
 `;
