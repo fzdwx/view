@@ -101,7 +101,7 @@ export function PreviewTabBar({
     .join(" ");
 
   function handleTabDragStart(event: DragEvent, tabId: string) {
-    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.effectAllowed = "copyMove";
     event.dataTransfer.setData("text/plain", tabId);
     setDragTabId(tabId);
   }

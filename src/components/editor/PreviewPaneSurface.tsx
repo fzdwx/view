@@ -13,6 +13,10 @@ import {
 } from "../../lib/previewPanes";
 import type { PreviewTab } from "../../lib/previewTabs";
 import { usePreviewPaneData } from "../../hooks/usePreviewPaneData";
+import {
+  previewPaneSurfaceClassName,
+  usePreviewPaneSplitDrop,
+} from "./usePreviewPaneSplitDrop";
 
 interface PreviewPaneSurfaceProps {
   readonly activeCommit: string | null;
@@ -83,6 +87,7 @@ export function PreviewPaneSurface({
     projectFiles,
   });
   const isActive = pane.id === activePaneId;
+  const splitDrop = usePreviewPaneSplitDrop({ pane, onSplitTab });
   const draft =
     activeProjectPath && data.selectedProjectPath
       ? editorDrafts[editorDraftKey(activeProjectPath, data.selectedProjectPath)] ??
@@ -91,9 +96,10 @@ export function PreviewPaneSurface({
 
   return (
     <section
-      className={isActive ? "editor-pane active" : "editor-pane"}
+      className={previewPaneSurfaceClassName(isActive, splitDrop.intent)}
       onPointerDownCapture={() => onActivatePane(pane.id)}
       onFocusCapture={() => onActivatePane(pane.id)}
+      {...splitDrop.dragHandlers}
     >
       <PreviewTabBar
         activeTabId={pane.activeTabId}

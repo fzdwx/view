@@ -2,6 +2,7 @@ import type { DragEvent, MouseEvent } from "react";
 import { GitCompare, X } from "lucide-react";
 import { useFileIcon } from "../lib/fileIcons";
 import { fileNameFromPath } from "../lib/pathLabels";
+import { writePreviewTabDragData } from "../lib/previewTabDrag";
 import type { PreviewTab } from "../lib/previewTabs";
 
 export function PreviewTabItem({
@@ -44,7 +45,10 @@ export function PreviewTabItem({
         .join(" ")}
       title={tab.path}
       draggable
-      onDragStart={(event) => onDragStart(event, tab.id)}
+      onDragStart={(event) => {
+        writePreviewTabDragData(event.dataTransfer, { tabId: tab.id });
+        onDragStart(event, tab.id);
+      }}
       onDragOver={(event) => onDragOver(event, tab.id)}
       onDrop={(event) => onDrop(event, tab.id)}
       onDragEnd={onDragEnd}
