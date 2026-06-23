@@ -41,6 +41,7 @@ export interface GitPanelDataProps {
   readonly activeCommit: string | null;
   readonly activeReflogSelector: string | null;
   readonly changedFiles: RepositoryPayload["files"];
+  readonly commitFiles: RepositoryPayload["files"];
   readonly commitFilter: string;
   readonly commits: CommitInfo[];
   readonly commitsLoading: boolean;

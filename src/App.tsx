@@ -51,6 +51,7 @@ import { useSelectedPathGuard } from "./hooks/useSelectedPathGuard";
 import { useWorkbenchDock } from "./hooks/useWorkbenchDock";
 import { type FileSearchResult, type ProjectScript, detectProjectScripts, terminalKill, type ReflogEntry } from "./lib/api";
 import { pasteDestinationFromSelectedPath } from "./lib/clipboardFiles";
+import { commitPanelFiles } from "./lib/commitPanelFiles";
 import {
   type SavedProject,
   loadSavedProjects,
@@ -500,9 +501,6 @@ export function App() {
     },
     [pasteFilesFromTree],
   );
-  const handleProjectTreeCopyFile = useCallback(() => {
-    void copyFileFromTree(selectedProjectFile?.path ?? null);
-  }, [copyFileFromTree, selectedProjectFile?.path]);
   const copySelectedProjectFileEvent = useEffectEvent(() => {
     void copyFileFromTree(selectedProjectFile?.path ?? null);
   });
@@ -762,6 +760,7 @@ export function App() {
       activeCommit,
       activeReflogSelector,
       changedFiles,
+      commitFiles: commitPanelFiles(payload),
       commitFilter,
       commits,
       commitsLoading: commitsQuery.isLoading,
