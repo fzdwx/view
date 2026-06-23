@@ -107,6 +107,7 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
   const editorSearchRequestRef = useRef(0);
   const editorSearchTimerRef = useRef<number | null>(null);
   const editorFindStatesRef = useRef<Map<string, EditorFindState> | null>(null);
+  const editorMetricsRef = useRef({ height: 0, width: 0 });
   if (editorFindStatesRef.current === null) {
     editorFindStatesRef.current = new Map<string, EditorFindState>();
   }
@@ -128,10 +129,8 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
   const [activeEditorMatchIndex, setActiveEditorMatchIndex] = useState(0);
   const [activeGitMarkerId, setActiveGitMarkerId] = useState<string | null>(null);
   const [fileViewMode, setFileViewMode] = useState<FileViewMode>("source");
-  const [editorScrollLeft, setEditorScrollLeft] = useState(0);
   const [editorViewportHeight, setEditorViewportHeight] = useState(0);
   const [editorViewportWidth, setEditorViewportWidth] = useState(0);
-  const [activeEditorLineNumber, setActiveEditorLineNumber] = useState(1);
   const [gitPopoverLeftOffset, setGitPopoverLeftOffset] = useState(0);
   // Derived file values; the `??` coalescing here is flagged as a pseudo
   // event-handler by a false positive, so suppress the rule for this block.
@@ -142,12 +141,15 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
   const mediaType = file?.mediaType ?? null;
   const renderableMedia = Boolean(mediaDataUrl && mediaType?.startsWith("image/"));
   const canShowMediaSource = Boolean(file && !file.binary && !file.tooLarge);
-  const lines = useMemo(
-    () => (content.length > 0 ? content.split(/\r?\n/) : [""]),
+  const lineCount = useMemo(
+    () => countContentLines(content),
     [content],
   );
   const visibleGitMarkers = useMemo(
-    () => filterVisibleEditorGitMarkers(gitMarkers, content),
+    () =>
+      gitMarkers.length > 0
+        ? filterVisibleEditorGitMarkers(gitMarkers, content)
+        : [],
     [content, gitMarkers],
   );
   /* oxlint-enable react-doctor/no-event-handler */
@@ -182,59 +184,6 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
   const showBlameAnnotations =
     blameLoading || blameLines.length > 0 || Boolean(blameError);
   const showGitGutter = visibleGitMarkers.length > 0;
-  const activeBlameRow = useMemo<VisibleBlameRow | null>(() => {
-    if (!showBlameAnnotations) {
-      return null;
-    }
-
-    if (blameLoading && blameLines.length === 0) {
-      return {
-        lineNumber: activeEditorLineNumber,
-        text: "Loading blame...",
-        title: "Loading blame...",
-        tone: "status",
-      };
-    }
-
-    if (blameError && blameLines.length === 0) {
-      return {
-        lineNumber: activeEditorLineNumber,
-        text: "Blame unavailable",
-        title: `Blame unavailable\n${blameError}`,
-        tone: "status",
-      };
-    }
-
-    let blameLine = blameLineByLine.get(activeEditorLineNumber);
-    if (!blameLine && blameLineNumbers.length > 0) {
-      for (let index = blameLineNumbers.length - 1; index >= 0; index -= 1) {
-        const candidateLineNumber = blameLineNumbers[index];
-        if (candidateLineNumber <= activeEditorLineNumber) {
-          blameLine = blameLineByLine.get(candidateLineNumber);
-          break;
-        }
-      }
-      blameLine ??= blameLineByLine.get(blameLineNumbers[0]);
-    }
-    if (!blameLine) {
-      return null;
-    }
-
-    return {
-      lineNumber: blameLine.lineNumber,
-      text: formatBlameLineText(blameLine),
-      title: formatBlameLineTitle(blameLine),
-      tone: blameLine.committed ? "default" : "uncommitted",
-    };
-  }, [
-    activeEditorLineNumber,
-    blameError,
-    blameLineByLine,
-    blameLineNumbers,
-    blameLines.length,
-    blameLoading,
-    showBlameAnnotations,
-  ]);
   const gitMarkerSegmentsByLine = useMemo(() => {
     const segments = new Map<number, GitMarkerSegment>();
 
@@ -265,10 +214,16 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
       return;
     }
 
-    setEditorScrollLeft(view.scrollDOM.scrollLeft);
-    setEditorViewportHeight(view.scrollDOM.clientHeight);
-    setEditorViewportWidth(view.scrollDOM.clientWidth);
-    setActiveEditorLineNumber(view.state.doc.lineAt(view.state.selection.main.head).number);
+    const nextHeight = view.scrollDOM.clientHeight;
+    const nextWidth = view.scrollDOM.clientWidth;
+    const previous = editorMetricsRef.current;
+    if (previous.height === nextHeight && previous.width === nextWidth) {
+      return;
+    }
+
+    editorMetricsRef.current = { height: nextHeight, width: nextWidth };
+    setEditorViewportHeight(nextHeight);
+    setEditorViewportWidth(nextWidth);
   }, []);
 
   const syncEditorMetricsEvent = useEffectEvent(() => {
@@ -602,7 +557,7 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
     }
 
     const lineStart = utf16OffsetForLine(content, target.line);
-    const matchedLine = content.split(/\r?\n/)[target.line - 1] ?? "";
+    const matchedLine = contentLineAt(content, target.line);
     const byteToUtf16 = byteOffsetToUtf16(matchedLine, target.column);
     const cursorOffset = lineStart + byteToUtf16;
 
@@ -825,6 +780,17 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
                 );
               },
               markers(view) {
+                const activeBlameRow = resolveVisibleBlameRow({
+                  blameError,
+                  blameLineByLine,
+                  blameLineNumbers,
+                  blameLinesLength: blameLines.length,
+                  blameLoading,
+                  lineNumber: view.state.doc.lineAt(
+                    view.state.selection.main.head,
+                  ).number,
+                  showBlameAnnotations,
+                });
                 if (!activeBlameRow) {
                   return [];
                 }
@@ -835,11 +801,11 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
                 }
 
                 const width = resolveBlameLayerWidth(
-                  editorViewportWidth || view.scrollDOM.clientWidth,
+                  view.scrollDOM.clientWidth,
                 );
                 const left = Math.max(
                   0,
-                  (editorScrollLeft || view.scrollDOM.scrollLeft) +
+                  view.scrollDOM.scrollLeft +
                     view.scrollDOM.clientWidth -
                     width -
                     18,
@@ -894,9 +860,11 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
     ];
   }, [
     activeEditorMatchIndex,
-    activeBlameRow,
-    editorScrollLeft,
-    editorViewportWidth,
+    blameError,
+    blameLineByLine,
+    blameLineNumbers,
+    blameLines.length,
+    blameLoading,
     gitMarkerSegmentsByLine,
     openEditorFind,
     showBlameAnnotations,
@@ -1160,12 +1128,7 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
             syncEditorMetrics(view);
           }}
           onUpdate={(update: ViewUpdate) => {
-            if (
-              update.docChanged ||
-              update.geometryChanged ||
-              update.selectionSet ||
-              update.viewportChanged
-            ) {
+            if (update.geometryChanged || update.viewportChanged) {
               syncEditorMetrics(update.view);
             }
           }}
@@ -1178,8 +1141,8 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
                 className={`editor-git-overview-marker ${marker.kind}`}
                 style={
                   {
-                    top: `${Math.max(0, ((marker.line - 1) / Math.max(1, lines.length)) * 100)}%`,
-                    height: `${Math.max(3, (marker.lineCount / Math.max(1, lines.length)) * 100)}%`,
+                    top: `${Math.max(0, ((marker.line - 1) / Math.max(1, lineCount)) * 100)}%`,
+                    height: `${Math.max(3, (marker.lineCount / Math.max(1, lineCount)) * 100)}%`,
                   } as CSSProperties
                 }
               />
@@ -1246,8 +1209,113 @@ function applyBlameLayerMarkerDom(
   text.textContent = marker.row.text;
 }
 
+function resolveVisibleBlameRow({
+  blameError,
+  blameLineByLine,
+  blameLineNumbers,
+  blameLinesLength,
+  blameLoading,
+  lineNumber,
+  showBlameAnnotations,
+}: {
+  readonly blameError: string | null;
+  readonly blameLineByLine: ReadonlyMap<number, FileBlameLine>;
+  readonly blameLineNumbers: readonly number[];
+  readonly blameLinesLength: number;
+  readonly blameLoading: boolean;
+  readonly lineNumber: number;
+  readonly showBlameAnnotations: boolean;
+}): VisibleBlameRow | null {
+  if (!showBlameAnnotations) {
+    return null;
+  }
+
+  if (blameLoading && blameLinesLength === 0) {
+    return {
+      lineNumber,
+      text: "Loading blame...",
+      title: "Loading blame...",
+      tone: "status",
+    };
+  }
+
+  if (blameError && blameLinesLength === 0) {
+    return {
+      lineNumber,
+      text: "Blame unavailable",
+      title: `Blame unavailable\n${blameError}`,
+      tone: "status",
+    };
+  }
+
+  let blameLine = blameLineByLine.get(lineNumber);
+  if (!blameLine && blameLineNumbers.length > 0) {
+    for (let index = blameLineNumbers.length - 1; index >= 0; index -= 1) {
+      const candidateLineNumber = blameLineNumbers[index];
+      if (candidateLineNumber <= lineNumber) {
+        blameLine = blameLineByLine.get(candidateLineNumber);
+        break;
+      }
+    }
+    blameLine ??= blameLineByLine.get(blameLineNumbers[0]);
+  }
+  if (!blameLine) {
+    return null;
+  }
+
+  return {
+    lineNumber: blameLine.lineNumber,
+    text: formatBlameLineText(blameLine),
+    title: formatBlameLineTitle(blameLine),
+    tone: blameLine.committed ? "default" : "uncommitted",
+  };
+}
+
 function resolveBlameLayerWidth(viewportWidth: number): number {
   return Math.max(240, Math.min(420, Math.round(viewportWidth * 0.34)));
+}
+
+function countContentLines(content: string): number {
+  if (content.length === 0) {
+    return 1;
+  }
+
+  let count = 1;
+  for (let index = 0; index < content.length; index += 1) {
+    if (content[index] === "\n") {
+      count += 1;
+    }
+  }
+  return content.endsWith("\n") ? Math.max(1, count - 1) : count;
+}
+
+function contentLineAt(content: string, lineNumber: number): string {
+  if (lineNumber <= 1) {
+    const end = content.search(/\r?\n/);
+    return end >= 0 ? content.slice(0, end) : content;
+  }
+
+  let currentLine = 1;
+  let lineStart = 0;
+  for (let index = 0; index < content.length; index += 1) {
+    if (content[index] !== "\n") {
+      continue;
+    }
+
+    currentLine += 1;
+    lineStart = index + 1;
+    if (currentLine === lineNumber) {
+      const nextNewline = content.indexOf("\n", lineStart);
+      const lineEnd = nextNewline >= 0 ? nextNewline : content.length;
+      return content.slice(
+        lineStart,
+        lineEnd > lineStart && content[lineEnd - 1] === "\r"
+          ? lineEnd - 1
+          : lineEnd,
+      );
+    }
+  }
+  return "";
 }
 
 function formatBlameLineText(line: FileBlameLine): string {

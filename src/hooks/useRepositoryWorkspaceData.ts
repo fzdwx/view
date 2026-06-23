@@ -7,7 +7,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   type CommitInfo,
   type FileBlameLine,
-  type FileContent,
   type FileSearchResult,
   type GitStatus,
   type ReflogEntry,
@@ -16,7 +15,6 @@ import {
   getChangedFiles,
   getCommits,
   getFileBlame,
-  getFileContent,
   getFileDiff,
   getProjectFiles,
   getReflog,
@@ -36,12 +34,6 @@ import type { EditorGitMarker } from "../lib/editorTypes";
 import { isChangedFileStatus } from "../lib/gitStatus";
 import type { PreviewMode } from "../lib/previewTabs";
 import { requireQueryInput } from "../lib/queryInput";
-
-export interface LoadedFileContent {
-  readonly rootPath: string;
-  readonly filePath: string;
-  readonly file: FileContent;
-}
 
 export interface LoadedFileDiff {
   readonly rootPath: string;
@@ -82,8 +74,6 @@ export interface RepositoryProjectData {
   readonly commits: CommitInfo[];
   readonly commitsQuery: UseQueryResult<CommitInfo[], Error>;
   readonly currentBranchRef: string | null;
-  readonly currentFileContent: FileContent | null;
-  readonly fileContentQuery: UseQueryResult<LoadedFileContent, Error>;
   readonly fileSearchQuery: UseQueryResult<FileSearchResult[], Error>;
   readonly filteredCommits: CommitInfo[];
   readonly payload: RepositoryPayload | undefined;
@@ -252,33 +242,6 @@ export function useRepositoryProjectData({
     retry: false,
   });
 
-  // The whole query object is returned to consumers (App.tsx) that read many
-  // fields (data/isFetching/isError/refetch/isPlaceholderData), so it must be
-  // held as one value per the rule's own false-positive guidance.
-  // oxlint-disable-next-line react-doctor/query-destructure-result
-  const fileContentQuery = useQuery({
-    queryKey: ["file-content", activeProjectPath, selectedProjectPath],
-    queryFn: async () => {
-      const rootPath = requireQueryInput(
-        activeProjectPath,
-        "file content path",
-      );
-      const filePath = requireQueryInput(
-        selectedProjectPath,
-        "file content file path",
-      );
-
-      return {
-        rootPath,
-        filePath,
-        file: await getFileContent(rootPath, filePath),
-      };
-    },
-    enabled: Boolean(activeProjectPath && selectedProjectPath),
-    placeholderData: keepPreviousData,
-    retry: false,
-  });
-
   const searchFn = commandMode === "content" ? searchFileContents : searchFileNames;
   // The whole query object is returned to consumers (App.tsx) that read many
   // fields (data/isFetching/isError/refetch/isPlaceholderData), so it must be
@@ -300,17 +263,21 @@ export function useRepositoryProjectData({
   });
 
   const payload = repositoryQuery.data;
-  const currentFileContent =
-    fileContentQuery.data?.rootPath === activeProjectPath &&
-    fileContentQuery.data?.filePath === selectedProjectPath
-      ? fileContentQuery.data.file
-      : null;
+  const projectFileByPath = useMemo(
+    () =>
+      new Map(
+        (projectFilesQuery.data ?? repositoryQuery.data?.files ?? []).map(
+          (file) => [file.path, file],
+        ),
+      ),
+    [projectFilesQuery.data, repositoryQuery.data?.files],
+  );
   const selectedProjectFile = useMemo(
     () =>
-      (projectFilesQuery.data ?? repositoryQuery.data?.files ?? []).find(
-        (file) => file.path === selectedProjectPath,
-      ) ?? null,
-    [projectFilesQuery.data, repositoryQuery.data?.files, selectedProjectPath],
+      selectedProjectPath
+        ? projectFileByPath.get(selectedProjectPath) ?? null
+        : null,
+    [projectFileByPath, selectedProjectPath],
   );
   const selectedProjectStatus = selectedProjectFile?.status ?? null;
   const changedFiles = changedFilesQuery.data ?? payload?.files ?? [];
@@ -383,8 +350,6 @@ export function useRepositoryProjectData({
     commits,
     commitsQuery,
     currentBranchRef,
-    currentFileContent,
-    fileContentQuery,
     fileSearchQuery,
     filteredCommits,
     payload,

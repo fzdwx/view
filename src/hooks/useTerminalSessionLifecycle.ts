@@ -69,6 +69,8 @@ export interface TerminalSessionLifecycleOptions {
   readonly setClosedState: (closed: TerminalClose | null) => void;
   readonly setFrameState: (frame: TerminalFrame) => void;
   readonly socketRef: MutableRef<WebSocket | null>;
+  readonly socketCwdRef: MutableRef<string | null>;
+  readonly socketTitleRef: MutableRef<string | null>;
   readonly terminalOptionsRef: MutableRef<TerminalSpawnOptions>;
   readonly titleChangeRef: MutableRef<(title: string | null) => void>;
   readonly workingDirectoryChangeRef: MutableRef<(cwd: string | null) => void>;
@@ -227,6 +229,8 @@ export function useTerminalSessionLifecycle(options: TerminalSessionLifecycleOpt
     options.setClosedState,
     options.setFrameState,
     options.socketRef,
+    options.socketCwdRef,
+    options.socketTitleRef,
     options.terminalOptionsRef,
     options.titleChangeRef,
     options.workingDirectoryChangeRef,

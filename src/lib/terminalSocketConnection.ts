@@ -25,6 +25,8 @@ export interface TerminalSocketConnectionOptions {
   readonly sendInput: (data: TerminalInput | null) => void;
   readonly setClosedState: (closed: TerminalClose | null) => void;
   readonly socketRef: MutableRef<WebSocket | null>;
+  readonly socketCwdRef: MutableRef<string | null>;
+  readonly socketTitleRef: MutableRef<string | null>;
   readonly titleChangeRef: MutableRef<(title: string | null) => void>;
   readonly workingDirectoryChangeRef: MutableRef<(cwd: string | null) => void>;
   readonly triggerVisualBell: () => void;
@@ -64,8 +66,16 @@ export function connectTerminalSocket(
       return;
     }
     if (message.type === "frame") {
-      options.titleChangeRef.current(message.title ?? null);
-      options.workingDirectoryChangeRef.current(message.cwd ?? null);
+      const nextTitle = message.title ?? null;
+      if (options.socketTitleRef.current !== nextTitle) {
+        options.socketTitleRef.current = nextTitle;
+        options.titleChangeRef.current(nextTitle);
+      }
+      const nextCwd = message.cwd ?? null;
+      if (options.socketCwdRef.current !== nextCwd) {
+        options.socketCwdRef.current = nextCwd;
+        options.workingDirectoryChangeRef.current(nextCwd);
+      }
       options.queueFrame(message, element, options.sendInput);
     } else if (message.type === "bell") {
       options.triggerVisualBell();

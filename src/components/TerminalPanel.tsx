@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { memo, useRef } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -23,6 +23,7 @@ import {
   DEFAULT_TERMINAL_CELL_METRICS,
   type TerminalCursorStyle,
   type TerminalFrame,
+  type TerminalLine,
   type TerminalRun,
 } from "../lib/terminalTypes";
 import type { TerminalSessionInfo } from "../lib/terminalSessions";
@@ -241,6 +242,11 @@ interface TerminalCellsProps {
   readonly cursorShape: TerminalCursorStyle;
 }
 
+type TerminalCursorFrame = Pick<
+  TerminalFrame,
+  "cursorCol" | "cursorRow" | "cursorShape" | "cursorVisible"
+>;
+
 function TerminalCells({
   graphemes,
   keyPrefix,
@@ -284,7 +290,7 @@ function renderRunWithCursor(
   run: TerminalRun,
   row: number,
   startCol: number,
-  frame: TerminalFrame,
+  frame: TerminalCursorFrame,
   graphemes: readonly string[],
 ) {
   const textColumns = terminalTextColumns(graphemes);
@@ -329,7 +335,7 @@ function renderRunWithCursor(
 
 interface TrailingCursorProps {
   readonly row: number;
-  readonly frame: TerminalFrame;
+  readonly frame: TerminalCursorFrame;
   readonly renderedColumns: number;
 }
 
@@ -356,30 +362,125 @@ function TrailingCursor({ row, frame, renderedColumns }: TrailingCursorProps) {
   );
 }
 
+interface TerminalLineViewProps {
+  readonly cursorCol: number;
+  readonly cursorRow: number;
+  readonly cursorShape: TerminalCursorStyle;
+  readonly cursorVisible: boolean;
+  readonly line: TerminalLine;
+  readonly row: number;
+}
+
+const TerminalLineView = memo(
+  function TerminalLineView({
+    cursorCol,
+    cursorRow,
+    cursorShape,
+    cursorVisible,
+    line,
+    row,
+  }: TerminalLineViewProps) {
+    let column = 0;
+    const frameCursor = {
+      cursorCol,
+      cursorRow,
+      cursorShape,
+      cursorVisible,
+    } satisfies TerminalCursorFrame;
+
+    return (
+      <div className="terminal-line">
+        {line.cells.map((run) => {
+          const graphemes = splitTerminalGraphemes(run.text || " ");
+          const startColumn = column;
+          column += terminalTextColumns(graphemes);
+          return renderRunWithCursor(
+            run,
+            row,
+            startColumn,
+            frameCursor,
+            graphemes,
+          );
+        })}
+        <TrailingCursor row={row} frame={frameCursor} renderedColumns={column} />
+      </div>
+    );
+  },
+  areTerminalLinePropsEqual,
+);
+
 function TerminalRows({ frame }: { frame: TerminalFrame }) {
   return (
     <>
-      {frame.lines.map((line, row) => {
-        let column = 0;
-        return (
-          <div key={row} className="terminal-line">
-            {line.cells.map((run) => {
-              const graphemes = splitTerminalGraphemes(run.text || " ");
-              const startColumn = column;
-              column += terminalTextColumns(graphemes);
-              return renderRunWithCursor(
-                run,
-                row,
-                startColumn,
-                frame,
-                graphemes,
-              );
-            })}
-            <TrailingCursor row={row} frame={frame} renderedColumns={column} />
-          </div>
-        );
-      })}
+      {frame.lines.map((line, row) => (
+        <TerminalLineView
+          key={row}
+          cursorCol={frame.cursorCol}
+          cursorRow={frame.cursorRow}
+          cursorShape={frame.cursorShape}
+          cursorVisible={frame.cursorVisible}
+          line={line}
+          row={row}
+        />
+      ))}
     </>
+  );
+}
+
+function areTerminalLinePropsEqual(
+  previous: Readonly<TerminalLineViewProps>,
+  next: Readonly<TerminalLineViewProps>,
+): boolean {
+  if (previous.row !== next.row) {
+    return false;
+  }
+
+  const previousCursorOnLine =
+    previous.cursorVisible && previous.cursorRow === previous.row;
+  const nextCursorOnLine = next.cursorVisible && next.cursorRow === next.row;
+  if (previousCursorOnLine || nextCursorOnLine) {
+    if (
+      previousCursorOnLine !== nextCursorOnLine ||
+      previous.cursorCol !== next.cursorCol ||
+      previous.cursorShape !== next.cursorShape
+    ) {
+      return false;
+    }
+  }
+
+  return terminalLinesEqual(previous.line, next.line);
+}
+
+function terminalLinesEqual(
+  previous: TerminalLine,
+  next: TerminalLine,
+): boolean {
+  if (previous === next) {
+    return true;
+  }
+  if (previous.cells.length !== next.cells.length) {
+    return false;
+  }
+
+  for (let index = 0; index < previous.cells.length; index += 1) {
+    if (!terminalRunsEqual(previous.cells[index], next.cells[index])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function terminalRunsEqual(previous: TerminalRun, next: TerminalRun): boolean {
+  return (
+    previous.text === next.text &&
+    previous.fg === next.fg &&
+    previous.bg === next.bg &&
+    previous.href === next.href &&
+    previous.bold === next.bold &&
+    previous.dim === next.dim &&
+    previous.italic === next.italic &&
+    previous.underline === next.underline &&
+    previous.inverse === next.inverse
   );
 }
 

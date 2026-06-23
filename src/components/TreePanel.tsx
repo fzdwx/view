@@ -79,6 +79,8 @@ export const TreePanel = memo(function TreePanel({
   const lastTreeSelectionPathRef = useRef(selectedPath);
   const onSelectPathRef = useRef(onSelectPath);
   const selectedPathRef = useRef(selectedPath);
+  const selectAbortRef = useRef<AbortController | null>(null);
+  const pendingSelectFrameRef = useRef<number | null>(null);
   const treeSelectedPathsRef = useRef<readonly string[]>(
     selectedPath ? [selectedPath] : [],
   );
@@ -93,6 +95,24 @@ export const TreePanel = memo(function TreePanel({
       treeGitStageDecoration(fileByPathRef.current.get(context.item.path) ?? null),
     [],
   );
+  const scheduleSelectPath = useCallback((path: string) => {
+    if (pendingSelectFrameRef.current !== null) {
+      window.cancelAnimationFrame(pendingSelectFrameRef.current);
+    }
+    pendingSelectFrameRef.current = window.requestAnimationFrame(() => {
+      pendingSelectFrameRef.current = null;
+      if (selectAbortRef.current?.signal.aborted) {
+        return;
+      }
+      if (
+        selectedPathRef.current === path ||
+        !selectablePathsRef.current.has(path)
+      ) {
+        return;
+      }
+      onSelectPathRef.current(path);
+    });
+  }, []);
 
   const { model } = useFileTree({
     preparedInput,
@@ -121,15 +141,19 @@ export const TreePanel = memo(function TreePanel({
       const path = selectedPaths[0] ?? null;
       lastTreeSelectionPathRef.current = path ?? null;
       if (path && selectablePathsRef.current.has(path)) {
-        onSelectPathRef.current(path);
+        scheduleSelectPath(path);
       }
     },
   });
 
   const syncSelectedPath = useCallback(() => {
+    if (selectedPath && lastTreeSelectionPathRef.current === selectedPath) {
+      return;
+    }
+
     syncTreePanelSelectedPath({ model, selectablePaths, selectedPath });
     treeSelectedPathsRef.current = model.getSelectedPaths();
-  }, [model, selectablePaths, selectedPath]);
+  }, [model, selectablePaths, selectedPath, treeSelectedPathsRef]);
 
   const {
     handleTreeClickCapture,
@@ -189,6 +213,12 @@ export const TreePanel = memo(function TreePanel({
   useEffect(() => {
     syncSelectedPath();
   }, [syncSelectedPath]);
+
+  useEffect(() => {
+    const abortController = new AbortController();
+    selectAbortRef.current = abortController;
+    return () => abortController.abort();
+  }, []);
 
   if (files.length === 0) {
     return (

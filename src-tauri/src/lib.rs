@@ -918,15 +918,23 @@ fn get_changed_files(path: String, commit: Option<String>) -> Result<Vec<TreeFil
 }
 
 #[tauri::command]
-fn get_file_content(path: String, file_path: String) -> Result<FileContent, String> {
-    let root = workspace_root(&path)?;
-    read_file_content(&root, &file_path)
+async fn get_file_content(path: String, file_path: String) -> Result<FileContent, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = workspace_root(&path)?;
+        read_file_content(&root, &file_path)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn get_file_blame(path: String, file_path: String) -> Result<Vec<FileBlameLine>, String> {
-    let root = repository_root(&path)?;
-    git_file_blame(&root, &file_path)
+async fn get_file_blame(path: String, file_path: String) -> Result<Vec<FileBlameLine>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = repository_root(&path)?;
+        git_file_blame(&root, &file_path)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

@@ -84,9 +84,16 @@ export function usePreviewPaneData({
   const tab = activePreviewPaneTab(pane);
   const selectedProjectPath = tab?.mode === "file" ? tab.path : null;
   const selectedChangePath = tab?.mode === "diff" ? tab.path : null;
+  const projectFileByPath = useMemo(
+    () => new Map(projectFiles.map((file) => [file.path, file])),
+    [projectFiles],
+  );
   const selectedProjectFile = useMemo(
-    () => projectFiles.find((file) => file.path === selectedProjectPath) ?? null,
-    [projectFiles, selectedProjectPath],
+    () =>
+      selectedProjectPath
+        ? projectFileByPath.get(selectedProjectPath) ?? null
+        : null,
+    [projectFileByPath, selectedProjectPath],
   );
   const selectedProjectStatus = selectedProjectFile?.status ?? null;
 

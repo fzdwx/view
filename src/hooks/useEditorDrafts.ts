@@ -1,10 +1,6 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  type FileContent,
-  isTauriRuntime,
-  saveFileContent,
-} from "../lib/api";
+import { isTauriRuntime, saveFileContent } from "../lib/api";
 import {
   countDirtyDrafts,
   countDirtyDraftsForProject,
@@ -17,7 +13,6 @@ import type { EditorDraft } from "../lib/editorTypes";
 
 export interface UseEditorDraftsOptions {
   readonly activeProjectPath: string | null;
-  readonly currentFileContent: FileContent | null;
   readonly selectedProjectPath: string | null;
   readonly onFileSaved: (projectPath: string, filePath: string) => Promise<void>;
 }
@@ -45,12 +40,16 @@ export interface EditorDraftsController {
   ) => void;
   readonly saveActiveFile: () => Promise<void>;
   readonly setConflictDraftContent: (content: string) => void;
-  readonly updateEditorDraft: (content: string) => void;
+  readonly updateEditorDraftForFile: (
+    projectPath: string,
+    filePath: string,
+    baseContent: string,
+    content: string,
+  ) => void;
 }
 
 export function useEditorDrafts({
   activeProjectPath,
-  currentFileContent,
   selectedProjectPath,
   onFileSaved,
 }: UseEditorDraftsOptions): EditorDraftsController {
@@ -81,39 +80,6 @@ export function useEditorDrafts({
     [editorDrafts],
   );
   const savingActiveFile = Boolean(editorKey && savePendingKeys.has(editorKey));
-
-  // editorDrafts accumulates per-file unsaved content; it's keyed state
-  // (grows as files are edited) and can't be derived from currentFileContent.
-  useEffect(() => {
-    /* oxlint-disable react-doctor/no-derived-state */
-    if (!editorKey || !currentFileContent) {
-      return;
-    }
-
-    setEditorDrafts((current) => {
-      const existing = current[editorKey];
-      if (existing?.conflict || existing?.content !== existing?.baseContent) {
-        return current;
-      }
-      if (
-        existing &&
-        existing.baseContent === currentFileContent.content &&
-        existing.content === currentFileContent.content
-      ) {
-        return current;
-      }
-
-      return {
-        ...current,
-        [editorKey]: {
-          baseContent: currentFileContent.content,
-          content: currentFileContent.content,
-          conflict: null,
-        },
-      };
-    });
-    /* oxlint-enable react-doctor/no-derived-state */
-  }, [currentFileContent, editorKey]);
 
   useEffect(() => {
     if (dirtyDraftCount === 0) {
@@ -196,30 +162,46 @@ export function useEditorDrafts({
     [],
   );
 
-  const updateEditorDraft = useCallback(
-    (content: string) => {
-      if (!editorKey || !currentFileContent) {
-        return;
-      }
-
+  const updateEditorDraftForFile = useCallback(
+    (
+      projectPath: string,
+      filePath: string,
+      baseContent: string,
+      content: string,
+    ) => {
+      const key = editorDraftKey(projectPath, filePath);
       setEditorDrafts((current) => {
-        const existing = current[editorKey] ?? {
-          baseContent: currentFileContent.content,
-          content: currentFileContent.content,
-          conflict: null,
-        };
+        const existing = current[key];
+        const existingIsStaleCleanDraft = Boolean(
+          existing &&
+            !existing.conflict &&
+            existing.content === existing.baseContent &&
+            existing.baseContent !== baseContent,
+        );
+        const draft =
+          existing && !existingIsStaleCleanDraft
+            ? existing
+            : {
+                baseContent,
+                content: baseContent,
+                conflict: null,
+              };
+
+        if (draft.content === content) {
+          return current;
+        }
 
         return {
           ...current,
-          [editorKey]: {
-            ...existing,
+          [key]: {
+            ...draft,
             content,
           },
         };
       });
       setSaveError(null);
     },
-    [currentFileContent, editorKey, setSaveError],
+    [setSaveError],
   );
 
   const setConflictDraftContent = useCallback(
@@ -395,6 +377,6 @@ export function useEditorDrafts({
     moveEditorDraftPath,
     saveActiveFile,
     setConflictDraftContent,
-    updateEditorDraft,
+    updateEditorDraftForFile,
   };
 }

@@ -46,6 +46,8 @@ export function useTerminalSession(options: TerminalSessionOptions) {
   const activeRef = useRef(active);
   const sessionRef = useRef<TerminalSessionInfo | null>(session);
   const cwdRef = useRef<string | null>(cwd);
+  const socketCwdRef = useRef<string | null>(cwd);
+  const socketTitleRef = useRef<string | null>(null);
   const titleChangeRef = useRef(onTitleChange);
   const workingDirectoryChangeRef = useRef(onWorkingDirectoryChange);
   const onSessionReadyRef = useRef(onSessionReady);
@@ -166,6 +168,8 @@ export function useTerminalSession(options: TerminalSessionOptions) {
     setClosedState,
     setFrameState,
     socketRef,
+    socketCwdRef,
+    socketTitleRef,
     terminalOptionsRef,
     titleChangeRef,
     workingDirectoryChangeRef,

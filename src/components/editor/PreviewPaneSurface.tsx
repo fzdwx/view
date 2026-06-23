@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { PreviewTabBar } from "../PreviewTabBar";
 import { CodeMirrorFilePreview } from "./CodeMirrorFilePreview";
 import { editorDraftKey } from "../../lib/editorDrafts";
@@ -37,7 +38,12 @@ interface PreviewPaneSurfaceProps {
   readonly saveError: string | null;
   readonly savingActiveFile: boolean;
   readonly onActivatePane: (paneId: PreviewPaneId) => void;
-  readonly onChangeDraft: (content: string) => void;
+  readonly onChangeDraftForFile: (
+    projectPath: string,
+    filePath: string,
+    baseContent: string,
+    content: string,
+  ) => void;
   readonly onCloseAllTabs: (paneId: PreviewPaneId) => void;
   readonly onCloseOtherTabs: (paneId: PreviewPaneId, tabId: string) => void;
   readonly onCloseTab: (paneId: PreviewPaneId, tabId: string) => void;
@@ -78,7 +84,7 @@ export function PreviewPaneSurface({
   saveError,
   savingActiveFile,
   onActivatePane,
-  onChangeDraft,
+  onChangeDraftForFile,
   onCloseAllTabs,
   onCloseOtherTabs,
   onCloseTab,
@@ -109,6 +115,55 @@ export function PreviewPaneSurface({
       ? editorDrafts[editorDraftKey(activeProjectPath, data.selectedProjectPath)] ??
         null
       : null;
+  const effectiveDraft =
+    draft &&
+    data.currentFileContent &&
+    !draft.conflict &&
+    draft.content === draft.baseContent &&
+    draft.baseContent !== data.currentFileContent.content
+      ? null
+      : draft;
+  const handleChangeDraft = useCallback(
+    (content: string) => {
+      if (activeProjectPath && data.selectedProjectPath && data.currentFileContent) {
+        onChangeDraftForFile(
+          activeProjectPath,
+          data.selectedProjectPath,
+          data.currentFileContent.content,
+          content,
+        );
+      }
+    },
+    [
+      activeProjectPath,
+      data.currentFileContent,
+      data.selectedProjectPath,
+      onChangeDraftForFile,
+    ],
+  );
+
+  const handleSetConflictDraftContent = useCallback(
+    (content: string) => {
+      if (activeProjectPath && data.selectedProjectPath && data.currentFileContent) {
+        onChangeDraftForFile(
+          activeProjectPath,
+          data.selectedProjectPath,
+          data.currentFileContent.content,
+          content,
+        );
+        return;
+      }
+
+      onSetConflictDraftContent(content);
+    },
+    [
+      activeProjectPath,
+      data.currentFileContent,
+      data.selectedProjectPath,
+      onChangeDraftForFile,
+      onSetConflictDraftContent,
+    ],
+  );
 
   return (
     <section
@@ -175,7 +230,7 @@ export function PreviewPaneSurface({
             blameLoading={Boolean(
               data.selectedProjectPath && data.fileBlameQuery.isFetching,
             )}
-            draft={draft}
+            draft={effectiveDraft}
             editorSessionKey={`${pane.id}:${pane.activeTabId ?? pane.mode}`}
             error={
               data.fileContentQuery.isError
@@ -194,10 +249,10 @@ export function PreviewPaneSurface({
             saving={isActive && savingActiveFile}
             selectedPath={data.selectedProjectPath}
             target={pane.target}
-            onChangeDraft={onChangeDraft}
+            onChangeDraft={handleChangeDraft}
             onDiscardConflict={onDiscardConflict}
             onSave={onSave}
-            onSetConflictDraftContent={onSetConflictDraftContent}
+            onSetConflictDraftContent={handleSetConflictDraftContent}
           />
         ) : (
           <PreviewPaneDiffBody

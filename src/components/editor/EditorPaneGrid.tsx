@@ -26,7 +26,12 @@ export interface EditorPaneGridProps {
   readonly saveError: string | null;
   readonly savingActiveFile: boolean;
   readonly onActivatePane: (paneId: PreviewPaneId) => void;
-  readonly onChangeDraft: (content: string) => void;
+  readonly onChangeDraftForFile: (
+    projectPath: string,
+    filePath: string,
+    baseContent: string,
+    content: string,
+  ) => void;
   readonly onCloseAllTabs: (paneId: PreviewPaneId) => void;
   readonly onCloseOtherTabs: (paneId: PreviewPaneId, tabId: string) => void;
   readonly onCloseTab: (paneId: PreviewPaneId, tabId: string) => void;

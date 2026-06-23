@@ -168,7 +168,6 @@ export function App() {
     commandResults,
     commits,
     commitsQuery,
-    currentFileContent,
     fileSearchQuery,
     filteredCommits,
     payload,
@@ -231,10 +230,9 @@ export function App() {
     moveEditorDraftPath,
     saveActiveFile,
     setConflictDraftContent,
-    updateEditorDraft,
+    updateEditorDraftForFile,
   } = useEditorDrafts({
     activeProjectPath,
-    currentFileContent,
     selectedProjectPath,
     onFileSaved: handleFileSaved,
   });
@@ -1144,7 +1142,6 @@ export function App() {
                 saveError={saveError}
                 savingActiveFile={savingActiveFile}
                 onActivatePane={activatePane}
-                onChangeDraft={updateEditorDraft}
                 onCloseAllTabs={closeAllTabs}
                 onCloseOtherTabs={closeOtherTabs}
                 onCloseTab={closePreviewTab}
@@ -1153,6 +1150,7 @@ export function App() {
                 onOpenTerminalTab={openTerminalTabInEditor}
                 onSave={saveActivePreviewFile}
                 onSelectTab={activatePreviewTab}
+                onChangeDraftForFile={updateEditorDraftForFile}
                 onSetConflictDraftContent={setConflictDraftContent}
                 onSplitTab={splitTab}
               />
