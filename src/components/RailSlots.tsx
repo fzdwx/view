@@ -1,4 +1,4 @@
-import type { DragEvent } from "react";
+import { useEffect, useState, type DragEvent } from "react";
 import { railItemDefinitions } from "../lib/railItems";
 import type { RailItemId, RailSlot } from "../lib/workbenchTypes";
 
@@ -23,18 +23,42 @@ export function RailSlotList({
   onStartRailItemDrag,
   onDropRailItem,
 }: RailSlotProps) {
+  const [dropActive, setDropActive] = useState(false);
   const isDragging = draggedRailItem !== null;
   const showZone = items.length > 0 || isDragging;
+
+  useEffect(() => {
+    if (!isDragging) {
+      setDropActive(false);
+    }
+  }, [isDragging]);
+
+  function handleDragEnter() {
+    if (isDragging) {
+      setDropActive(true);
+    }
+  }
 
   function handleDragOver(event: DragEvent<HTMLDivElement>) {
     if (isDragging) {
       event.preventDefault();
+      event.stopPropagation();
       event.dataTransfer.dropEffect = "move";
+      setDropActive(true);
+    }
+  }
+
+  function handleDragLeave(event: DragEvent<HTMLDivElement>) {
+    const relatedTarget = event.relatedTarget;
+    if (!(relatedTarget instanceof Node) || !event.currentTarget.contains(relatedTarget)) {
+      setDropActive(false);
     }
   }
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
+    event.stopPropagation();
+    setDropActive(false);
     const item = draggedRailItem;
     if (item) {
       onDropRailItem(item, slot);
@@ -48,10 +72,17 @@ export function RailSlotList({
   return (
     <div
       className={
-        isDragging
-          ? `rail-slot rail-slot-${slot} drop-target`
-          : `rail-slot rail-slot-${slot}`
+        [
+          "rail-slot",
+          `rail-slot-${slot}`,
+          isDragging ? "drop-target" : "",
+          isDragging && dropActive ? "drop-target-active" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")
       }
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
@@ -85,7 +116,7 @@ function RailButton({
   const definition = railItemDefinitions[item];
   const Icon = definition.icon;
   return (
-   <button
+    <button
       type="button"
       className={
         active

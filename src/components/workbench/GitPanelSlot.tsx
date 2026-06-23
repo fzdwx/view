@@ -1,4 +1,4 @@
-import type { DragEvent, ReactNode } from "react";
+import { useEffect, useState, type DragEvent, type ReactNode } from "react";
 import { gitPanelLabel } from "../../lib/workbenchLayout";
 import type { GitPanelId } from "../../lib/workbenchTypes";
 
@@ -17,16 +17,46 @@ export function GitPanelSlot({
   onDropPanel(panel: GitPanelId, targetPanel: GitPanelId): void;
   panelId: GitPanelId;
 }) {
-  function handleDragOver(event: DragEvent<HTMLElement>) {
-    if (!draggingPanel) {
+  const [dropActive, setDropActive] = useState(false);
+  const canDrop = draggingPanel !== null && draggingPanel !== panelId;
+
+  useEffect(() => {
+    if (!canDrop) {
+      setDropActive(false);
+    }
+  }, [canDrop]);
+
+  function handleDragEnter(event: DragEvent<HTMLElement>) {
+    if (!canDrop) {
       return;
     }
     event.preventDefault();
+    event.stopPropagation();
     event.dataTransfer.dropEffect = "move";
+    setDropActive(true);
+  }
+
+  function handleDragOver(event: DragEvent<HTMLElement>) {
+    if (!canDrop) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+    setDropActive(true);
+  }
+
+  function handleDragLeave(event: DragEvent<HTMLElement>) {
+    const relatedTarget = event.relatedTarget;
+    if (!(relatedTarget instanceof Node) || !event.currentTarget.contains(relatedTarget)) {
+      setDropActive(false);
+    }
   }
 
   function handleDrop(event: DragEvent<HTMLElement>) {
     event.preventDefault();
+    event.stopPropagation();
+    setDropActive(false);
     const panel =
       (event.dataTransfer.getData("application/x-view-git-panel") as GitPanelId) ||
       draggingPanel;
@@ -38,11 +68,17 @@ export function GitPanelSlot({
   return (
     <section
       className={
-        draggingPanel && draggingPanel !== panelId
-          ? "git-panel-slot can-drop"
-          : "git-panel-slot"
+        [
+          "git-panel-slot",
+          canDrop ? "can-drop" : "",
+          canDrop && dropActive ? "drop-target-active" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")
       }
       style={{ gridArea: panelId }}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >

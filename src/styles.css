@@ -307,6 +307,12 @@ textarea,
   outline-offset: 2px;
 }
 
+.rail-slot.drop-target-active {
+  background: color-mix(in oklch, var(--accent-strong) 12%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent-strong) 42%, transparent);
+  outline-color: var(--accent-strong);
+}
+
 .project-switcher-anchor {
   position: static;
 }
@@ -1699,8 +1705,34 @@ kbd {
 }
 
 .git-panel-slot.can-drop {
-  outline: 1px dashed color-mix(in oklch, var(--accent-strong) 70%, transparent);
-  outline-offset: -4px;
+  outline: 1px dashed color-mix(in oklch, var(--accent-strong) 46%, transparent);
+  outline-offset: -5px;
+}
+
+.git-panel-slot.can-drop::after {
+  position: absolute;
+  z-index: 2;
+  inset: 6px;
+  border: 1px solid color-mix(in oklch, var(--accent-strong) 58%, transparent);
+  border-radius: 5px;
+  background: color-mix(in oklch, var(--accent-strong) 7%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--surface-4) 50%, transparent);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    background 90ms ease,
+    border-color 90ms ease,
+    opacity 90ms ease;
+}
+
+.git-panel-slot.can-drop.drop-target-active::after {
+  border-color: var(--accent-strong);
+  background: color-mix(in oklch, var(--accent-strong) 14%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, #ffffff 14%, transparent),
+    0 0 0 1px color-mix(in oklch, var(--accent-strong) 35%, transparent);
+  opacity: 1;
 }
 
 .git-panel-grab-edge {
@@ -5814,9 +5846,9 @@ body.is-resizing-y * {
   inset: 0;
   z-index: 40;
   display: grid;
-  grid-template-columns: 96px minmax(0, 1fr) 96px;
+  grid-template-columns: minmax(176px, 28%) minmax(0, 1fr) minmax(176px, 28%);
   gap: 12px;
-  padding: 12px;
+  padding: 47px 12px 12px;
   background: rgb(0 0 0 / 0.22);
   pointer-events: none;
 }
@@ -5832,24 +5864,63 @@ body.is-resizing-y * {
 }
 
 .rail-dock-drop {
+  position: relative;
   display: grid;
   place-items: center;
-  border: 1px dashed color-mix(in oklch, var(--accent-strong) 60%, transparent);
-  border-radius: 8px;
+  overflow: hidden;
+  border: 1px dashed color-mix(in oklch, var(--accent-strong) 48%, transparent);
+  border-radius: 7px;
   background: color-mix(in oklch, var(--surface-2) 60%, transparent);
   color: var(--accent-strong);
   font-size: 11px;
   pointer-events: auto;
-  transition: background 120ms ease, border-color 120ms ease;
+  transition:
+    background 100ms ease,
+    border-color 100ms ease,
+    box-shadow 100ms ease,
+    transform 100ms ease;
+}
+
+.rail-dock-drop::before {
+  position: absolute;
+  inset: 12px;
+  border-radius: 5px;
+  background:
+    linear-gradient(
+      to bottom,
+      color-mix(in oklch, var(--accent-strong) 34%, var(--surface-3)) 0 24px,
+      color-mix(in oklch, var(--surface-3) 74%, transparent) 24px
+    );
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--accent-strong) 22%, transparent),
+    0 16px 32px rgb(0 0 0 / 0.22);
+  content: "";
+  opacity: 0.32;
+  transform: scale(0.96);
+  transition:
+    opacity 100ms ease,
+    transform 100ms ease;
 }
 
 .rail-dock-drop:hover,
 .rail-dock-drop.active {
   border-color: var(--accent-strong);
-  background: color-mix(in oklch, var(--accent) 22%, var(--surface-2));
+  background: color-mix(in oklch, var(--accent-strong) 10%, var(--surface-2));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--accent-strong) 36%, transparent),
+    0 18px 46px rgb(0 0 0 / 0.36);
+  transform: scale(1.01);
+}
+
+.rail-dock-drop:hover::before,
+.rail-dock-drop.active::before {
+  opacity: 0.86;
+  transform: scale(1);
 }
 
 .rail-dock-drop-label {
+  position: relative;
+  z-index: 1;
   font-family: var(--mono);
-  opacity: 0.8;
+  opacity: 0.86;
 }

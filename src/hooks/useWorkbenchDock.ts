@@ -6,6 +6,7 @@ import {
 } from "../lib/workbenchLayout";
 import { terminalWorkspaceEmptyEvent } from "../lib/terminalSessions";
 import { terminalPanelEmptyEvent } from "../lib/terminalTabPlacement";
+import { useWorkbenchDockDrag } from "./useWorkbenchDockDrag";
 import type {
   GitPanelId,
   PanelSizes,
@@ -56,7 +57,6 @@ export function useWorkbenchDock(): WorkbenchDockController {
   const [detachedGitPanels, setDetachedGitPanels] = useState<GitPanelId[]>(
     initialLayout.detachedGitPanels,
   );
-  const [draggedGitPanel, setDraggedGitPanel] = useState<GitPanelId | null>(null);
   const [panelSizes, setPanelSizes] = useState<PanelSizes>(
     initialLayout.panelSizes,
   );
@@ -66,7 +66,13 @@ export function useWorkbenchDock(): WorkbenchDockController {
   const [railActiveItems, setRailActiveItems] = useState<RailActiveItems>(
     initialLayout.railActiveItems,
   );
-  const [draggedRailItem, setDraggedRailItem] = useState<RailItemId | null>(null);
+  const {
+    clearDockDrag,
+    draggedGitPanel,
+    draggedRailItem,
+    startGitPanelDrag,
+    startRailItemDrag,
+  } = useWorkbenchDockDrag();
   const layoutSaveTimerRef = useRef<number | null>(null);
   const latestLayoutRef = useRef({
     ...defaultWorkbenchLayout,
@@ -76,11 +82,6 @@ export function useWorkbenchDock(): WorkbenchDockController {
     railActiveItems: initialLayout.railActiveItems,
     panelSizes: initialLayout.panelSizes,
   });
-
-  const clearDockDrag = useCallback(() => {
-    setDraggedGitPanel(null);
-    setDraggedRailItem(null);
-  }, []);
 
   useEffect(() => {
     const nextLayout = {
@@ -133,19 +134,6 @@ export function useWorkbenchDock(): WorkbenchDockController {
     };
   }, []);
 
-  const clearDockDragRef = useRef(clearDockDrag);
-  clearDockDragRef.current = clearDockDrag;
-
-  useEffect(() => {
-    const handler = () => clearDockDragRef.current();
-    window.addEventListener("dragend", handler);
-    window.addEventListener("drop", handler);
-    return () => {
-      window.removeEventListener("dragend", handler);
-      window.removeEventListener("drop", handler);
-    };
-  }, []);
-
   useEffect(() => {
     const handleTerminalWorkspaceEmpty = () => {
       const layout = latestLayoutRef.current.railLayout;
@@ -191,10 +179,6 @@ export function useWorkbenchDock(): WorkbenchDockController {
     [],
   );
 
-  const startGitPanelDrag = useCallback((panel: GitPanelId) => {
-    setDraggedGitPanel(panel);
-  }, []);
-
   const moveGitPanel = useCallback(
     (panel: GitPanelId, targetPanel: GitPanelId) => {
       setDetachedGitPanels((current: GitPanelId[]) =>
@@ -228,13 +212,6 @@ export function useWorkbenchDock(): WorkbenchDockController {
     },
     [clearDockDrag],
   );
-
-  const startRailItemDrag = useCallback((item: RailItemId) => {
-    // Rendering the overlay synchronously inside dragstart cancels the native drag.
-    window.requestAnimationFrame(() => {
-      setDraggedRailItem(item);
-    });
-  }, []);
 
   const selectRailItem = useCallback(
     (side: RailSide, slot: RailSlot, item: RailItemId) => {
@@ -273,9 +250,9 @@ export function useWorkbenchDock(): WorkbenchDockController {
         );
         return nextLayout;
       });
-      setDraggedRailItem(null);
+      clearDockDrag();
     },
-    [],
+    [clearDockDrag],
   );
 
   return {
