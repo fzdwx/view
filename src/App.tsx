@@ -62,6 +62,7 @@ import { projectRootFromPayload } from "./lib/repositoryPayload";
 import {
   buildRailBottomPanelsStyle,
   buildRailWorkbenchGridStyle,
+  railSideHasIcons,
 } from "./lib/workbenchLayout";
 import { closeTerminalTab, runInTerminal } from "./lib/terminalSessions";
 import {
@@ -437,6 +438,7 @@ export function App() {
   const leftBottomItems = railLayout.left.bottom;
   const rightTopItems = railLayout.right.top;
   const rightBottomItems = railLayout.right.bottom;
+  const hasRightRailIcons = railSideHasIcons(railLayout, "right");
   const leftTopActiveItem = railActiveItems.left.top;
   const leftBottomActiveItem = railActiveItems.left.bottom;
   const rightTopActiveItem = railActiveItems.right.top;
@@ -959,7 +961,9 @@ export function App() {
 
   const shellStyle = {
     ...appShellStyle,
-    gridTemplateColumns: "48px minmax(0, 1fr) 48px",
+    gridTemplateColumns: hasRightRailIcons
+      ? "48px minmax(0, 1fr) 48px"
+      : "48px minmax(0, 1fr)",
     gridTemplateRows: "35px minmax(0, 1fr)",
   };
   const previewDebugEnabled =
@@ -1247,15 +1251,17 @@ export function App() {
           </div>
         )}
       </section>
-      <ProjectSideRail
-        draggedRailItem={draggedRailItem}
-        hasActiveProject={Boolean(activeProject)}
-        isActiveItem={isRailItemActive("right")}
-        railLayout={railLayout}
-        onDropRailItem={(item, slot) => dropRailItem(item, "right", slot)}
-        onSelectRailItem={handleSelectRailItem("right")}
-        onStartRailItemDrag={startRailItemDrag}
-      />
+      {hasRightRailIcons ? (
+        <ProjectSideRail
+          draggedRailItem={draggedRailItem}
+          hasActiveProject={Boolean(activeProject)}
+          isActiveItem={isRailItemActive("right")}
+          railLayout={railLayout}
+          onDropRailItem={(item, slot) => dropRailItem(item, "right", slot)}
+          onSelectRailItem={handleSelectRailItem("right")}
+          onStartRailItemDrag={startRailItemDrag}
+        />
+      ) : null}
       {draggedRailItem ? (
         <RailDockOverlay
           draggedRailItem={draggedRailItem}

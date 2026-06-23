@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import type { GitPanelId, ToolDock } from "./workbenchTypes";
+import type { GitPanelId, RailLayout, RailSide, ToolDock } from "./workbenchTypes";
 
 
 export function buildGitPanelGridStyle(
@@ -118,6 +118,11 @@ export function buildRailBottomPanelsStyle(
     gridTemplateColumns: "minmax(0, 1fr)",
     gridTemplateAreas: '"right-bottom"',
   };
+}
+
+export function railSideHasIcons(railLayout: RailLayout, side: RailSide): boolean {
+  const sideLayout = railLayout[side];
+  return sideLayout.top.length > 0 || sideLayout.bottom.length > 0;
 }
 
 export function gitPanelLabel(panelId: GitPanelId): string {
