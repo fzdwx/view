@@ -1965,12 +1965,64 @@ kbd {
 .tool-dock-left .history-panel,
 .tool-dock-right .history-panel {
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: 48px 38px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
 }
 
-.tool-dock-left .history-panel .search-field,
-.tool-dock-right .history-panel .search-field {
-  margin: 0 10px 6px;
+.tool-dock-left .branch-panel,
+.tool-dock-left .history-panel,
+.tool-dock-left .commit-detail-panel,
+.tool-dock-right .branch-panel,
+.tool-dock-right .history-panel,
+.tool-dock-right .commit-detail-panel {
+  background: var(--surface-0);
+}
+
+.tool-dock-left .commit-table,
+.tool-dock-left .reflog-table,
+.tool-dock-right .commit-table,
+.tool-dock-right .reflog-table {
+  grid-template-rows: 30px minmax(0, 1fr);
+}
+
+.tool-dock-left .commit-list-header,
+.tool-dock-right .commit-list-header {
+  border-top: 1px solid color-mix(in oklch, var(--line) 76%, transparent);
+  background: color-mix(in oklch, var(--surface-1) 70%, var(--surface-0));
+}
+
+.tool-dock-left .commit-list,
+.tool-dock-right .commit-list {
+  background:
+    linear-gradient(
+      to bottom,
+      color-mix(in oklch, var(--surface-1) 42%, transparent),
+      transparent 34px
+    ),
+    var(--surface-0);
+}
+
+.tool-dock-left .commit-row,
+.tool-dock-left .reflog-row,
+.tool-dock-right .commit-row,
+.tool-dock-right .reflog-row {
+  min-height: 30px;
+}
+
+.tool-dock-left .commit-subject,
+.tool-dock-left .commit-author,
+.tool-dock-left .commit-date,
+.tool-dock-left .commit-hash,
+.tool-dock-left .reflog-selector,
+.tool-dock-left .reflog-subject,
+.tool-dock-right .commit-subject,
+.tool-dock-right .commit-author,
+.tool-dock-right .commit-date,
+.tool-dock-right .commit-hash,
+.tool-dock-right .reflog-selector,
+.tool-dock-right .reflog-subject {
+  min-height: 30px;
+  padding-top: 5px;
+  padding-bottom: 5px;
 }
 
 .branch-panel {
