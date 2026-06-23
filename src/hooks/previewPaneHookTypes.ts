@@ -6,6 +6,7 @@ import type {
   PreviewSplitDirection,
 } from "../lib/previewPanes";
 import type {
+  FilePreviewMode,
   PreviewMode,
   PreviewTab,
   PreviewTarget,
@@ -15,7 +16,9 @@ export interface UsePreviewPanesOptions {
   readonly activeCommit: string | null;
   readonly activeProjectPath: string | null;
   readonly editorDrafts: Record<string, EditorDraft>;
+  readonly onCloseTerminalTab: (projectPath: string, terminalTabId: string) => void;
   readonly onDiscardDraft: (key: string) => void;
+  readonly onRestoreTerminalTab: (projectPath: string, terminalTabId: string) => void;
   readonly onSelectChangePath: (path: string | null) => void;
   readonly onSelectCommit: (commit: string | null) => void;
   readonly onSelectProjectPath: (path: string | null) => void;
@@ -41,10 +44,16 @@ export interface PreviewPanesController {
   readonly closeActivePreviewTab: () => void;
   readonly movePreviewTabPath: (fromPath: string, toPath: string) => void;
   readonly openPreviewTab: (
-    mode: PreviewMode,
+    mode: FilePreviewMode,
     path: string,
     targetLine?: number | null,
     targetColumn?: number | null,
+  ) => void;
+  readonly openTerminalTab: (
+    paneId: PreviewPaneId,
+    projectPath: string,
+    terminalTabId: string,
+    title: string,
   ) => void;
   readonly removePreviewTabsForPath: (path: string) => void;
   readonly reorderPreviewTabs: (

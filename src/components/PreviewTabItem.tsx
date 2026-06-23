@@ -1,5 +1,5 @@
 import type { DragEvent, MouseEvent } from "react";
-import { GitCompare, X } from "lucide-react";
+import { GitCompare, TerminalSquare, X } from "lucide-react";
 import { useFileIcon } from "../lib/fileIcons";
 import { fileNameFromPath } from "../lib/pathLabels";
 import { writePreviewTabDragData } from "../lib/previewTabDrag";
@@ -43,7 +43,7 @@ export function PreviewTabItem({
       ]
         .filter(Boolean)
         .join(" ")}
-      title={tab.path}
+      title={previewTabTitle(tab)}
       draggable
       onDragStart={(event) => {
         writePreviewTabDragData(event.dataTransfer, { tabId: tab.id });
@@ -64,16 +64,22 @@ export function PreviewTabItem({
       >
         <span
           className={
-            tab.mode === "diff" ? "preview-tab-kind diff" : "preview-tab-kind"
+            tab.mode === "diff"
+              ? "preview-tab-kind diff"
+              : tab.mode === "terminal"
+                ? "preview-tab-kind terminal"
+                : "preview-tab-kind"
           }
         >
           {tab.mode === "diff" ? (
             <GitCompare size={11} />
+          ) : tab.mode === "terminal" ? (
+            <TerminalSquare size={12} />
           ) : (
             <PreviewTabFileIcon path={tab.path} />
           )}
         </span>
-        <span className="preview-tab-name">{fileNameFromPath(tab.path)}</span>
+        <span className="preview-tab-name">{previewTabTitle(tab)}</span>
         {dirty ? (
           <span className="preview-tab-dirty" aria-label="Unsaved changes" />
         ) : null}
@@ -85,7 +91,7 @@ export function PreviewTabItem({
             ? "preview-tab-close preview-tab-close-dirty"
             : "preview-tab-close"
         }
-        aria-label={`Close ${tab.path}`}
+        aria-label={`Close ${previewTabTitle(tab)}`}
         onClick={(event) => {
           event.stopPropagation();
           onClose(tab.id);
@@ -95,6 +101,10 @@ export function PreviewTabItem({
       </button>
     </div>
   );
+}
+
+function previewTabTitle(tab: PreviewTab): string {
+  return tab.mode === "terminal" ? tab.path : fileNameFromPath(tab.path);
 }
 
 function PreviewTabFileIcon({ path }: { readonly path: string }) {

@@ -1,13 +1,10 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   activatePreviewPane,
   activatePreviewPaneTab,
   activePreviewPane,
   activePreviewPaneTab,
   clearPreviewPaneLayout,
-  closeAllPreviewPaneTabs,
-  closeOtherPreviewPaneTabs,
-  closePreviewPaneTab,
   createPreviewPaneLayout,
   movePreviewPaneTabPath,
   openPreviewPaneTab,
@@ -16,27 +13,40 @@ import {
   reorderPreviewPaneTabs,
   showPreviewPaneDiffSelection,
   splitPreviewPaneTab,
+  splitPreviewPaneTabWithDestination,
   type PreviewPaneId,
   type PreviewPaneLayout,
   type PreviewSplitDirection,
 } from "../lib/previewPanes";
 import {
+  createTerminalPreviewTab,
+  restoreTerminalPreviewTabs,
+  type TerminalPreviewTabLifecycle,
+} from "../lib/previewPaneTerminalTabs";
+import {
+  type FilePreviewMode,
   type PreviewMode,
   type PreviewTab,
   type PreviewTarget,
+  isTerminalPreviewTab,
   previewTabId,
 } from "../lib/previewTabs";
+import { addTerminalTab, getTerminalWorkspace } from "../lib/terminalSessions";
+import { dockTerminalTabToEditor } from "../lib/terminalTabPlacement";
 import type {
   PreviewPanesController,
   UsePreviewPanesOptions,
 } from "./previewPaneHookTypes";
+import { usePreviewPaneCloseActions } from "./usePreviewPaneCloseActions";
 import { usePreviewPaneDirtyGuard } from "./usePreviewPaneDirtyGuard";
 
 export function usePreviewPanes({
   activeCommit,
   activeProjectPath,
   editorDrafts,
+  onCloseTerminalTab,
   onDiscardDraft,
+  onRestoreTerminalTab,
   onSelectChangePath,
   onSelectCommit,
   onSelectProjectPath,
@@ -57,6 +67,10 @@ export function usePreviewPanes({
       layout,
       onDiscardDraft,
     });
+  const terminalLifecycle = useMemo<TerminalPreviewTabLifecycle>(
+    () => ({ close: onCloseTerminalTab, restore: onRestoreTerminalTab }),
+    [onCloseTerminalTab, onRestoreTerminalTab],
+  );
 
   const syncSelection = useCallback(
     (nextLayout: PreviewPaneLayout) => {
@@ -104,7 +118,7 @@ export function usePreviewPanes({
 
   const openPreviewTab = useCallback(
     (
-      mode: PreviewMode,
+      mode: FilePreviewMode,
       path: string,
       targetLine: number | null = null,
       targetColumn: number | null = null,
@@ -125,6 +139,19 @@ export function usePreviewPanes({
     [activeCommit, activePane?.id, applyLayout, layout],
   );
 
+  const openTerminalTab = useCallback(
+    (
+      paneId: PreviewPaneId,
+      projectPath: string,
+      terminalTabId: string,
+      title: string,
+    ) => {
+      const tab = createTerminalPreviewTab(projectPath, terminalTabId, title);
+      applyLayout(openPreviewPaneTab(layout, paneId, tab, null));
+    },
+    [applyLayout, layout],
+  );
+
   const splitTab = useCallback(
     (
       paneId: PreviewPaneId,
@@ -133,58 +160,58 @@ export function usePreviewPanes({
     ) => {
       const nextPaneId = `preview-pane-${paneIdCounterRef.current + 1}`;
       paneIdCounterRef.current += 1;
-      applyLayout(splitPreviewPaneTab(layout, paneId, tabId, direction, nextPaneId));
+      const sourcePane = layout.panes.find((pane) => pane.id === paneId);
+      const sourceTab = sourcePane?.tabs.find((tab) => tab.id === tabId) ?? null;
+      if (!isTerminalPreviewTab(sourceTab)) {
+        applyLayout(splitPreviewPaneTab(layout, paneId, tabId, direction, nextPaneId));
+        return;
+      }
+
+      const sourceTerminalTab =
+        getTerminalWorkspace(sourceTab.projectPath).tabs.find(
+          (tab) => tab.id === sourceTab.terminalTabId,
+        ) ?? null;
+      const cwd = sourceTerminalTab?.cwd ?? sourceTerminalTab?.session?.cwd ?? null;
+      const destinationTerminalTab = addTerminalTab(sourceTab.projectPath, cwd);
+      dockTerminalTabToEditor(sourceTab.projectPath, destinationTerminalTab.id);
+      const destinationTab = createTerminalPreviewTab(
+        sourceTab.projectPath,
+        destinationTerminalTab.id,
+        destinationTerminalTab.title,
+      );
+      applyLayout(
+        splitPreviewPaneTabWithDestination(
+          layout,
+          paneId,
+          tabId,
+          direction,
+          nextPaneId,
+          destinationTab,
+        ),
+      );
     },
     [applyLayout, layout],
   );
 
-  const closePreviewTab = useCallback(
-    (paneId: PreviewPaneId, tabId: string) => {
-      const pane = layout.panes.find((current) => current.id === paneId);
-      const removedTab = pane?.tabs.find((tab) => tab.id === tabId) ?? null;
-      const nextLayout = closePreviewPaneTab(layout, paneId, tabId);
-      if (
-        removedTab &&
-        confirmDiscardClosedDirtyTabs([removedTab], nextLayout)
-      ) {
-        applyLayout(nextLayout);
-      }
-    },
-    [applyLayout, confirmDiscardClosedDirtyTabs, layout],
-  );
-
-  const closeOtherTabs = useCallback(
-    (paneId: PreviewPaneId, keepTabId: string) => {
-      const pane = layout.panes.find((current) => current.id === paneId);
-      const removedTabs = pane?.tabs.filter((tab) => tab.id !== keepTabId) ?? [];
-      const nextLayout = closeOtherPreviewPaneTabs(layout, paneId, keepTabId);
-      if (confirmDiscardClosedDirtyTabs(removedTabs, nextLayout)) {
-        applyLayout(nextLayout);
-      }
-    },
-    [applyLayout, confirmDiscardClosedDirtyTabs, layout],
-  );
-
-  const closeAllTabs = useCallback(
-    (paneId: PreviewPaneId) => {
-      const pane = layout.panes.find((current) => current.id === paneId);
-      const nextLayout = closeAllPreviewPaneTabs(layout, paneId);
-      if (confirmDiscardClosedDirtyTabs(pane?.tabs ?? [], nextLayout)) {
-        applyLayout(nextLayout);
-      }
-    },
-    [applyLayout, confirmDiscardClosedDirtyTabs, layout],
-  );
-
-  const closeActivePreviewTab = useCallback(() => {
-    if (activePane?.activeTabId) {
-      closePreviewTab(activePane.id, activePane.activeTabId);
-    }
-  }, [activePane, closePreviewTab]);
+  const {
+    closeActivePreviewTab,
+    closeAllTabs,
+    closeOtherTabs,
+    closePreviewTab,
+  } = usePreviewPaneCloseActions({
+    activePane,
+    applyLayout,
+    confirmDiscardClosedDirtyTabs,
+    layout,
+    terminalLifecycle,
+  });
 
   const clearPreviewTabs = useCallback(
-    (mode: PreviewMode = "file") => applyLayout(clearPreviewPaneLayout(mode)),
-    [applyLayout],
+    (mode: PreviewMode = "file") => {
+      restoreTerminalPreviewTabs(layout, terminalLifecycle);
+      applyLayout(clearPreviewPaneLayout(mode));
+    },
+    [applyLayout, layout, terminalLifecycle],
   );
 
   const showDiffSelection = useCallback(() => {
@@ -261,6 +288,7 @@ export function usePreviewPanes({
     closeOtherTabs,
     closePreviewTab,
     movePreviewTabPath,
+    openTerminalTab,
     openPreviewTab,
     removePreviewTabsForPath,
     reorderPreviewTabs,

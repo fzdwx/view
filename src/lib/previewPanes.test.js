@@ -9,6 +9,7 @@ import {
   openPreviewPaneTab,
   primaryPreviewPaneId,
   splitPreviewPaneTab,
+  splitPreviewPaneTabWithDestination,
 } from "./previewPanes";
 
 const fileA = {
@@ -95,6 +96,44 @@ describe("previewPanes", () => {
         { kind: "pane", paneId: "preview-pane-2" },
       ],
     });
+  });
+
+  test("splits a source tab into a new pane with a distinct destination tab", () => {
+    const terminalSource = {
+      id: "terminal:/repo:terminal-1",
+      mode: "terminal",
+      path: "repo",
+      commit: null,
+      projectPath: "/repo",
+      terminalTabId: "terminal-1",
+    };
+    const terminalDestination = {
+      id: "terminal:/repo:terminal-2",
+      mode: "terminal",
+      path: "repo 2",
+      commit: null,
+      projectPath: "/repo",
+      terminalTabId: "terminal-2",
+    };
+    const opened = openPreviewPaneTab(
+      createPreviewPaneLayout(),
+      primaryPreviewPaneId,
+      terminalSource,
+      null,
+    );
+
+    const split = splitPreviewPaneTabWithDestination(
+      opened,
+      primaryPreviewPaneId,
+      terminalSource.id,
+      "right",
+      "preview-pane-2",
+      terminalDestination,
+    );
+
+    expect(split.panes[0]?.tabs).toEqual([terminalSource]);
+    expect(split.panes[1]?.tabs).toEqual([terminalDestination]);
+    expect(split.panes[1]?.activeTabId).toBe(terminalDestination.id);
   });
 
   test("nests a down split inside the selected right pane", () => {

@@ -80,6 +80,30 @@ export function splitPreviewPaneTab(
 ): PreviewPaneLayout {
   const sourcePane = layout.panes.find((pane) => pane.id === paneId);
   const sourceTab = sourcePane?.tabs.find((tab) => tab.id === tabId) ?? null;
+  if (!sourceTab) {
+    return layout;
+  }
+
+  return splitPreviewPaneTabWithDestination(
+    layout,
+    paneId,
+    tabId,
+    direction,
+    nextPaneId,
+    sourceTab,
+  );
+}
+
+export function splitPreviewPaneTabWithDestination(
+  layout: PreviewPaneLayout,
+  paneId: PreviewPaneId,
+  tabId: string,
+  direction: PreviewSplitDirection,
+  nextPaneId: PreviewPaneId,
+  destinationTab: PreviewTab,
+): PreviewPaneLayout {
+  const sourcePane = layout.panes.find((pane) => pane.id === paneId);
+  const sourceTab = sourcePane?.tabs.find((tab) => tab.id === tabId) ?? null;
   if (!sourcePane || !sourceTab) {
     return layout;
   }
@@ -87,7 +111,7 @@ export function splitPreviewPaneTab(
   const sourceIndex = layout.panes.findIndex((pane) => pane.id === paneId);
   const nextDestination = destinationWithTab(
     createPreviewPane(nextPaneId),
-    sourceTab,
+    destinationTab,
   );
   const panes = [
     ...layout.panes.slice(0, sourceIndex + 1),

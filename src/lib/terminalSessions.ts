@@ -17,6 +17,7 @@ export interface TerminalTab {
   readonly id: string;
   readonly baseTitle: string;
   readonly title: string;
+  readonly cwd: string | null;
   /** Live PTY session for this tab, if one has been spawned. */
   readonly session: TerminalSessionInfo | null;
   /** Set when the PTY exits so the tab can render a closed state. */
@@ -92,6 +93,7 @@ export function createInitialTerminalWorkspace(
         id: "terminal-1",
         baseTitle,
         title: baseTitle,
+        cwd: null,
         session: null,
         closed: false,
         exitCode: null,
@@ -121,7 +123,11 @@ export function updateTerminalWorkspace(
   emit();
 }
 
-export function addTerminalTab(projectPath: string): void {
+export function addTerminalTab(
+  projectPath: string,
+  cwd: string | null = null,
+): TerminalTab {
+  let createdTab: TerminalTab | null = null;
   updateTerminalWorkspace(projectPath, (workspace) => {
     const nextIndex = workspace.nextTabIndex + 1;
     const baseTitle = defaultTerminalBaseTitle(projectPath, nextIndex);
@@ -129,17 +135,23 @@ export function addTerminalTab(projectPath: string): void {
       id: `terminal-${Date.now()}-${nextIndex}`,
       baseTitle,
       title: baseTitle,
+      cwd,
       session: null,
       closed: false,
       exitCode: null,
       pendingCommand: null,
     };
+    createdTab = tab;
     return {
       tabs: [...workspace.tabs, tab],
       activeTabId: tab.id,
       nextTabIndex: nextIndex,
     };
   });
+  if (!createdTab) {
+    throw new Error("Failed to create terminal tab");
+  }
+  return createdTab;
 }
 
 /**
@@ -155,6 +167,7 @@ export function runInTerminal(projectPath: string, command: string, label?: stri
       id: `terminal-${Date.now()}-${nextIndex}`,
       baseTitle,
       title: baseTitle,
+      cwd: null,
       session: null,
       closed: false,
       exitCode: null,
@@ -227,9 +240,33 @@ export function setTerminalTabSession(
   updateTerminalWorkspace(projectPath, (workspace) => ({
     ...workspace,
     tabs: workspace.tabs.map((tab) =>
-      tab.id === tabId ? { ...tab, session, closed: false, exitCode: null } : tab,
+      tab.id === tabId
+        ? { ...tab, cwd: session.cwd, session, closed: false, exitCode: null }
+        : tab,
     ),
   }));
+}
+
+export function setTerminalTabCwd(
+  projectPath: string,
+  tabId: string,
+  cwd: string | null,
+): void {
+  const nextCwd = cwd?.trim() || null;
+  if (!nextCwd) {
+    return;
+  }
+  updateTerminalWorkspace(projectPath, (workspace) => {
+    let changed = false;
+    const nextTabs = workspace.tabs.map((tab) => {
+      if (tab.id !== tabId || tab.cwd === nextCwd) {
+        return tab;
+      }
+      changed = true;
+      return { ...tab, cwd: nextCwd };
+    });
+    return changed ? { ...workspace, tabs: nextTabs } : workspace;
+  });
 }
 
 export function setTerminalTabTitle(

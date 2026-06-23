@@ -637,6 +637,8 @@ struct TerminalFrame {
     #[serde(rename = "type")]
     message_type: &'static str,
     title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cwd: Option<String>,
     rows: usize,
     cols: usize,
     display_offset: usize,
@@ -2769,7 +2771,16 @@ fn terminal_cursor_shape_str(shape: CursorShape) -> &'static str {
     }
 }
 
+#[cfg(test)]
 fn terminal_frame(term: &Term<TerminalEventProxy>, title: Option<&str>) -> Result<String, String> {
+    terminal_frame_with_cwd(term, title, None)
+}
+
+fn terminal_frame_with_cwd(
+    term: &Term<TerminalEventProxy>,
+    title: Option<&str>,
+    cwd: Option<&str>,
+) -> Result<String, String> {
     let cursor_shape = term.cursor_style().shape;
     let grid = term.grid();
     let cols = grid.columns();
@@ -2838,6 +2849,7 @@ fn terminal_frame(term: &Term<TerminalEventProxy>, title: Option<&str>) -> Resul
     serde_json::to_string(&TerminalFrame {
         message_type: "frame",
         title: title.map(str::to_string),
+        cwd: cwd.map(str::to_string),
         rows,
         cols,
         display_offset: display_offset.max(0) as usize,
@@ -3215,7 +3227,11 @@ fn spawn_terminal_session_with_options(
         let mut metadata = initial_terminal_metadata;
         let initial_display_title =
             terminal_display_title(&title_root, title.as_deref(), &metadata);
-        if let Ok(frame) = terminal_frame(&term, initial_display_title.as_deref()) {
+        if let Ok(frame) = terminal_frame_with_cwd(
+            &term,
+            initial_display_title.as_deref(),
+            metadata.cwd.as_deref(),
+        ) {
             let _ = reader_output_tx.send(TerminalWsEvent::Frame(frame));
         }
 
@@ -3272,7 +3288,11 @@ fn spawn_terminal_session_with_options(
             }
 
             let display_title = terminal_display_title(&title_root, title.as_deref(), &metadata);
-            match terminal_frame(&term, display_title.as_deref()) {
+            match terminal_frame_with_cwd(
+                &term,
+                display_title.as_deref(),
+                metadata.cwd.as_deref(),
+            ) {
                 Ok(frame) => {
                     if reader_output_tx
                         .send(TerminalWsEvent::Frame(frame))
@@ -4132,6 +4152,24 @@ mod tests {
         .expect("frame json");
 
         assert_eq!(frame["title"], "View Title Protocol");
+    }
+
+    #[test]
+    fn terminal_frame_exposes_current_working_directory() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        let term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(20, 6),
+            test_terminal_event_proxy(input_tx),
+        );
+
+        let frame: serde_json::Value = serde_json::from_str(
+            &terminal_frame_with_cwd(&term, None, Some("/tmp/view/packages/app"))
+                .expect("terminal frame"),
+        )
+        .expect("frame json");
+
+        assert_eq!(frame["cwd"], "/tmp/view/packages/app");
     }
 
     #[test]

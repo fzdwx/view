@@ -49,7 +49,7 @@ import { useRepositoryRemotePolling } from "./hooks/useRepositoryRemotePolling";
 import { useRepositoryProjectData } from "./hooks/useRepositoryWorkspaceData";
 import { useSelectedPathGuard } from "./hooks/useSelectedPathGuard";
 import { useWorkbenchDock } from "./hooks/useWorkbenchDock";
-import { type FileSearchResult, type ProjectScript, detectProjectScripts, type ReflogEntry } from "./lib/api";
+import { type FileSearchResult, type ProjectScript, detectProjectScripts, terminalKill, type ReflogEntry } from "./lib/api";
 import { pasteDestinationFromSelectedPath } from "./lib/clipboardFiles";
 import {
   type SavedProject,
@@ -63,7 +63,12 @@ import {
   buildRailBottomPanelsStyle,
   buildRailWorkbenchGridStyle,
 } from "./lib/workbenchLayout";
-import { runInTerminal } from "./lib/terminalSessions";
+import { closeTerminalTab, runInTerminal } from "./lib/terminalSessions";
+import {
+  clearTerminalTabPlacement,
+  dockTerminalTabToEditor,
+  restoreTerminalTabToPanel,
+} from "./lib/terminalTabPlacement";
 import type {
   RailItemId,
   RailLayout,
@@ -248,6 +253,7 @@ export function App() {
     closeOtherTabs,
     closePreviewTab,
     movePreviewTabPath,
+    openTerminalTab,
     openPreviewTab,
     removePreviewTabsForPath,
     reorderPreviewTabs,
@@ -257,11 +263,30 @@ export function App() {
     activeCommit,
     activeProjectPath,
     editorDrafts,
+    onCloseTerminalTab: (projectPath, terminalTabId) => {
+      clearTerminalTabPlacement(projectPath, terminalTabId);
+      closeTerminalTab(projectPath, terminalTabId, (session) => {
+        void terminalKill(session.id).catch(() => undefined);
+      });
+    },
     onDiscardDraft: discardDraftByKey,
+    onRestoreTerminalTab: restoreTerminalTabToPanel,
     onSelectChangePath: setSelectedChangePath,
     onSelectCommit: setActiveCommit,
     onSelectProjectPath: setSelectedProjectPath,
   });
+  const openTerminalTabInEditor = useCallback(
+    (
+      paneId: string,
+      projectPath: string,
+      terminalTabId: string,
+      title: string,
+    ) => {
+      dockTerminalTabToEditor(projectPath, terminalTabId);
+      openTerminalTab(paneId, projectPath, terminalTabId, title);
+    },
+    [openTerminalTab],
+  );
   const gitWriteGuard = useGitWriteGuard();
   const {
     canRunGitFileAction,
@@ -1112,6 +1137,7 @@ export function App() {
                 onCloseTab={closePreviewTab}
                 onDiscardConflict={discardConflictToDisk}
                 onReorderTabs={reorderPreviewTabs}
+                onOpenTerminalTab={openTerminalTabInEditor}
                 onSave={saveActivePreviewFile}
                 onSelectTab={activatePreviewTab}
                 onSetConflictDraftContent={setConflictDraftContent}

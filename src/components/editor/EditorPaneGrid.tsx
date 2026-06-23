@@ -36,6 +36,12 @@ export interface EditorPaneGridProps {
     fromId: string,
     toId: string,
   ) => void;
+  readonly onOpenTerminalTab: (
+    paneId: PreviewPaneId,
+    projectPath: string,
+    terminalTabId: string,
+    title: string,
+  ) => void;
   readonly onSave: () => void;
   readonly onSelectTab: (paneId: PreviewPaneId, tab: PreviewTab) => void;
   readonly onSetConflictDraftContent: (content: string) => void;
@@ -54,16 +60,22 @@ export function EditorPaneGrid({
 
   return (
     <section className="editor-pane-grid">
-      {renderPreviewPaneLayoutNode(layout.tree, panes, props)}
+      <PreviewPaneLayoutNodeView node={layout.tree} panes={panes} props={props} />
     </section>
   );
 }
 
-function renderPreviewPaneLayoutNode(
-  node: PreviewPaneLayoutNode,
-  panes: ReadonlyMap<PreviewPaneId, PreviewPane>,
-  props: Omit<EditorPaneGridProps, "layout">,
-) {
+interface PreviewPaneLayoutNodeViewProps {
+  readonly node: PreviewPaneLayoutNode;
+  readonly panes: ReadonlyMap<PreviewPaneId, PreviewPane>;
+  readonly props: Omit<EditorPaneGridProps, "layout">;
+}
+
+function PreviewPaneLayoutNodeView({
+  node,
+  panes,
+  props,
+}: PreviewPaneLayoutNodeViewProps) {
   switch (node.kind) {
     case "pane": {
       const pane = panes.get(node.paneId);
@@ -74,7 +86,7 @@ function renderPreviewPaneLayoutNode(
         <div className={`editor-pane-split split-${node.direction}`}>
           {node.children.map((child) => (
             <div className="editor-pane-split-child" key={previewPaneNodeKey(child)}>
-              {renderPreviewPaneLayoutNode(child, panes, props)}
+              <PreviewPaneLayoutNodeView node={child} panes={panes} props={props} />
             </div>
           ))}
         </div>

@@ -1,5 +1,3 @@
-import { Loader2 } from "lucide-react";
-import { DiffPanel } from "../DiffPanel";
 import { PreviewTabBar } from "../PreviewTabBar";
 import { CodeMirrorFilePreview } from "./CodeMirrorFilePreview";
 import { editorDraftKey } from "../../lib/editorDrafts";
@@ -11,12 +9,18 @@ import {
   type PreviewPaneId,
   type PreviewSplitDirection,
 } from "../../lib/previewPanes";
-import type { PreviewTab } from "../../lib/previewTabs";
+import { isTerminalPreviewTab, type PreviewTab } from "../../lib/previewTabs";
 import { usePreviewPaneData } from "../../hooks/usePreviewPaneData";
+import {
+  paneLoading,
+  PreviewPaneDiffBody,
+} from "./PreviewPaneDiffBody";
+import { TerminalEditorPane } from "./TerminalEditorPane";
 import {
   previewPaneSurfaceClassName,
   usePreviewPaneSplitDrop,
 } from "./usePreviewPaneSplitDrop";
+import { usePreviewPaneTerminalDrop } from "./usePreviewPaneTerminalDrop";
 
 interface PreviewPaneSurfaceProps {
   readonly activeCommit: string | null;
@@ -42,6 +46,12 @@ interface PreviewPaneSurfaceProps {
     paneId: PreviewPaneId,
     fromId: string,
     toId: string,
+  ) => void;
+  readonly onOpenTerminalTab: (
+    paneId: PreviewPaneId,
+    projectPath: string,
+    terminalTabId: string,
+    title: string,
   ) => void;
   readonly onSave: () => void;
   readonly onSelectTab: (paneId: PreviewPaneId, tab: PreviewTab) => void;
@@ -73,6 +83,7 @@ export function PreviewPaneSurface({
   onCloseOtherTabs,
   onCloseTab,
   onDiscardConflict,
+  onOpenTerminalTab,
   onReorderTabs,
   onSave,
   onSelectTab,
@@ -87,7 +98,12 @@ export function PreviewPaneSurface({
     projectFiles,
   });
   const isActive = pane.id === activePaneId;
+  const activeTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? null;
   const splitDrop = usePreviewPaneSplitDrop({ pane, onSplitTab });
+  const terminalDrop = usePreviewPaneTerminalDrop({
+    paneId: pane.id,
+    onOpenTerminalTab,
+  });
   const draft =
     activeProjectPath && data.selectedProjectPath
       ? editorDrafts[editorDraftKey(activeProjectPath, data.selectedProjectPath)] ??
@@ -96,10 +112,30 @@ export function PreviewPaneSurface({
 
   return (
     <section
-      className={previewPaneSurfaceClassName(isActive, splitDrop.intent)}
+      className={[
+        previewPaneSurfaceClassName(isActive, splitDrop.intent),
+        terminalDrop.dragging ? "drop-terminal-tab" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       onPointerDownCapture={() => onActivatePane(pane.id)}
       onFocusCapture={() => onActivatePane(pane.id)}
-      {...splitDrop.dragHandlers}
+      onDragLeaveCapture={(event) => {
+        terminalDrop.onDragLeaveCapture(event);
+        splitDrop.dragHandlers.onDragLeaveCapture(event);
+      }}
+      onDragOverCapture={(event) => {
+        terminalDrop.onDragOverCapture(event);
+        if (!event.isPropagationStopped()) {
+          splitDrop.dragHandlers.onDragOverCapture(event);
+        }
+      }}
+      onDropCapture={(event) => {
+        terminalDrop.onDropCapture(event);
+        if (!event.isPropagationStopped()) {
+          splitDrop.dragHandlers.onDropCapture(event);
+        }
+      }}
     >
       <PreviewTabBar
         activeTabId={pane.activeTabId}
@@ -118,13 +154,17 @@ export function PreviewPaneSurface({
         selectedPath={
           pane.mode === "diff"
             ? data.selectedChangePath
-            : data.selectedProjectPath
+            : pane.mode === "file"
+              ? data.selectedProjectPath
+              : null
         }
         tabs={pane.tabs}
         variant="pane"
       />
       <div className="editor-pane-body">
-        {pane.mode === "file" ? (
+        {isTerminalPreviewTab(activeTab) ? (
+          <TerminalEditorPane active={isActive} tab={activeTab} />
+        ) : pane.mode === "file" ? (
           <CodeMirrorFilePreview
             blameError={
               data.fileBlameQuery.isError
@@ -160,7 +200,7 @@ export function PreviewPaneSurface({
             onSetConflictDraftContent={onSetConflictDraftContent}
           />
         ) : (
-          <DiffPaneBody
+          <PreviewPaneDiffBody
             activeCommit={activeCommit}
             activeProjectPath={activeProjectPath}
             data={data}
@@ -171,86 +211,5 @@ export function PreviewPaneSurface({
         )}
       </div>
     </section>
-  );
-}
-
-function DiffPaneBody({
-  activeCommit,
-  activeProjectPath,
-  data,
-  gitAvailability,
-  hasGitRepository,
-  repositoryReady,
-}: {
-  readonly activeCommit: string | null;
-  readonly activeProjectPath: string | null;
-  readonly data: ReturnType<typeof usePreviewPaneData>;
-  readonly gitAvailability: GitAvailability;
-  readonly hasGitRepository: boolean;
-  readonly repositoryReady: boolean;
-}) {
-  if (gitAvailability === "loading") {
-    return <PaneLoading />;
-  }
-  if (!hasGitRepository) {
-    return <PaneEmpty title="Git Diff Unavailable" copy="This folder is not inside a Git repository." />;
-  }
-  if (repositoryReady && !data.selectedChangePath) {
-    return <PaneEmpty title="Select a changed file" copy="Choose a file from Changes to render its diff." />;
-  }
-  if (repositoryReady && data.fileDiffQuery.isFetching && !data.currentFileDiff) {
-    return <PaneLoading />;
-  }
-  if (repositoryReady) {
-    return (
-      <DiffPanel
-        error={
-          data.parsedDiff.error ??
-          (data.fileDiffQuery.isError
-            ? String(data.fileDiffQuery.error.message)
-            : null)
-        }
-        files={data.visibleDiffFiles}
-        title={data.selectedChangePath ?? "Repository diff"}
-        projectPath={activeProjectPath}
-        commit={activeCommit}
-      />
-    );
-  }
-  return <PaneLoading />;
-}
-
-function PaneLoading() {
-  return (
-    <div className="diff-loading">
-      <Loader2 className="spin" size={18} />
-    </div>
-  );
-}
-
-function PaneEmpty({
-  title,
-  copy,
-}: {
-  readonly title: string;
-  readonly copy: string;
-}) {
-  return (
-    <div className="empty-state">
-      <div className="empty-title">{title}</div>
-      <div className="empty-copy">{copy}</div>
-    </div>
-  );
-}
-
-function paneLoading(
-  repositoryLoading: boolean,
-  data: ReturnType<typeof usePreviewPaneData>,
-): boolean {
-  return (
-    repositoryLoading ||
-    data.fileContentQuery.isFetching ||
-    data.fileDiffQuery.isFetching ||
-    data.fileWorktreeDiffQuery.isFetching
   );
 }

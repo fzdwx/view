@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { editorDraftKey, isDraftDirty } from "../lib/editorDrafts";
 import type { EditorDraft } from "../lib/editorTypes";
 import {
+  type FilePreviewMode,
   type PreviewMode,
   type PreviewTab,
   type PreviewTarget,
@@ -33,7 +34,7 @@ export interface PreviewTabsController {
   readonly clearPreviewTabs: (mode?: PreviewMode) => void;
   readonly movePreviewTabPath: (fromPath: string, toPath: string) => void;
   readonly openPreviewTab: (
-    mode: PreviewMode,
+    mode: FilePreviewMode,
     path: string,
     targetLine?: number | null,
     targetColumn?: number | null,
@@ -111,7 +112,7 @@ export function usePreviewTabs({
 
   const openPreviewTab = useCallback(
     (
-      mode: PreviewMode,
+      mode: FilePreviewMode,
       path: string,
       targetLine: number | null = null,
       targetColumn: number | null = null,

@@ -16,7 +16,7 @@ import {
 } from "../lib/api";
 import { confirmNativeDialog, showNativeMessage } from "../lib/nativeDialogs";
 import { buildRequestedFilePath } from "../lib/pathLabels";
-import type { PreviewMode } from "../lib/previewTabs";
+import type { FilePreviewMode } from "../lib/previewTabs";
 import type { SavedProject } from "../lib/projects";
 import { useProjectFileStateRefresh } from "./useProjectFileStateRefresh";
 
@@ -41,7 +41,7 @@ export interface UseProjectFileActionsOptions {
   ) => void;
   readonly movePreviewTabPath: (fromPath: string, toPath: string) => void;
   readonly openPreviewTab: (
-    mode: PreviewMode,
+    mode: FilePreviewMode,
     path: string,
     targetLine?: number | null,
   ) => void;

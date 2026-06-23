@@ -5,6 +5,7 @@ import {
   saveWorkbenchLayout,
 } from "../lib/workbenchLayout";
 import { terminalWorkspaceEmptyEvent } from "../lib/terminalSessions";
+import { terminalPanelEmptyEvent } from "../lib/terminalTabPlacement";
 import type {
   GitPanelId,
   PanelSizes,
@@ -157,9 +158,17 @@ export function useWorkbenchDock(): WorkbenchDockController {
       terminalWorkspaceEmptyEvent,
       handleTerminalWorkspaceEmpty,
     );
+    window.addEventListener(
+      terminalPanelEmptyEvent,
+      handleTerminalWorkspaceEmpty,
+    );
     return () => {
       window.removeEventListener(
         terminalWorkspaceEmptyEvent,
+        handleTerminalWorkspaceEmpty,
+      );
+      window.removeEventListener(
+        terminalPanelEmptyEvent,
         handleTerminalWorkspaceEmpty,
       );
     };
