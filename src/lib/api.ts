@@ -202,9 +202,22 @@ export interface GitPathsRequest {
 }
 
 export type RestoreMode = "all" | "staged" | "worktree";
+export type GitChangeSource = "staged" | "worktree";
+export type GitChangeOperation = "discard" | "stage" | "unstage";
 
 export interface RestoreFilesRequest extends GitPathsRequest {
   readonly mode: RestoreMode;
+}
+
+export interface GitFileChangeRequest {
+  readonly path: string;
+  readonly filePath: string;
+  readonly source: GitChangeSource;
+  readonly operation: GitChangeOperation;
+  readonly oldStart: number;
+  readonly oldLineCount: number;
+  readonly newStart: number;
+  readonly newLineCount: number;
 }
 
 export interface CommitRequest {
@@ -248,6 +261,18 @@ export async function getFileDiff(
     path,
     commit: commit ?? null,
     filePath,
+  });
+}
+
+export async function getFileStatusDiff(
+  path: string,
+  filePath: string,
+  source: GitChangeSource,
+): Promise<string> {
+  return invoke<string>("get_file_status_diff", {
+    path,
+    filePath,
+    source,
   });
 }
 
@@ -521,6 +546,12 @@ export async function restoreFiles(
   request: RestoreFilesRequest,
 ): Promise<GitWriteResponse> {
   return invoke<GitWriteResponse>("restore_files", { request });
+}
+
+export async function applyFileChange(
+  request: GitFileChangeRequest,
+): Promise<GitWriteResponse> {
+  return invoke<GitWriteResponse>("apply_file_change", { request });
 }
 
 export async function createCommit(

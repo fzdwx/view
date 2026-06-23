@@ -1,4 +1,5 @@
 import type { SaveConflict } from "./api";
+import type { GitChangeSource } from "./api";
 
 export type FileViewMode = "preview" | "source";
 
@@ -10,6 +11,7 @@ export interface EditorDraft {
 
 export interface EditorGitMarker {
   readonly id: string;
+  readonly source: GitChangeSource;
   readonly line: number;
   readonly lineCount: number;
   readonly oldStart: number;

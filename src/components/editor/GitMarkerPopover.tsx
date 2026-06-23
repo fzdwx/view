@@ -1,5 +1,5 @@
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import { RotateCcw, X } from "lucide-react";
+import { Check, Minus, RotateCcw, Trash2, X } from "lucide-react";
 import { gitMarkerLabel } from "../../lib/editorGitMarkers";
 import type { EditorGitMarker } from "../../lib/editorTypes";
 
@@ -7,16 +7,24 @@ export function GitMarkerPopover({
   left,
   marker,
   top,
+  canRunGitChangeAction,
   onClose,
+  onDiscard,
   onMoveHorizontal,
   onRevert,
+  onStage,
+  onUnstage,
 }: {
   left: number;
   marker: EditorGitMarker;
   top: number;
+  canRunGitChangeAction: boolean;
   onClose(): void;
+  onDiscard(): void;
   onMoveHorizontal(delta: number): void;
   onRevert(): void;
+  onStage(): void;
+  onUnstage(): void;
 }) {
   const previewLines = marker.diffLines.slice(0, 12);
   const hiddenLineCount = Math.max(0, marker.diffLines.length - previewLines.length);
@@ -52,7 +60,8 @@ export function GitMarkerPopover({
         <div>
           <span>{gitMarkerLabel(marker.kind)}</span>
           <small>
-            line {marker.line}, +{marker.additions} -{marker.deletions}
+            {marker.source === "staged" ? "staged" : "worktree"} · line{" "}
+            {marker.line}, +{marker.additions} -{marker.deletions}
           </small>
         </div>
         <button
@@ -85,10 +94,44 @@ export function GitMarkerPopover({
         ) : null}
       </div>
       <div className="editor-git-popover-actions">
-        <button type="button" className="ghost-button editor-git-revert" onClick={onRevert}>
-          <RotateCcw size={13} />
-          Rollback change
-        </button>
+        {marker.source === "worktree" ? (
+          <>
+            <button
+              type="button"
+              className="ghost-button editor-git-action"
+              disabled={!canRunGitChangeAction}
+              onClick={onStage}
+            >
+              <Check size={13} />
+              Stage change
+            </button>
+            <button
+              type="button"
+              className="ghost-button editor-git-action danger"
+              disabled={!canRunGitChangeAction}
+              onClick={onDiscard}
+            >
+              <Trash2 size={13} />
+              Discard change
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="ghost-button editor-git-action"
+            disabled={!canRunGitChangeAction}
+            onClick={onUnstage}
+          >
+            <Minus size={13} />
+            Unstage change
+          </button>
+        )}
+        {marker.source === "worktree" ? (
+          <button type="button" className="ghost-button editor-git-revert" onClick={onRevert}>
+            <RotateCcw size={13} />
+            Draft rollback
+          </button>
+        ) : null}
       </div>
     </section>
   );

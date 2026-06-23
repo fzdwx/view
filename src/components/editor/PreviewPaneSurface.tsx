@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import { PreviewTabBar } from "../PreviewTabBar";
 import { CodeMirrorFilePreview } from "./CodeMirrorFilePreview";
 import { editorDraftKey } from "../../lib/editorDrafts";
-import type { EditorDraft } from "../../lib/editorTypes";
+import type { EditorDraft, EditorGitMarker } from "../../lib/editorTypes";
 import type { TreeFile } from "../../lib/api";
 import type { GitAvailability } from "../workbench/GitPanels";
 import {
@@ -12,10 +12,8 @@ import {
 } from "../../lib/previewPanes";
 import { isTerminalPreviewTab, type PreviewTab } from "../../lib/previewTabs";
 import { usePreviewPaneData } from "../../hooks/usePreviewPaneData";
-import {
-  paneLoading,
-  PreviewPaneDiffBody,
-} from "./PreviewPaneDiffBody";
+import { PreviewPaneDiffBody } from "./PreviewPaneDiffBody";
+import { paneLoading } from "./previewPaneLoading";
 import { TerminalEditorPane } from "./TerminalEditorPane";
 import {
   previewPaneSurfaceClassName,
@@ -37,6 +35,7 @@ interface PreviewPaneSurfaceProps {
   readonly repositoryReady: boolean;
   readonly saveError: string | null;
   readonly savingActiveFile: boolean;
+  readonly canRunGitChangeAction: boolean;
   readonly onActivatePane: (paneId: PreviewPaneId) => void;
   readonly onChangeDraftForFile: (
     projectPath: string,
@@ -48,6 +47,10 @@ interface PreviewPaneSurfaceProps {
   readonly onCloseOtherTabs: (paneId: PreviewPaneId, tabId: string) => void;
   readonly onCloseTab: (paneId: PreviewPaneId, tabId: string) => void;
   readonly onDiscardConflict: () => void;
+  readonly onDiscardGitChange: (
+    filePath: string,
+    marker: EditorGitMarker,
+  ) => Promise<boolean>;
   readonly onReorderTabs: (
     paneId: PreviewPaneId,
     fromId: string,
@@ -61,12 +64,20 @@ interface PreviewPaneSurfaceProps {
   ) => void;
   readonly onSave: () => void;
   readonly onSelectTab: (paneId: PreviewPaneId, tab: PreviewTab) => void;
+  readonly onStageGitChange: (
+    filePath: string,
+    marker: EditorGitMarker,
+  ) => Promise<boolean>;
   readonly onSetConflictDraftContent: (content: string) => void;
   readonly onSplitTab: (
     paneId: PreviewPaneId,
     tabId: string,
     direction: PreviewSplitDirection,
   ) => void;
+  readonly onUnstageGitChange: (
+    filePath: string,
+    marker: EditorGitMarker,
+  ) => Promise<boolean>;
 }
 
 export function PreviewPaneSurface({
@@ -83,18 +94,22 @@ export function PreviewPaneSurface({
   repositoryReady,
   saveError,
   savingActiveFile,
+  canRunGitChangeAction,
   onActivatePane,
   onChangeDraftForFile,
   onCloseAllTabs,
   onCloseOtherTabs,
   onCloseTab,
   onDiscardConflict,
+  onDiscardGitChange,
   onOpenTerminalTab,
   onReorderTabs,
   onSave,
   onSelectTab,
+  onStageGitChange,
   onSetConflictDraftContent,
   onSplitTab,
+  onUnstageGitChange,
 }: PreviewPaneSurfaceProps) {
   const data = usePreviewPaneData({
     activeCommit,
@@ -249,10 +264,14 @@ export function PreviewPaneSurface({
             saving={isActive && savingActiveFile}
             selectedPath={data.selectedProjectPath}
             target={pane.target}
+            canRunGitChangeAction={canRunGitChangeAction}
             onChangeDraft={handleChangeDraft}
             onDiscardConflict={onDiscardConflict}
+            onDiscardGitChange={onDiscardGitChange}
             onSave={onSave}
+            onStageGitChange={onStageGitChange}
             onSetConflictDraftContent={handleSetConflictDraftContent}
+            onUnstageGitChange={onUnstageGitChange}
           />
         ) : (
           <PreviewPaneDiffBody

@@ -2,7 +2,7 @@ import { isTauriRuntime } from "../../lib/api";
 import type { TerminalPreviewTab } from "../../lib/previewTabs";
 import { useTerminalWorkspace } from "../../hooks/useTerminalWorkspace";
 import { TerminalSessionView } from "../TerminalPanel";
-import { PaneEmpty } from "./PreviewPaneDiffBody";
+import { PaneEmpty } from "./PreviewPaneStates";
 
 export function TerminalEditorPane({
   active,

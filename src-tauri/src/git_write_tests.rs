@@ -1,4 +1,7 @@
-use super::{stage_files, unstage_files, GitPathsRequest};
+use super::{
+    apply_file_change, stage_files, unstage_files, GitChangeOperation, GitChangeSource,
+    GitFileChangeRequest, GitPathsRequest,
+};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -116,6 +119,81 @@ fn unstage_files_unstages_staged_file() {
 }
 
 #[test]
+fn apply_file_change_stages_only_selected_worktree_hunk() {
+    let repo = create_repo_with_multiline_file();
+    fs::write(repo.join("tracked.txt"), "one\nTWO\nthree\nfour\nFIVE\n").expect("modify tracked");
+
+    apply_file_change(change_request(
+        &repo,
+        GitChangeSource::Worktree,
+        GitChangeOperation::Stage,
+        2,
+        1,
+        2,
+        1,
+    ))
+    .expect("stage one hunk");
+
+    let cached = run_git(&repo, &["diff", "--cached", "--", "tracked.txt"]);
+    let worktree = run_git(&repo, &["diff", "--", "tracked.txt"]);
+    assert!(cached.contains("TWO"));
+    assert!(!cached.contains("FIVE"));
+    assert!(worktree.contains("FIVE"));
+    assert!(!worktree.contains("+TWO"));
+    fs::remove_dir_all(repo).ok();
+}
+
+#[test]
+fn apply_file_change_unstages_only_selected_staged_hunk() {
+    let repo = create_repo_with_multiline_file();
+    fs::write(repo.join("tracked.txt"), "one\nTWO\nthree\nfour\nFIVE\n").expect("modify tracked");
+    run_git(&repo, &["add", "tracked.txt"]);
+
+    apply_file_change(change_request(
+        &repo,
+        GitChangeSource::Staged,
+        GitChangeOperation::Unstage,
+        5,
+        1,
+        5,
+        1,
+    ))
+    .expect("unstage one hunk");
+
+    let cached = run_git(&repo, &["diff", "--cached", "--", "tracked.txt"]);
+    let worktree = run_git(&repo, &["diff", "--", "tracked.txt"]);
+    assert!(cached.contains("TWO"));
+    assert!(!cached.contains("FIVE"));
+    assert!(worktree.contains("FIVE"));
+    assert!(!worktree.contains("+TWO"));
+    fs::remove_dir_all(repo).ok();
+}
+
+#[test]
+fn apply_file_change_discards_only_selected_worktree_hunk() {
+    let repo = create_repo_with_multiline_file();
+    fs::write(repo.join("tracked.txt"), "one\nTWO\nthree\nfour\nFIVE\n").expect("modify tracked");
+
+    apply_file_change(change_request(
+        &repo,
+        GitChangeSource::Worktree,
+        GitChangeOperation::Discard,
+        2,
+        1,
+        2,
+        1,
+    ))
+    .expect("discard one hunk");
+
+    let content = fs::read_to_string(repo.join("tracked.txt")).expect("read tracked");
+    assert_eq!(content, "one\ntwo\nthree\nfour\nFIVE\n");
+    let worktree = run_git(&repo, &["diff", "--", "tracked.txt"]);
+    assert!(!worktree.contains("TWO"));
+    assert!(worktree.contains("FIVE"));
+    fs::remove_dir_all(repo).ok();
+}
+
+#[test]
 fn stage_files_rejects_path_escaping_repo() {
     let repo = create_repo_with_tracked_file();
 
@@ -204,6 +282,39 @@ fn create_repo_with_tracked_file() -> PathBuf {
     run_git(&repo, &["add", "tracked.txt"]);
     run_git(&repo, &["commit", "-m", "base"]);
     repo
+}
+
+fn create_repo_with_multiline_file() -> PathBuf {
+    let repo = unique_temp_repo_path();
+    fs::create_dir_all(&repo).expect("create temp repo");
+    run_git(&repo, &["init", "--initial-branch=main"]);
+    run_git(&repo, &["config", "user.email", "view@example.test"]);
+    run_git(&repo, &["config", "user.name", "View Test"]);
+    fs::write(repo.join("tracked.txt"), "one\ntwo\nthree\nfour\nfive\n").expect("write tracked");
+    run_git(&repo, &["add", "tracked.txt"]);
+    run_git(&repo, &["commit", "-m", "base"]);
+    repo
+}
+
+fn change_request(
+    repo: &Path,
+    source: GitChangeSource,
+    operation: GitChangeOperation,
+    old_start: usize,
+    old_line_count: usize,
+    new_start: usize,
+    new_line_count: usize,
+) -> GitFileChangeRequest {
+    GitFileChangeRequest {
+        path: repo.to_string_lossy().to_string(),
+        file_path: "tracked.txt".to_string(),
+        source,
+        operation,
+        old_start,
+        old_line_count,
+        new_start,
+        new_line_count,
+    }
 }
 
 fn create_conflict_repo() -> PathBuf {

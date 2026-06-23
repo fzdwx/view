@@ -1,7 +1,7 @@
-import { Loader2 } from "lucide-react";
 import { DiffPanel } from "../DiffPanel";
 import type { GitAvailability } from "../workbench/GitPanels";
 import type { usePreviewPaneData } from "../../hooks/usePreviewPaneData";
+import { PaneEmpty, PaneLoading } from "./PreviewPaneStates";
 
 export function PreviewPaneDiffBody({
   activeCommit,
@@ -57,39 +57,4 @@ export function PreviewPaneDiffBody({
     );
   }
   return <PaneLoading />;
-}
-
-export function PaneLoading() {
-  return (
-    <div className="diff-loading">
-      <Loader2 className="spin" size={18} />
-    </div>
-  );
-}
-
-export function PaneEmpty({
-  title,
-  copy,
-}: {
-  readonly title: string;
-  readonly copy: string;
-}) {
-  return (
-    <div className="empty-state">
-      <div className="empty-title">{title}</div>
-      <div className="empty-copy">{copy}</div>
-    </div>
-  );
-}
-
-export function paneLoading(
-  repositoryLoading: boolean,
-  data: ReturnType<typeof usePreviewPaneData>,
-): boolean {
-  return (
-    repositoryLoading ||
-    data.fileContentQuery.isFetching ||
-    data.fileDiffQuery.isFetching ||
-    data.fileWorktreeDiffQuery.isFetching
-  );
 }

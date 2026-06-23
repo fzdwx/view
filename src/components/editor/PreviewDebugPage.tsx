@@ -361,10 +361,14 @@ export function PreviewDebugPage({
               saving={false}
               selectedPath={file?.path ?? null}
               target={target}
+              canRunGitChangeAction={false}
               onChangeDraft={setDraftContent}
               onDiscardConflict={() => applyScenario("text")}
+              onDiscardGitChange={() => Promise.resolve(false)}
               onSave={handleSave}
+              onStageGitChange={() => Promise.resolve(false)}
               onSetConflictDraftContent={setDraftContent}
+              onUnstageGitChange={() => Promise.resolve(false)}
             />
           </div>
         </article>

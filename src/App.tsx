@@ -37,6 +37,7 @@ import { useAppSettingsState } from "./hooks/useAppSettingsState";
 import { useCommandPanel } from "./hooks/useCommandPanel";
 import { useEditorDrafts } from "./hooks/useEditorDrafts";
 import { useGitActions } from "./hooks/useGitActions";
+import { useGitChangeActions } from "./hooks/useGitChangeActions";
 import { useGitFileActions } from "./hooks/useGitFileActions";
 import { useGitWriteGuard } from "./hooks/useGitWriteGuard";
 import { useGitWriteActions } from "./hooks/useGitWriteActions";
@@ -306,6 +307,18 @@ export function App() {
     removePreviewTabsForPath,
     selectedProjectPath,
     setSelectedProjectPath,
+  });
+  const {
+    canRunGitChangeAction,
+    discardChange,
+    stageChange,
+    unstageChange,
+  } = useGitChangeActions({
+    activeProject,
+    discardDraftForPath,
+    editorDrafts,
+    gitWriteGuard,
+    hasGitRepository,
   });
   const gitWriteActions = useGitWriteActions({
     activeProject,
@@ -1141,18 +1154,22 @@ export function App() {
                 repositoryReady={Boolean(payload)}
                 saveError={saveError}
                 savingActiveFile={savingActiveFile}
+                canRunGitChangeAction={canRunGitChangeAction}
                 onActivatePane={activatePane}
                 onCloseAllTabs={closeAllTabs}
                 onCloseOtherTabs={closeOtherTabs}
                 onCloseTab={closePreviewTab}
                 onDiscardConflict={discardConflictToDisk}
+                onDiscardGitChange={discardChange}
                 onReorderTabs={reorderPreviewTabs}
                 onOpenTerminalTab={openTerminalTabInEditor}
                 onSave={saveActivePreviewFile}
                 onSelectTab={activatePreviewTab}
                 onChangeDraftForFile={updateEditorDraftForFile}
+                onStageGitChange={stageChange}
                 onSetConflictDraftContent={setConflictDraftContent}
                 onSplitTab={splitTab}
+                onUnstageGitChange={unstageChange}
               />
             </section>
             {hasRightTopPanel ? (

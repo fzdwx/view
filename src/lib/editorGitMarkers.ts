@@ -1,4 +1,5 @@
 import type { EditorGitMarker } from "./editorTypes";
+import type { GitChangeSource } from "./api";
 
 export function revertEditorGitMarker(
   content: string,
@@ -93,7 +94,10 @@ export function gitMarkerLabel(kind: EditorGitMarker["kind"]): string {
   }
 }
 
-export function buildEditorGitMarkers(diff: string): EditorGitMarker[] {
+export function buildEditorGitMarkers(
+  diff: string,
+  source: GitChangeSource = "worktree",
+): EditorGitMarker[] {
   if (!diff.trim()) {
     return [];
   }
@@ -147,7 +151,8 @@ export function buildEditorGitMarkers(diff: string): EditorGitMarker[] {
     const line = Math.max(1, currentChange.newStart);
     const lineCount = Math.max(1, newLineCount || oldLineCount);
     markers.push({
-      id: `${currentChange.oldStart}-${oldLineCount}-${currentChange.newStart}-${newLineCount}-${markerIndex}`,
+      id: `${source}-${currentChange.oldStart}-${oldLineCount}-${currentChange.newStart}-${newLineCount}-${markerIndex}`,
+      source,
       line,
       lineCount,
       oldStart: currentChange.oldStart,

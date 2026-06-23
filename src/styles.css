@@ -4964,11 +4964,14 @@ body.is-resizing-y * {
 
 .editor-git-popover-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
+  gap: 6px;
   border-top: 1px solid var(--line);
   padding: 7px 8px;
 }
 
+.editor-git-action,
 .editor-git-revert {
   width: auto;
   height: 24px;
@@ -4976,6 +4979,10 @@ body.is-resizing-y * {
   gap: 6px;
   padding: 0 8px;
   font-size: 11px;
+}
+
+.editor-git-action.danger {
+  color: var(--danger);
 }
 
 .target-preview {

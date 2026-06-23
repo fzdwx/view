@@ -1,5 +1,5 @@
 import type { TreeFile } from "../../lib/api";
-import type { EditorDraft } from "../../lib/editorTypes";
+import type { EditorDraft, EditorGitMarker } from "../../lib/editorTypes";
 import type {
   PreviewPane,
   PreviewPaneId,
@@ -25,6 +25,7 @@ export interface EditorPaneGridProps {
   readonly repositoryReady: boolean;
   readonly saveError: string | null;
   readonly savingActiveFile: boolean;
+  readonly canRunGitChangeAction: boolean;
   readonly onActivatePane: (paneId: PreviewPaneId) => void;
   readonly onChangeDraftForFile: (
     projectPath: string,
@@ -36,6 +37,10 @@ export interface EditorPaneGridProps {
   readonly onCloseOtherTabs: (paneId: PreviewPaneId, tabId: string) => void;
   readonly onCloseTab: (paneId: PreviewPaneId, tabId: string) => void;
   readonly onDiscardConflict: () => void;
+  readonly onDiscardGitChange: (
+    filePath: string,
+    marker: EditorGitMarker,
+  ) => Promise<boolean>;
   readonly onReorderTabs: (
     paneId: PreviewPaneId,
     fromId: string,
@@ -49,12 +54,20 @@ export interface EditorPaneGridProps {
   ) => void;
   readonly onSave: () => void;
   readonly onSelectTab: (paneId: PreviewPaneId, tab: PreviewTab) => void;
+  readonly onStageGitChange: (
+    filePath: string,
+    marker: EditorGitMarker,
+  ) => Promise<boolean>;
   readonly onSetConflictDraftContent: (content: string) => void;
   readonly onSplitTab: (
     paneId: PreviewPaneId,
     tabId: string,
     direction: PreviewSplitDirection,
   ) => void;
+  readonly onUnstageGitChange: (
+    filePath: string,
+    marker: EditorGitMarker,
+  ) => Promise<boolean>;
 }
 
 export function EditorPaneGrid({

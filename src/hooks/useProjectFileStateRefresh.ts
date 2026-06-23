@@ -15,6 +15,7 @@ const durableProjectStateQueryRoots = [
 const previewStateQueryRoots = [
   "file-blame",
   "file-content",
+  "file-staged-diff",
   "file-worktree-diff",
   "file-diff",
 ] as const;

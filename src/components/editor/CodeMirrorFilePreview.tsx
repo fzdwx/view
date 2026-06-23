@@ -74,10 +74,14 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
   saving,
   selectedPath,
   target,
+  canRunGitChangeAction,
   onChangeDraft,
   onDiscardConflict,
+  onDiscardGitChange,
   onSave,
+  onStageGitChange,
   onSetConflictDraftContent,
+  onUnstageGitChange,
 }: {
   blameError: string | null;
   blameLines: FileBlameLine[];
@@ -93,10 +97,14 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
   saving: boolean;
   selectedPath: string | null;
   target: PreviewTarget | null;
+  canRunGitChangeAction: boolean;
   onChangeDraft(content: string): void;
   onDiscardConflict(): void;
+  onDiscardGitChange(filePath: string, marker: EditorGitMarker): Promise<boolean>;
   onSave(): void;
+  onStageGitChange(filePath: string, marker: EditorGitMarker): Promise<boolean>;
   onSetConflictDraftContent(content: string): void;
+  onUnstageGitChange(filePath: string, marker: EditorGitMarker): Promise<boolean>;
 }) {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const findInputRef = useRef<HTMLInputElement | null>(null);
@@ -654,6 +662,20 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
     setActiveGitMarkerId(null);
   }
 
+  async function runGitMarkerAction(
+    marker: EditorGitMarker,
+    action: (filePath: string, marker: EditorGitMarker) => Promise<boolean>,
+  ) {
+    if (!selectedPath) {
+      return;
+    }
+
+    const completed = await action(selectedPath, marker);
+    if (completed) {
+      setActiveGitMarkerId(null);
+    }
+  }
+
   function handleEditorFindKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     const key = event.key.toLowerCase();
     if (key === "escape") {
@@ -1154,11 +1176,21 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
             left={gitPopoverLeft}
             marker={activeGitMarker}
             top={activeGitMarkerTop}
+            canRunGitChangeAction={canRunGitChangeAction}
             onClose={() => setActiveGitMarkerId(null)}
+            onDiscard={() => {
+              void runGitMarkerAction(activeGitMarker, onDiscardGitChange);
+            }}
             onMoveHorizontal={(delta: number) =>
               setGitPopoverLeftOffset((current) => current + delta)
             }
             onRevert={() => revertGitMarker(activeGitMarker)}
+            onStage={() => {
+              void runGitMarkerAction(activeGitMarker, onStageGitChange);
+            }}
+            onUnstage={() => {
+              void runGitMarkerAction(activeGitMarker, onUnstageGitChange);
+            }}
           />
         ) : null}
       </div>

@@ -12,6 +12,7 @@ import {
   getFileBlame,
   getFileContent,
   getFileDiff,
+  getFileStatusDiff,
 } from "../lib/api";
 import {
   countDiffStats,
@@ -42,6 +43,9 @@ interface LoadedWorktreeFileDiff {
   readonly rootPath: string;
   readonly filePath: string;
   readonly status: GitStatus;
+  readonly staged: boolean;
+  readonly unstaged: boolean;
+  readonly untracked: boolean;
   readonly diff: string;
 }
 
@@ -60,6 +64,7 @@ export interface PreviewPaneData {
   readonly fileBlameQuery: UseQueryResult<LoadedFileBlame, Error>;
   readonly fileContentQuery: UseQueryResult<LoadedFileContent, Error>;
   readonly fileDiffQuery: UseQueryResult<LoadedFileDiff, Error>;
+  readonly fileStagedDiffQuery: UseQueryResult<LoadedWorktreeFileDiff, Error>;
   readonly fileWorktreeDiffQuery: UseQueryResult<LoadedWorktreeFileDiff, Error>;
   readonly parsedDiff: ParsedRepositoryDiff;
   readonly selectedChangePath: string | null;
@@ -96,6 +101,9 @@ export function usePreviewPaneData({
     [projectFileByPath, selectedProjectPath],
   );
   const selectedProjectStatus = selectedProjectFile?.status ?? null;
+  const selectedProjectStaged = selectedProjectFile?.staged === true;
+  const selectedProjectUnstaged = selectedProjectFile?.unstaged === true;
+  const selectedProjectUntracked = selectedProjectFile?.untracked === true;
 
   const fileContentQuery = useQuery({
     queryKey: ["file-content", activeProjectPath, selectedProjectPath],
@@ -164,16 +172,66 @@ export function usePreviewPaneData({
       activeProjectPath,
       selectedProjectPath,
       selectedProjectStatus,
+      selectedProjectStaged,
+      selectedProjectUnstaged,
+      selectedProjectUntracked,
     ],
     queryFn: async () => {
       const rootPath = requireQueryInput(activeProjectPath, "worktree diff path");
       const filePath = requireQueryInput(selectedProjectPath, "worktree diff file");
       const status = requireQueryInput(selectedProjectStatus, "worktree status");
-      return { rootPath, filePath, status, diff: await getFileDiff(rootPath, filePath, null) };
+      return {
+        rootPath,
+        filePath,
+        status,
+        staged: selectedProjectStaged,
+        unstaged: selectedProjectUnstaged,
+        untracked: selectedProjectUntracked,
+        diff: await getFileStatusDiff(rootPath, filePath, "worktree"),
+      };
     },
     enabled:
       canLoadFilePreviewMetadata &&
-      Boolean(selectedProjectStatus && isChangedFileStatus(selectedProjectStatus)),
+      Boolean(
+        selectedProjectStatus &&
+          isChangedFileStatus(selectedProjectStatus) &&
+          (selectedProjectUnstaged || selectedProjectUntracked),
+      ),
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+
+  const fileStagedDiffQuery = useQuery({
+    queryKey: [
+      "file-staged-diff",
+      activeProjectPath,
+      selectedProjectPath,
+      selectedProjectStatus,
+      selectedProjectStaged,
+      selectedProjectUnstaged,
+      selectedProjectUntracked,
+    ],
+    queryFn: async () => {
+      const rootPath = requireQueryInput(activeProjectPath, "staged diff path");
+      const filePath = requireQueryInput(selectedProjectPath, "staged diff file");
+      const status = requireQueryInput(selectedProjectStatus, "staged status");
+      return {
+        rootPath,
+        filePath,
+        status,
+        staged: selectedProjectStaged,
+        unstaged: selectedProjectUnstaged,
+        untracked: selectedProjectUntracked,
+        diff: await getFileStatusDiff(rootPath, filePath, "staged"),
+      };
+    },
+    enabled:
+      canLoadFilePreviewMetadata &&
+      Boolean(
+        selectedProjectStatus &&
+          isChangedFileStatus(selectedProjectStatus) &&
+          selectedProjectStaged,
+      ),
     placeholderData: keepPreviousData,
     retry: false,
   });
@@ -192,12 +250,27 @@ export function usePreviewPaneData({
   const currentWorktreeFileDiff =
     fileWorktreeDiffQuery.data?.rootPath === activeProjectPath &&
     fileWorktreeDiffQuery.data?.filePath === selectedProjectPath &&
-    fileWorktreeDiffQuery.data?.status === selectedProjectStatus
+    fileWorktreeDiffQuery.data?.status === selectedProjectStatus &&
+    fileWorktreeDiffQuery.data?.staged === selectedProjectStaged &&
+    fileWorktreeDiffQuery.data?.unstaged === selectedProjectUnstaged &&
+    fileWorktreeDiffQuery.data?.untracked === selectedProjectUntracked
       ? fileWorktreeDiffQuery.data.diff
       : "";
+  const currentStagedFileDiff =
+    fileStagedDiffQuery.data?.rootPath === activeProjectPath &&
+    fileStagedDiffQuery.data?.filePath === selectedProjectPath &&
+    fileStagedDiffQuery.data?.status === selectedProjectStatus &&
+    fileStagedDiffQuery.data?.staged === selectedProjectStaged &&
+    fileStagedDiffQuery.data?.unstaged === selectedProjectUnstaged &&
+    fileStagedDiffQuery.data?.untracked === selectedProjectUntracked
+      ? fileStagedDiffQuery.data.diff
+      : "";
   const editorGitMarkers = useMemo(
-    () => buildEditorGitMarkers(currentWorktreeFileDiff),
-    [currentWorktreeFileDiff],
+    () => [
+      ...buildEditorGitMarkers(currentWorktreeFileDiff, "worktree"),
+      ...buildEditorGitMarkers(currentStagedFileDiff, "staged"),
+    ],
+    [currentStagedFileDiff, currentWorktreeFileDiff],
   );
   const parsedDiff = useMemo(
     () => parseRepositoryDiff(currentFileDiff?.diff ?? ""),
@@ -221,6 +294,7 @@ export function usePreviewPaneData({
     fileBlameQuery,
     fileContentQuery,
     fileDiffQuery,
+    fileStagedDiffQuery,
     fileWorktreeDiffQuery,
     parsedDiff,
     selectedChangePath,

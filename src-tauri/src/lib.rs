@@ -5654,6 +5654,8 @@ pub fn run() {
             git_commit_push::create_commit,
             git_commit_push::push_current_branch,
             git_commit_push::reset_hard_to_reflog,
+            git_write::get_file_status_diff,
+            git_write::apply_file_change,
             git_write::stage_files,
             git_write::unstage_files,
             git_restore::restore_files,
