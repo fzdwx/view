@@ -2876,7 +2876,7 @@ body.is-resizing-y * {
 .commit-list-header {
   display: grid;
   grid-template-columns:
-    var(--commit-graph-width, 30px)
+    var(--commit-graph-width, 24px)
     minmax(104px, 1fr)
     minmax(54px, 88px)
     minmax(104px, 110px)
@@ -3142,7 +3142,7 @@ body.is-resizing-y * {
   display: grid;
   position: relative;
   grid-template-columns:
-    var(--commit-graph-width, 30px)
+    var(--commit-graph-width, 24px)
     minmax(104px, 1fr)
     minmax(54px, 88px)
     minmax(104px, 110px)
@@ -3206,6 +3206,7 @@ body.is-resizing-y * {
   display: flex;
   align-items: center;
   align-self: stretch;
+  gap: 6px;
   padding: 6px 10px;
   min-width: 0;
   min-height: 32px;
@@ -3242,6 +3243,17 @@ body.is-resizing-y * {
 .commit-row.active .commit-date,
 .commit-row.active .commit-hash {
   color: var(--ink);
+}
+
+.commit-row.remote-only:not(.active) .commit-subject,
+.commit-row.remote-only:not(.active) .commit-author,
+.commit-row.remote-only:not(.active) .commit-date,
+.commit-row.remote-only:not(.active) .commit-hash {
+  color: var(--muted);
+}
+
+.commit-row.remote-only:not(.active) .commit-graph {
+  opacity: 0.62;
 }
 
 .reflog-row {
@@ -3318,12 +3330,47 @@ body.is-resizing-y * {
   white-space: nowrap;
 }
 
-.commit-subject > span:last-child {
+.commit-subject-text {
   display: block;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.commit-tracking-badge {
+  display: inline-flex;
+  max-width: 118px;
+  height: 18px;
+  flex: 0 0 auto;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1;
+  overflow: hidden;
+  padding: 0 6px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commit-tracking-badge.local {
+  border-color: color-mix(in oklch, var(--success) 36%, var(--line));
+  background: color-mix(in oklch, var(--success) 13%, var(--surface-2));
+  color: var(--success);
+}
+
+.commit-tracking-badge.upstream {
+  border-color: color-mix(in oklch, var(--blue) 24%, var(--line));
+  background: color-mix(in oklch, var(--blue) 8%, var(--surface-2));
+  color: color-mix(in oklch, var(--blue) 70%, var(--muted));
+}
+
+.commit-row.active .commit-tracking-badge {
+  background: color-mix(in oklch, var(--surface-2) 78%, transparent);
 }
 
 .reflog-selector,
@@ -3347,7 +3394,7 @@ body.is-resizing-y * {
 
 .commit-graph {
   display: grid;
-  width: var(--commit-graph-width, 30px);
+  width: var(--commit-graph-width, 24px);
   height: 28px;
   align-items: center;
   justify-items: start;
@@ -5773,7 +5820,7 @@ body.is-resizing-y * {
   .commit-list-header,
   .commit-row {
     grid-template-columns:
-      var(--commit-graph-width, 34px)
+      var(--commit-graph-width, 24px)
       minmax(124px, 1fr)
       78px
       104px;

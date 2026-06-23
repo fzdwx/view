@@ -37,12 +37,17 @@ use tungstenite::{accept, Error as WsError, Message, WebSocket};
 
 mod clipboard_paste;
 mod git_commit_push;
+#[cfg(test)]
+#[path = "git_log_tracking_tests.rs"]
+mod git_log_tracking_tests;
 mod git_pathspec;
 mod git_restore;
 mod git_status;
+mod git_tracking;
 mod git_write;
 mod wsl;
 
+use git_tracking::CommitTrackingInfo;
 use git_status::{
     count_statuses, normalize_git_path, parse_name_status_entries, parse_porcelain_v1_z_status,
     StatusCounts, TreeFile, WORKTREE_STATUS_ARGS,
@@ -110,6 +115,7 @@ struct CommitInfo {
     author: String,
     date: String,
     subject: String,
+    tracking: Option<CommitTrackingInfo>,
 }
 
 #[derive(Serialize)]
@@ -1396,6 +1402,7 @@ fn git_log(
     filter: Option<&str>,
 ) -> Result<Vec<CommitInfo>, String> {
     let target = branch.filter(|value| !value.trim().is_empty());
+    let tracking_selection = git_tracking::tracking_selection_for_target(root, target, git);
     let commit_filter = CommitLogFilter::parse(filter);
     let mut args = vec![
         "log".to_string(),
@@ -1418,7 +1425,10 @@ fn git_log(
         args.push("120".to_string());
     }
 
-    if let Some(target) = target {
+    if let Some(selection) = tracking_selection.as_ref() {
+        args.push(selection.left_ref.clone());
+        args.push(selection.right_ref.clone());
+    } else if let Some(target) = target {
         args.push(target.to_string());
     }
 
@@ -1428,15 +1438,24 @@ fn git_log(
     }
 
     let output = git_owned(root, &args).unwrap_or_default();
-    let commits = output
+    let mut commits = output
         .lines()
         .filter_map(parse_commit_log_line)
-        .filter(|commit| matches_commit_text_terms(commit, &commit_filter.text_terms));
+        .filter(|commit| matches_commit_text_terms(commit, &commit_filter.text_terms))
+        .collect::<Vec<_>>();
+
+    if let Some(selection) = tracking_selection.as_ref() {
+        if let Ok(tracking_map) = git_tracking::commit_tracking_map(root, selection, git) {
+            for commit in &mut commits {
+                commit.tracking = tracking_map.get(&commit.hash).cloned();
+            }
+        }
+    }
 
     if commit_filter.has_text_terms() {
-        Ok(commits.take(120).collect())
+        Ok(commits.into_iter().take(120).collect())
     } else {
-        Ok(commits.collect())
+        Ok(commits)
     }
 }
 
@@ -1648,6 +1667,7 @@ fn parse_commit_log_line(line: &str) -> Option<CommitInfo> {
         author: parts[3].to_string(),
         date: parts[4].to_string(),
         subject: parts[5].to_string(),
+        tracking: None,
     })
 }
 

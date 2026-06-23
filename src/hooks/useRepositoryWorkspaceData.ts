@@ -428,6 +428,7 @@ function reflogEntryToCommitInfo(entry: ReflogEntry): CommitInfo {
     author: entry.author,
     date: entry.date,
     subject: entry.subject || entry.action,
+    tracking: null,
   };
 }
 

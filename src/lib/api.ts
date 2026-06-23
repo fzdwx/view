@@ -42,13 +42,22 @@ export interface RepositorySummary {
   tags: TagInfo[];
 }
 
+export type CommitTrackingSide = "local" | "upstream";
+
+export interface CommitTrackingInfo {
+  readonly side: CommitTrackingSide;
+  readonly label: string;
+  readonly compareLabel: string;
+}
+
 export interface CommitInfo {
-  hash: string;
-  shortHash: string;
-  parents: string[];
-  author: string;
-  date: string;
-  subject: string;
+  readonly hash: string;
+  readonly shortHash: string;
+  readonly parents: string[];
+  readonly author: string;
+  readonly date: string;
+  readonly subject: string;
+  readonly tracking: CommitTrackingInfo | null;
 }
 
 export interface ReflogEntry {

@@ -3,8 +3,10 @@ import type { CommitGraphRow } from "../../lib/commitGraph";
 
 const COMMIT_GRAPH_ROW_HEIGHT = 28;
 const COMMIT_GRAPH_MID_Y = 14;
-const COMMIT_GRAPH_LANE_GAP = 13;
-const COMMIT_GRAPH_LEFT_INSET = 10.5;
+const COMMIT_GRAPH_LANE_GAP = 10;
+const COMMIT_GRAPH_LEFT_INSET = 7.5;
+const COMMIT_GRAPH_RIGHT_INSET = 10;
+const COMMIT_GRAPH_MIN_WIDTH = 24;
 
 const laneX = (lane: number) =>
   lane * COMMIT_GRAPH_LANE_GAP + COMMIT_GRAPH_LEFT_INSET;
@@ -125,8 +127,10 @@ export function CommitGraph({ row }: { row: CommitGraphRow }) {
 export function getCommitGraphWidth(laneCount: number) {
   return Math.ceil(
     Math.max(
-      36,
-      COMMIT_GRAPH_LEFT_INSET + (laneCount - 1) * COMMIT_GRAPH_LANE_GAP + 20,
+      COMMIT_GRAPH_MIN_WIDTH,
+      COMMIT_GRAPH_LEFT_INSET +
+        (laneCount - 1) * COMMIT_GRAPH_LANE_GAP +
+        COMMIT_GRAPH_RIGHT_INSET,
     ),
   );
 }
