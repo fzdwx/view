@@ -75,12 +75,15 @@ export function CommitInspector({
     [detailHeight, isHorizontal],
   );
   const handleResizeCommit = useCallback(
-    () => {
-      const next = draftDetailRef.current;
+    (totalDelta: number) => {
+      const next =
+        draftDetailRef.current ??
+        clamp(
+          detailHeight + totalDelta,
+          minCommitDetailHeight,
+          maxCommitDetailHeight,
+        );
       draftDetailRef.current = null;
-      if (next == null) {
-        return;
-      }
 
       const delta = next - detailHeight;
       applyCommitInspectorSize(panelRef.current, isHorizontal, next);
@@ -114,6 +117,7 @@ export function CommitInspector({
         axis={isHorizontal ? "x" : "y"}
         className="commit-info-splitter"
         label="Resize commit details"
+        liveResize={false}
         onResize={handleResizePreview}
         onResizeEnd={handleResizeCommit}
       />

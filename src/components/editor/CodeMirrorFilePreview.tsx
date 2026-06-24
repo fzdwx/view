@@ -50,6 +50,7 @@ import { clamp, wrapIndex } from "../../lib/numeric";
 import {
   isPanelResizeInProgress,
   panelResizeEndEvent,
+  runAfterPanelResizeIdle,
 } from "../../lib/panelResizeInteraction";
 import type { PreviewTarget } from "../../lib/previewTabs";
 import { GitMarkerPopover } from "./GitMarkerPopover";
@@ -369,12 +370,20 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
       }
       syncEditorMetricsEvent();
     };
+    let pendingMetricsSync: ReturnType<typeof runAfterPanelResizeIdle> | null = null;
     const syncMetricsAfterPanelResize = () => {
       if (!editorMetricsPendingAfterResizeRef.current) {
         return;
       }
       editorMetricsPendingAfterResizeRef.current = false;
-      syncEditorMetricsEvent();
+      pendingMetricsSync?.cancel();
+      pendingMetricsSync = runAfterPanelResizeIdle(
+        () => {
+          pendingMetricsSync = null;
+          syncEditorMetricsEvent();
+        },
+        { idleTimeoutMs: 500, timeoutMs: 32 },
+      );
     };
     syncMetricsUnlessPanelResizing();
     editorView.scrollDOM.addEventListener("scroll", syncMetricsUnlessPanelResizing, {
@@ -385,6 +394,7 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
     window.addEventListener(panelResizeEndEvent, syncMetricsAfterPanelResize);
 
     return () => {
+      pendingMetricsSync?.cancel();
       observer.disconnect();
       window.removeEventListener(panelResizeEndEvent, syncMetricsAfterPanelResize);
       editorView.scrollDOM.removeEventListener("scroll", syncMetricsUnlessPanelResizing);

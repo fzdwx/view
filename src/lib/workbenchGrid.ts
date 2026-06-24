@@ -65,9 +65,12 @@ export function buildRailWorkbenchGridStyle(
 ): CSSProperties {
   const columns: string[] = [];
   const topAreas: string[] = [];
+  const leftTopWidth = "var(--rail-left-top-width, 280px)";
+  const rightTopWidth = "var(--rail-right-top-width, 320px)";
+  const bottomHeight = "var(--rail-bottom-height, 260px)";
 
   if (hasLeftTopPanel) {
-    columns.push("var(--rail-left-top-width)", "6px");
+    columns.push(leftTopWidth, "6px");
     topAreas.push("left-top", "left-top-splitter");
   }
 
@@ -75,7 +78,7 @@ export function buildRailWorkbenchGridStyle(
   topAreas.push("center");
 
   if (hasRightTopPanel) {
-    columns.push("6px", "var(--rail-right-top-width)");
+    columns.push("6px", rightTopWidth);
     topAreas.push("right-top-splitter", "right-top");
   }
 
@@ -90,7 +93,7 @@ export function buildRailWorkbenchGridStyle(
   return {
     gridTemplateColumns: columns.join(" "),
     gridTemplateRows: hasBottomPanels
-      ? "minmax(0, 1fr) 6px var(--rail-bottom-height)"
+      ? `minmax(0, 1fr) 6px ${bottomHeight}`
       : "minmax(0, 1fr)",
     gridTemplateAreas: templateAreas.join(" "),
   };
@@ -100,9 +103,11 @@ export function buildRailBottomPanelsStyle(
   hasLeftBottomPanel: boolean,
   hasRightBottomPanel: boolean,
 ): CSSProperties {
+  const bottomLeftWidth = "var(--rail-bottom-left-width, 320px)";
+
   if (hasLeftBottomPanel && hasRightBottomPanel) {
     return {
-      gridTemplateColumns: "var(--rail-bottom-left-width) 10px minmax(0, 1fr)",
+      gridTemplateColumns: `${bottomLeftWidth} 10px minmax(0, 1fr)`,
       gridTemplateAreas: '"left-bottom bottom-inner-splitter right-bottom"',
     };
   }

@@ -12,12 +12,14 @@ export function ResizeHandle({
   axis,
   className,
   label,
+  liveResize = true,
   onResize,
   onResizeEnd,
 }: {
   axis: "x" | "y";
   className: string;
   label: string;
+  liveResize?: boolean;
   onResize(delta: number): void;
   onResizeEnd?(totalDelta: number): void;
 }) {
@@ -25,12 +27,17 @@ export function ResizeHandle({
     event.preventDefault();
 
     let lastPosition = axis === "x" ? event.clientX : event.clientY;
+    let latestPosition = lastPosition;
     let resizeFrame: number | null = null;
     let resizeFrameStartedAt: number | null = null;
+    const previewLine = liveResize
+      ? null
+      : createResizePreviewLine(axis, lastPosition);
     let pendingDelta = 0;
     let totalDelta = 0;
     const collectPerf = isPerfLogEnabled();
     const resizeStats = {
+      commitMs: 0,
       frames: 0,
       maxFlushMs: 0,
       totalFlushMs: 0,
@@ -48,7 +55,11 @@ export function ResizeHandle({
       const delta = pendingDelta;
       pendingDelta = 0;
       const startedAt = collectPerf ? performance.now() : 0;
-      onResize(delta);
+      if (liveResize) {
+        onResize(delta);
+      } else if (previewLine) {
+        updateResizePreviewLine(previewLine, axis, latestPosition);
+      }
       if (collectPerf) {
         const flushMs = performance.now() - startedAt;
         resizeStats.frames += 1;
@@ -81,6 +92,7 @@ export function ResizeHandle({
         axis === "x" ? moveEvent.clientX : moveEvent.clientY;
       const delta = nextPosition - lastPosition;
       lastPosition = nextPosition;
+      latestPosition = nextPosition;
       if (delta === 0) {
         return;
       }
@@ -90,24 +102,30 @@ export function ResizeHandle({
       scheduleResizeFlush();
     }
 
-    function stopResize() {
-      if (resizeFrame !== null) {
-        window.cancelAnimationFrame(resizeFrame);
-        resizeFrame = null;
-      }
-      flushPendingDelta();
+    function finishResize() {
       if (totalDelta !== 0) {
+        const commitStartedAt = collectPerf ? performance.now() : 0;
         onResizeEnd?.(totalDelta);
+        if (collectPerf) {
+          resizeStats.commitMs = performance.now() - commitStartedAt;
+        }
       }
       document.body.classList.remove("is-resizing-x", "is-resizing-y");
       dispatchPanelResizeEnd();
       if (collectPerf && resizeStats.frames > 0) {
+        const sessionMaxMs = Math.max(
+          resizeStats.maxFlushMs,
+          resizeStats.commitMs,
+        );
         logPerf(
           "resize:session",
-          resizeStats.maxFlushMs,
+          sessionMaxMs,
           {
             axis,
+            commitMs: Math.round(resizeStats.commitMs * 10) / 10,
             frames: resizeStats.frames,
+            liveResize,
+            mode: liveResize ? "live" : "deferred-preview",
             totalDelta,
             avgFlushMs: Math.round(
               (resizeStats.totalFlushMs / resizeStats.frames) * 10,
@@ -117,9 +135,23 @@ export function ResizeHandle({
           { slowThresholdMs: 8 },
         );
       }
+    }
+
+    function stopResize() {
+      if (resizeFrame !== null) {
+        window.cancelAnimationFrame(resizeFrame);
+        resizeFrame = null;
+      }
+      flushPendingDelta();
+      previewLine?.remove();
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", stopResize);
       window.removeEventListener("pointercancel", stopResize);
+      if (!liveResize && totalDelta !== 0) {
+        scheduleAfterNextFrame(finishResize);
+        return;
+      }
+      finishResize();
     }
 
     window.addEventListener("pointermove", handleMove);
@@ -154,4 +186,40 @@ export function ResizeHandle({
     // oxlint-disable-next-line react-doctor/prefer-tag-over-role
     <div role="separator" aria-label={label} aria-orientation={axis === "x" ? "vertical" : "horizontal"} tabIndex={0} className={`resize-handle ${axis === "x" ? "resize-handle-x" : "resize-handle-y"} ${className}`} onPointerDown={startResize} onKeyDown={handleKeyDown} />
   );
+}
+
+function scheduleAfterNextFrame(callback: () => void): void {
+  let finished = false;
+  const run = () => {
+    if (finished) {
+      return;
+    }
+    finished = true;
+    callback();
+  };
+
+  window.requestAnimationFrame(run);
+  window.setTimeout(run, 80);
+}
+
+function createResizePreviewLine(
+  axis: "x" | "y",
+  position: number,
+): HTMLDivElement {
+  const line = document.createElement("div");
+  line.className = `resize-preview-line resize-preview-line-${axis}`;
+  updateResizePreviewLine(line, axis, position);
+  document.body.append(line);
+  return line;
+}
+
+function updateResizePreviewLine(
+  line: HTMLDivElement,
+  axis: "x" | "y",
+  position: number,
+): void {
+  line.style.transform =
+    axis === "x"
+      ? `translate3d(${position}px, 0, 0)`
+      : `translate3d(0, ${position}px, 0)`;
 }

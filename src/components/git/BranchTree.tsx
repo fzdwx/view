@@ -23,7 +23,10 @@ import {
   type RefSectionId,
   type VirtualRefRow,
 } from "../../lib/branchTree";
-import { panelResizeEndEvent } from "../../lib/panelResizeInteraction";
+import {
+  panelResizeEndEvent,
+  runAfterPanelResizeIdle,
+} from "../../lib/panelResizeInteraction";
 import { measureElementUnlessPanelResizing } from "../../lib/virtualizerMeasurement";
 import { BranchContextMenu } from "./BranchContextMenu";
 
@@ -131,10 +134,22 @@ export const BranchTree = memo(function BranchTree({
   });
 
   useEffect(() => {
-    const measureAfterPanelResize = () => branchVirtualizer.measure();
+    let pendingMeasure: ReturnType<typeof runAfterPanelResizeIdle> | null = null;
+    const measureAfterPanelResize = () => {
+      pendingMeasure?.cancel();
+      pendingMeasure = runAfterPanelResizeIdle(
+        () => {
+          pendingMeasure = null;
+          branchVirtualizer.measure();
+        },
+        { idleTimeoutMs: 500, timeoutMs: 32 },
+      );
+    };
     window.addEventListener(panelResizeEndEvent, measureAfterPanelResize);
-    return () =>
+    return () => {
+      pendingMeasure?.cancel();
       window.removeEventListener(panelResizeEndEvent, measureAfterPanelResize);
+    };
   }, [branchVirtualizer]);
   const firstVisibleIndex = branchVirtualizer.range?.startIndex ?? 0;
   const firstVisibleRow = rows[firstVisibleIndex] ?? null;

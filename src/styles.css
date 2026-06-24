@@ -2143,6 +2143,29 @@ kbd {
   background: color-mix(in oklch, var(--accent-strong) 38%, var(--line-strong));
 }
 
+.resize-preview-line {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
+  background: color-mix(in oklch, var(--accent-strong) 58%, var(--line-strong));
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 24%, transparent);
+  will-change: transform;
+}
+
+.resize-preview-line-x {
+  top: 0;
+  left: -1px;
+  width: 2px;
+  height: 100vh;
+}
+
+.resize-preview-line-y {
+  top: -1px;
+  left: 0;
+  width: 100vw;
+  height: 2px;
+}
+
 .app-splitter {
   grid-column: 2;
 }

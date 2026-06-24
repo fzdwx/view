@@ -35,6 +35,8 @@ import { settingsChangedEvent } from "../lib/settings";
 import {
   isPanelResizeInProgress,
   panelResizeEndEvent,
+  runAfterPanelResizeIdle,
+  type PanelResizeIdleTaskHandle,
 } from "../lib/panelResizeInteraction";
 
 type MutableRef<T> = {
@@ -109,6 +111,7 @@ export function useTerminalSessionLifecycle(options: TerminalSessionLifecycleOpt
     let resizeInFlight = false;
     let pendingResize: { readonly cols: number; readonly rows: number } | null = null;
     let resizeAfterPanelDrag = false;
+    let pendingPanelResizeHandle: PanelResizeIdleTaskHandle | null = null;
     const sendResize = (sessionId: string, size: { readonly cols: number; readonly rows: number }) => {
       if (resizeInFlight) {
         pendingResize = size;
@@ -177,7 +180,14 @@ export function useTerminalSessionLifecycle(options: TerminalSessionLifecycleOpt
         return;
       }
       resizeAfterPanelDrag = false;
-      scheduleResize();
+      pendingPanelResizeHandle?.cancel();
+      pendingPanelResizeHandle = runAfterPanelResizeIdle(
+        () => {
+          pendingPanelResizeHandle = null;
+          scheduleResize();
+        },
+        { idleTimeoutMs: 500, timeoutMs: 32 },
+      );
     };
     const detachHandlers = attachTerminalScreenHandlers({
       cellMetricsRef: options.cellMetricsRef,
@@ -260,6 +270,8 @@ export function useTerminalSessionLifecycle(options: TerminalSessionLifecycleOpt
         window.clearTimeout(resizeDebounceTimer);
         resizeDebounceTimer = null;
       }
+      pendingPanelResizeHandle?.cancel();
+      pendingPanelResizeHandle = null;
       options.lastSizeRef.current = null;
       options.cellMetricsRef.current = DEFAULT_TERMINAL_CELL_METRICS;
       options.wheelScrollAccumulatorRef.current = 0;

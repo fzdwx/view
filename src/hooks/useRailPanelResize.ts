@@ -8,6 +8,12 @@ import {
   railSidePanelMaxForElement,
   railSidePanelMin,
 } from "../lib/workbenchPanelSizing";
+import {
+  isPanelResizeInProgress,
+  panelResizeEndEvent,
+  runAfterPanelResizeIdle,
+  type PanelResizeIdleTaskHandle,
+} from "../lib/panelResizeInteraction";
 import type { PanelSizes, RailPanelSizeKey } from "../lib/workbenchTypes";
 
 interface RailPanelResizeOptions {
@@ -87,7 +93,10 @@ export function useRailPanelResize({
       return;
     }
 
-    const clampRailPanelsToWorkbench = () => {
+    let clampPendingAfterPanelResize = false;
+    let pendingClampHandle: PanelResizeIdleTaskHandle | null = null;
+
+    const clampRailPanelsToWorkbenchNow = () => {
       const current = panelSizesRef.current;
       if (hasLeftTopPanel) {
         const max = railSidePanelMaxForElement(element, {
@@ -128,15 +137,44 @@ export function useRailPanelResize({
         }
       }
     };
+    const clampRailPanelsToWorkbench = () => {
+      if (isPanelResizeInProgress()) {
+        clampPendingAfterPanelResize = true;
+        return;
+      }
+      clampRailPanelsToWorkbenchNow();
+    };
+    const clampRailPanelsAfterPanelResize = () => {
+      if (!clampPendingAfterPanelResize) {
+        return;
+      }
+      clampPendingAfterPanelResize = false;
+      pendingClampHandle?.cancel();
+      pendingClampHandle = runAfterPanelResizeIdle(
+        () => {
+          pendingClampHandle = null;
+          clampRailPanelsToWorkbenchNow();
+        },
+        { idleTimeoutMs: 500, timeoutMs: 32 },
+      );
+    };
 
-    clampRailPanelsToWorkbench();
+    clampRailPanelsToWorkbenchNow();
     if (typeof ResizeObserver === "undefined") {
       return;
     }
 
     const resizeObserver = new ResizeObserver(clampRailPanelsToWorkbench);
+    window.addEventListener(panelResizeEndEvent, clampRailPanelsAfterPanelResize);
     resizeObserver.observe(element);
-    return () => resizeObserver.disconnect();
+    return () => {
+      pendingClampHandle?.cancel();
+      resizeObserver.disconnect();
+      window.removeEventListener(
+        panelResizeEndEvent,
+        clampRailPanelsAfterPanelResize,
+      );
+    };
   }, [
     contentGridRef,
     hasBottomPanels,

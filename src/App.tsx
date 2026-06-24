@@ -82,13 +82,6 @@ import type {
   ToolPanelId,
 } from "./lib/workbenchTypes";
 
-type RailGridStyle = CSSProperties & {
-  readonly "--rail-left-top-width": string;
-  readonly "--rail-right-top-width": string;
-  readonly "--rail-bottom-height": string;
-  readonly "--rail-bottom-left-width": string;
-};
-
 const MemoProjectFileTreePanel = memo(function MemoProjectFileTreePanel(
   props: ProjectFileTreePanelProps,
 ) {
@@ -468,26 +461,18 @@ export function App() {
     rightBottomActiveItem !== null &&
     rightBottomItems.includes(rightBottomActiveItem);
   const hasBottomPanels = hasLeftBottomPanel || hasRightBottomPanel;
-  const contentGridStyle = useMemo<RailGridStyle>(
+  const contentGridStyle = useMemo<CSSProperties>(
     () => ({
       ...buildRailWorkbenchGridStyle(
         hasLeftTopPanel,
         hasRightTopPanel,
         hasBottomPanels,
       ),
-      "--rail-left-top-width": `${panelSizes.leftTop}px`,
-      "--rail-right-top-width": `${panelSizes.rightTop}px`,
-      "--rail-bottom-height": `${panelSizes.bottom}px`,
-      "--rail-bottom-left-width": `${panelSizes.bottomLeft}px`,
     }),
     [
       hasBottomPanels,
       hasLeftTopPanel,
       hasRightTopPanel,
-      panelSizes.bottom,
-      panelSizes.bottomLeft,
-      panelSizes.leftTop,
-      panelSizes.rightTop,
     ],
   );
   const bottomPanelsStyle = hasBottomPanels
@@ -1138,6 +1123,7 @@ export function App() {
                   axis="x"
                   className="rail-left-top-splitter"
                   label="Resize left rail slot"
+                  liveResize={false}
                   onResize={handleResizeLeftTop}
                   onResizeEnd={handleResizeLeftTopEnd}
                 />
@@ -1183,6 +1169,7 @@ export function App() {
                   axis="x"
                   className="rail-right-top-splitter"
                   label="Resize right rail slot"
+                  liveResize={false}
                   onResize={handleResizeRightTop}
                   onResizeEnd={handleResizeRightTopEnd}
                 />
@@ -1214,6 +1201,7 @@ export function App() {
                   axis="y"
                   className="rail-bottom-splitter"
                   label="Resize bottom rail slot"
+                  liveResize={false}
                   onResize={handleResizeBottom}
                   onResizeEnd={handleResizeBottomEnd}
                 />
@@ -1248,6 +1236,7 @@ export function App() {
                       axis="x"
                       className="rail-bottom-inner-splitter"
                       label="Resize bottom rail panels"
+                      liveResize={false}
                       onResize={handleResizeBottomLeft}
                       onResizeEnd={handleResizeBottomLeftEnd}
                     />
