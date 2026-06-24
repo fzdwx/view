@@ -556,9 +556,11 @@ export function TerminalSessionView({
     <div
       ref={screenRef}
       className="terminal-screen"
-      role="textbox"
-      aria-multiline="true"
+      role="application"
       aria-label="Terminal"
+      // Custom PTY viewport: keyboard focus drives terminal input, mouse
+      // reporting, and interactive TUI programs.
+      // oxlint-disable-next-line react-doctor/no-noninteractive-tabindex
       tabIndex={0}
       onMouseDown={() => screenRef.current?.focus({ preventScroll: true })}
     >
@@ -603,7 +605,7 @@ export function TerminalSessionView({
 
 function TerminalRenderStats({ frame }: { readonly frame: TerminalFrame }) {
   useEffect(() => {
-    logPerf("terminal:render-input", 0, terminalFramePerfFields(frame));
+    logPerf("terminal:render-input", 0, () => terminalFramePerfFields(frame));
   }, [frame]);
 
   return null;

@@ -74,7 +74,7 @@ export function connectTerminalSocket(
       logPerf(
         "terminal:socket-frame",
         0,
-        terminalFramePerfFields(message),
+        () => terminalFramePerfFields(message),
       );
       const nextTitle = message.title ?? null;
       if (options.socketTitleRef.current !== nextTitle) {

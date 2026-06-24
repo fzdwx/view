@@ -63,7 +63,9 @@ export function useTerminalVisualState(): TerminalVisualState {
     if (!frame) {
       return;
     }
-    logPerf("terminal:frame-committed", 0, terminalFramePerfFields(frame));
+    logPerf("terminal:frame-committed", 0, () =>
+      terminalFramePerfFields(frame),
+    );
   }, [frame]);
 
   const clearScrollbackHint = useCallback(() => {
@@ -136,14 +138,15 @@ export function useTerminalVisualState(): TerminalVisualState {
     pendingFrameQueuedAtRef.current = null;
     if (pendingFrame) {
       const flushWaitMs = queuedAt == null ? 0 : performance.now() - queuedAt;
+      const flushFields = {
+        coalescedFrames: coalescedFrameCountRef.current,
+        documentHidden: document.hidden,
+        flush: "manual",
+      };
       logPerf(
         "terminal:flush-frame",
         flushWaitMs,
-        terminalFramePerfFields(pendingFrame, {
-          coalescedFrames: coalescedFrameCountRef.current,
-          documentHidden: document.hidden,
-          flush: "manual",
-        }),
+        () => terminalFramePerfFields(pendingFrame, flushFields),
         { slowThresholdMs: TERMINAL_FLUSH_WARN_MS },
       );
       coalescedFrameCountRef.current = 0;
@@ -195,13 +198,14 @@ export function useTerminalVisualState(): TerminalVisualState {
       if (isPanelResizeInProgress()) {
         return;
       }
+      const queueFields = {
+        coalesced: coalescedFrameCountRef.current > 0,
+        sequence: pendingFrameSequenceRef.current,
+      };
       logPerf(
         "terminal:queue-frame",
         0,
-        terminalFramePerfFields(nextFrame, {
-          coalesced: coalescedFrameCountRef.current > 0,
-          sequence: pendingFrameSequenceRef.current,
-        }),
+        () => terminalFramePerfFields(nextFrame, queueFields),
       );
       if (frameFlushRef.current == null) {
         frameFlushRef.current = window.requestAnimationFrame(() => {
@@ -215,14 +219,15 @@ export function useTerminalVisualState(): TerminalVisualState {
           pendingFrameQueuedAtRef.current = null;
           if (pendingFrame) {
             const flushWaitMs = queuedAt == null ? 0 : performance.now() - queuedAt;
+            const flushFields = {
+              coalescedFrames: coalescedFrameCountRef.current,
+              documentHidden: document.hidden,
+              flush: "raf",
+            };
             logPerf(
               "terminal:flush-frame",
               flushWaitMs,
-              terminalFramePerfFields(pendingFrame, {
-                coalescedFrames: coalescedFrameCountRef.current,
-                documentHidden: document.hidden,
-                flush: "raf",
-              }),
+              () => terminalFramePerfFields(pendingFrame, flushFields),
               { slowThresholdMs: TERMINAL_FLUSH_WARN_MS },
             );
             coalescedFrameCountRef.current = 0;

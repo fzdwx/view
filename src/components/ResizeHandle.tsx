@@ -6,6 +6,7 @@ import {
   dispatchPanelResizeEnd,
   dispatchPanelResizeStart,
 } from "../lib/panelResizeInteraction";
+import { logPerf } from "../lib/performanceLog";
 
 export function ResizeHandle({
   axis,
@@ -25,6 +26,7 @@ export function ResizeHandle({
 
     let lastPosition = axis === "x" ? event.clientX : event.clientY;
     let resizeFrame: number | null = null;
+    let resizeFrameStartedAt: number | null = null;
     let pendingDelta = 0;
     let totalDelta = 0;
     document.body.classList.add(
@@ -38,7 +40,22 @@ export function ResizeHandle({
       }
       const delta = pendingDelta;
       pendingDelta = 0;
+      const startedAt = performance.now();
       onResize(delta);
+      logPerf(
+        "resize:flush",
+        performance.now() - startedAt,
+        {
+          axis,
+          delta,
+          rafWaitMs:
+            resizeFrameStartedAt == null
+              ? null
+              : Math.round((startedAt - resizeFrameStartedAt) * 10) / 10,
+        },
+        { slowThresholdMs: 8 },
+      );
+      resizeFrameStartedAt = null;
     }
 
     function scheduleResizeFlush() {
@@ -46,6 +63,7 @@ export function ResizeHandle({
         return;
       }
 
+      resizeFrameStartedAt = performance.now();
       resizeFrame = window.requestAnimationFrame(() => {
         resizeFrame = null;
         flushPendingDelta();

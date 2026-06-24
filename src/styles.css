@@ -1575,6 +1575,7 @@ kbd {
 .git-log-panel {
   min-width: 0;
   min-height: 0;
+  contain: layout paint;
   background: var(--surface-0);
 }
 

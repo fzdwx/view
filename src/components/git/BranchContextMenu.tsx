@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { GitBranch, PenLine, Plus, Trash2 } from "lucide-react";
 import type { BranchInfo } from "../../lib/api";
 import type { BranchActionKind } from "../../lib/branchModels";
@@ -21,7 +22,7 @@ export function BranchContextMenu({
     top: clamp(top, 8, window.innerHeight - 154),
   };
 
-  return (
+  return createPortal(
     <div
       className="branch-context-menu"
       role="menu"
@@ -57,6 +58,7 @@ export function BranchContextMenu({
         <Trash2 size={13} />
         <span>Delete</span>
       </button>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -14,7 +14,12 @@ export function measureElementUnlessPanelResizing<
     return measureElement(element, entry, instance);
   }
 
-  const index = instance.indexFromElement(element);
+  const indexAttribute = instance.options.indexAttribute ?? "data-index";
+  const index = Number.parseInt(element.getAttribute(indexAttribute) ?? "", 10);
+  if (!Number.isFinite(index) || index < 0) {
+    return instance.options.estimateSize(0);
+  }
+
   const key = instance.options.getItemKey(index);
   return (
     instance.itemSizeCache.get(key) ?? instance.options.estimateSize(index)

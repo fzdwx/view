@@ -1,4 +1,5 @@
 export type PerfLogFields = Record<string, boolean | number | string | null | undefined>;
+type PerfLogFieldSource = PerfLogFields | (() => PerfLogFields);
 
 export interface PerfLogOptions {
   readonly slowThresholdMs?: number;
@@ -6,6 +7,19 @@ export interface PerfLogOptions {
 
 const perfLogStorageKey = "view:perf-log";
 const slowThresholdMs = 16;
+const panelResizeEndEvent = "view:panel-resize-end";
+const deferredLogLimit = 80;
+
+interface DeferredPerfLogEntry {
+  readonly label: string;
+  readonly durationMs: number;
+  readonly fields?: PerfLogFieldSource;
+  readonly thresholdMs: number;
+}
+
+let deferredResizeLogs: DeferredPerfLogEntry[] = [];
+let deferredResizeLogOverflow = 0;
+let resizeLogFlushAttached = false;
 
 export function isPerfLogEnabled(): boolean {
   if (typeof window === "undefined") {
@@ -26,7 +40,7 @@ export function isPerfLogEnabled(): boolean {
 export function timeSync<T>(
   label: string,
   action: () => T,
-  fields?: PerfLogFields,
+  fields?: PerfLogFieldSource,
   options?: PerfLogOptions,
 ): T {
   if (!isPerfLogEnabled()) {
@@ -44,7 +58,7 @@ export function timeSync<T>(
 export async function timeAsync<T>(
   label: string,
   action: () => Promise<T>,
-  fields?: PerfLogFields,
+  fields?: PerfLogFieldSource,
   options?: PerfLogOptions,
 ): Promise<T> {
   if (!isPerfLogEnabled()) {
@@ -62,18 +76,95 @@ export async function timeAsync<T>(
 export function logPerf(
   label: string,
   durationMs: number,
-  fields?: PerfLogFields,
+  fields?: PerfLogFieldSource,
   options?: PerfLogOptions,
 ): void {
   if (!isPerfLogEnabled()) {
     return;
   }
 
-  const roundedMs = Math.round(durationMs * 10) / 10;
   const thresholdMs = options?.slowThresholdMs ?? slowThresholdMs;
+  if (isPanelResizeInProgress()) {
+    deferResizePerfLog({ label, durationMs, fields, thresholdMs });
+    return;
+  }
+
+  writePerfLog(label, durationMs, fields, thresholdMs);
+}
+
+function writePerfLog(
+  label: string,
+  durationMs: number,
+  fields: PerfLogFieldSource | undefined,
+  thresholdMs: number,
+): void {
+  const roundedMs = Math.round(durationMs * 10) / 10;
   const method = durationMs >= thresholdMs ? "warn" : "debug";
+  const resolvedFields = resolvePerfFields(fields);
   console[method]("[perf]", label, {
     ms: roundedMs,
-    ...fields,
+    ...resolvedFields,
   });
+}
+
+function deferResizePerfLog(entry: DeferredPerfLogEntry): void {
+  if (deferredResizeLogs.length < deferredLogLimit) {
+    deferredResizeLogs.push(entry);
+  } else {
+    deferredResizeLogOverflow += 1;
+  }
+
+  if (resizeLogFlushAttached || typeof window === "undefined") {
+    return;
+  }
+
+  resizeLogFlushAttached = true;
+  window.addEventListener(panelResizeEndEvent, flushDeferredResizeLogs, {
+    once: true,
+  });
+}
+
+function flushDeferredResizeLogs(): void {
+  resizeLogFlushAttached = false;
+  const logs = deferredResizeLogs;
+  const overflow = deferredResizeLogOverflow;
+  deferredResizeLogs = [];
+  deferredResizeLogOverflow = 0;
+
+  window.setTimeout(() => {
+    for (const log of logs) {
+      writePerfLog(
+        `deferred:${log.label}`,
+        log.durationMs,
+        () => ({
+          ...resolvePerfFields(log.fields),
+          deferredDuringResize: true,
+        }),
+        log.thresholdMs,
+      );
+    }
+    if (overflow > 0) {
+      writePerfLog(
+        "deferred:overflow",
+        0,
+        { skipped: overflow, reason: "panel-resize-log-limit" },
+        slowThresholdMs,
+      );
+    }
+  }, 0);
+}
+
+function resolvePerfFields(fields: PerfLogFieldSource | undefined): PerfLogFields | undefined {
+  return typeof fields === "function" ? fields() : fields;
+}
+
+function isPanelResizeInProgress(): boolean {
+  if (typeof document === "undefined") {
+    return false;
+  }
+
+  return (
+    document.body.classList.contains("is-resizing-x") ||
+    document.body.classList.contains("is-resizing-y")
+  );
 }

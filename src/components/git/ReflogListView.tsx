@@ -1,4 +1,5 @@
 import type { CSSProperties, RefObject } from "react";
+import { createPortal } from "react-dom";
 import { RotateCcw } from "lucide-react";
 import type { BranchInfo, ReflogEntry } from "../../lib/api";
 import type { GitWriteActions } from "../../hooks/useGitWriteActions";
@@ -130,7 +131,7 @@ function ReflogContextMenu({
     top: clamp(top, 8, window.innerHeight - 120),
   };
 
-  return (
+  return createPortal(
     <div
       className="branch-context-menu"
       role="menu"
@@ -150,6 +151,7 @@ function ReflogContextMenu({
         <RotateCcw size={13} />
         <span>{`Reset --hard to ${selector}`}</span>
       </button>
-    </div>
+    </div>,
+    document.body,
   );
 }
