@@ -3,7 +3,10 @@ use std::path::Path;
 
 use crate::git_status::TreeFile;
 use crate::git_write::{git_write_response, GitWriteResponse};
-use crate::{git, git_with_env, git_with_env_stdout_on_error, repository_root, RepositorySummary};
+use crate::{
+    blocking_command, git, git_with_env, git_with_env_stdout_on_error, repository_root,
+    RepositorySummary,
+};
 
 const NONINTERACTIVE_GIT_ENV: &[(&str, &str)] = &[
     ("GIT_TERMINAL_PROMPT", "0"),
@@ -36,61 +39,70 @@ pub(crate) struct CommitWriteResponse {
 }
 
 #[tauri::command]
-pub(crate) fn create_commit(request: CommitRequest) -> Result<CommitWriteResponse, String> {
-    let root = repository_root(&request.path)?;
-    let message = request.message.trim();
-    if message.is_empty() {
-        return Err("Commit message cannot be empty".to_string());
-    }
-    if message.contains('\0') {
-        return Err("Commit message cannot contain NUL bytes".to_string());
-    }
+pub(crate) async fn create_commit(request: CommitRequest) -> Result<CommitWriteResponse, String> {
+    blocking_command("create_commit", move || {
+        let root = repository_root(&request.path)?;
+        let message = request.message.trim();
+        if message.is_empty() {
+            return Err("Commit message cannot be empty".to_string());
+        }
+        if message.contains('\0') {
+            return Err("Commit message cannot contain NUL bytes".to_string());
+        }
 
-    ensure_staged_changes(&root)?;
-    git(&root, &["commit", "-m", message]).map_err(map_commit_error)?;
+        ensure_staged_changes(&root)?;
+        git(&root, &["commit", "-m", message]).map_err(map_commit_error)?;
 
-    let hash = git_trim(&root, &["rev-parse", "HEAD"])?;
-    let short_hash = git_trim(&root, &["rev-parse", "--short", "HEAD"])?;
-    let response = git_write_response(&root)?;
-    Ok(CommitWriteResponse {
-        hash,
-        short_hash,
-        summary: response.summary,
-        files: response.files,
+        let hash = git_trim(&root, &["rev-parse", "HEAD"])?;
+        let short_hash = git_trim(&root, &["rev-parse", "--short", "HEAD"])?;
+        let response = git_write_response(&root)?;
+        Ok(CommitWriteResponse {
+            hash,
+            short_hash,
+            summary: response.summary,
+            files: response.files,
+        })
     })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn push_current_branch(path: String) -> Result<GitWriteResponse, String> {
-    let root = repository_root(&path)?;
-    let target = resolve_push_target(&root)?;
-    validate_push_state(&root, &target)?;
+pub(crate) async fn push_current_branch(path: String) -> Result<GitWriteResponse, String> {
+    blocking_command("push_current_branch", move || {
+        let root = repository_root(&path)?;
+        let target = resolve_push_target(&root)?;
+        validate_push_state(&root, &target)?;
 
-    let refspec = format!("HEAD:{}", target.merge_ref);
-    git_with_env_stdout_on_error(
-        &root,
-        &[
-            "push",
-            "--porcelain",
-            target.remote.as_str(),
-            refspec.as_str(),
-        ],
-        NONINTERACTIVE_GIT_ENV,
-    )
-    .map_err(map_push_error)?;
-    verify_remote_ref_matches_head(&root, &target)?;
+        let refspec = format!("HEAD:{}", target.merge_ref);
+        git_with_env_stdout_on_error(
+            &root,
+            &[
+                "push",
+                "--porcelain",
+                target.remote.as_str(),
+                refspec.as_str(),
+            ],
+            NONINTERACTIVE_GIT_ENV,
+        )
+        .map_err(map_push_error)?;
+        verify_remote_ref_matches_head(&root, &target)?;
 
-    git_write_response(&root)
+        git_write_response(&root)
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn reset_hard_to_reflog(
+pub(crate) async fn reset_hard_to_reflog(
     request: ResetHardToReflogRequest,
 ) -> Result<GitWriteResponse, String> {
-    let root = repository_root(&request.path)?;
-    let selector = normalize_reflog_selector(&request.selector)?;
-    git(&root, &["reset", "--hard", selector.as_str()]).map_err(map_reset_error)?;
-    git_write_response(&root)
+    blocking_command("reset_hard_to_reflog", move || {
+        let root = repository_root(&request.path)?;
+        let selector = normalize_reflog_selector(&request.selector)?;
+        git(&root, &["reset", "--hard", selector.as_str()]).map_err(map_reset_error)?;
+        git_write_response(&root)
+    })
+    .await
 }
 
 fn ensure_staged_changes(root: &Path) -> Result<(), String> {

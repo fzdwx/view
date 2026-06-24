@@ -10,7 +10,7 @@ use image::ImageEncoder;
 use std::io::Cursor;
 use std::path::PathBuf;
 
-use crate::{normalize_user_repo_path, workspace_root};
+use crate::{blocking_command, normalize_user_repo_path, workspace_root};
 pub(crate) use files::PastedFile;
 use files::{
     paste_clipboard_file_list, paste_project_file_paths, write_clipboard_image_file,
@@ -18,54 +18,63 @@ use files::{
 };
 
 #[tauri::command]
-pub(crate) fn write_pasted_files(
+pub(crate) async fn write_pasted_files(
     path: String,
     dest_dir: Option<String>,
     files: Vec<PastedFile>,
 ) -> Result<Vec<String>, String> {
-    let root = workspace_root(&path)?;
-    let dest_dir = normalize_optional_dest_dir(dest_dir)?;
-    write_pasted_file_bytes(&root, &dest_dir, files)
+    blocking_command("write_pasted_files", move || {
+        let root = workspace_root(&path)?;
+        let dest_dir = normalize_optional_dest_dir(dest_dir)?;
+        write_pasted_file_bytes(&root, &dest_dir, files)
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn paste_clipboard_into_project(
+pub(crate) async fn paste_clipboard_into_project(
     path: String,
     dest_dir: Option<String>,
 ) -> Result<Vec<String>, String> {
-    let root = workspace_root(&path)?;
-    let dest_dir = normalize_optional_dest_dir(dest_dir)?;
-    let mut clipboard =
-        Clipboard::new().map_err(|error| format!("Failed to access clipboard: {error}"))?;
+    blocking_command("paste_clipboard_into_project", move || {
+        let root = workspace_root(&path)?;
+        let dest_dir = normalize_optional_dest_dir(dest_dir)?;
+        let mut clipboard =
+            Clipboard::new().map_err(|error| format!("Failed to access clipboard: {error}"))?;
 
-    let file_list = read_clipboard_file_list(&mut clipboard);
-    if !file_list.is_empty() {
-        return paste_clipboard_file_list(&root, &dest_dir, &file_list);
-    }
+        let file_list = read_clipboard_file_list(&mut clipboard);
+        if !file_list.is_empty() {
+            return paste_clipboard_file_list(&root, &dest_dir, &file_list);
+        }
 
-    let text_file_list = read_clipboard_text_file_list(&mut clipboard);
-    if !text_file_list.is_empty() {
-        return paste_clipboard_file_list(&root, &dest_dir, &text_file_list);
-    }
+        let text_file_list = read_clipboard_text_file_list(&mut clipboard);
+        if !text_file_list.is_empty() {
+            return paste_clipboard_file_list(&root, &dest_dir, &text_file_list);
+        }
 
-    if let Some(image_bytes) = read_clipboard_image_png(&mut clipboard)? {
-        return write_clipboard_image_file(&root, &dest_dir, &image_bytes);
-    }
+        if let Some(image_bytes) = read_clipboard_image_png(&mut clipboard)? {
+            return write_clipboard_image_file(&root, &dest_dir, &image_bytes);
+        }
 
-    Err("No clipboard files or image found".to_string())
+        Err("No clipboard files or image found".to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn paste_project_files(
+pub(crate) async fn paste_project_files(
     path: String,
     source_path: String,
     source_files: Vec<String>,
     dest_dir: Option<String>,
 ) -> Result<Vec<String>, String> {
-    let root = workspace_root(&path)?;
-    let source_root = workspace_root(&source_path)?;
-    let dest_dir = normalize_optional_dest_dir(dest_dir)?;
-    paste_project_file_paths(&source_root, &root, &dest_dir, &source_files)
+    blocking_command("paste_project_files", move || {
+        let root = workspace_root(&path)?;
+        let source_root = workspace_root(&source_path)?;
+        let dest_dir = normalize_optional_dest_dir(dest_dir)?;
+        paste_project_file_paths(&source_root, &root, &dest_dir, &source_files)
+    })
+    .await
 }
 
 fn normalize_optional_dest_dir(dest_dir: Option<String>) -> Result<String, String> {

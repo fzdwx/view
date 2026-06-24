@@ -6,8 +6,8 @@ use std::process::{Command, Stdio};
 use crate::git_pathspec::{git_args_with_pathspecs, validate_existing_pathspecs};
 use crate::git_status::TreeFile;
 use crate::{
-    git_owned, git_show_bytes, repository_root, repository_summary, worktree_changed_files,
-    RepositorySummary,
+    blocking_command, git_owned, git_show_bytes, repository_root, repository_summary,
+    worktree_changed_files, RepositorySummary,
 };
 
 #[derive(Deserialize)]
@@ -54,66 +54,80 @@ pub(crate) struct GitFileChangeRequest {
 }
 
 #[tauri::command]
-pub(crate) fn stage_files(request: GitPathsRequest) -> Result<GitWriteResponse, String> {
-    let root = repository_root(&request.path)?;
-    let pathspecs = validate_write_pathspecs(&root, &request.paths)?;
-    let changed_files = worktree_changed_files(&root)?;
-    validate_stageable_pathspecs(&changed_files, &pathspecs)?;
+pub(crate) async fn stage_files(request: GitPathsRequest) -> Result<GitWriteResponse, String> {
+    blocking_command("stage_files", move || {
+        let root = repository_root(&request.path)?;
+        let pathspecs = validate_write_pathspecs(&root, &request.paths)?;
+        let changed_files = worktree_changed_files(&root)?;
+        validate_stageable_pathspecs(&changed_files, &pathspecs)?;
 
-    let stage_pathspecs = stage_pathspecs_with_rename_pairs(&root, &changed_files, &pathspecs)?;
-    let args = git_args_with_pathspecs(&["add"], &stage_pathspecs);
-    git_owned(&root, &args)?;
-    git_write_response(&root)
+        let stage_pathspecs = stage_pathspecs_with_rename_pairs(&root, &changed_files, &pathspecs)?;
+        let args = git_args_with_pathspecs(&["add"], &stage_pathspecs);
+        git_owned(&root, &args)?;
+        git_write_response(&root)
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn unstage_files(request: GitPathsRequest) -> Result<GitWriteResponse, String> {
-    let root = repository_root(&request.path)?;
-    let pathspecs = validate_write_pathspecs(&root, &request.paths)?;
-    let changed_files = worktree_changed_files(&root)?;
-    validate_unstageable_pathspecs(&changed_files, &pathspecs)?;
+pub(crate) async fn unstage_files(request: GitPathsRequest) -> Result<GitWriteResponse, String> {
+    blocking_command("unstage_files", move || {
+        let root = repository_root(&request.path)?;
+        let pathspecs = validate_write_pathspecs(&root, &request.paths)?;
+        let changed_files = worktree_changed_files(&root)?;
+        validate_unstageable_pathspecs(&changed_files, &pathspecs)?;
 
-    let args = git_args_with_pathspecs(&["restore", "--staged"], &pathspecs);
-    git_owned(&root, &args)?;
-    git_write_response(&root)
+        let args = git_args_with_pathspecs(&["restore", "--staged"], &pathspecs);
+        git_owned(&root, &args)?;
+        git_write_response(&root)
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn get_file_status_diff(
+pub(crate) async fn get_file_status_diff(
     path: String,
     file_path: String,
     source: GitChangeSource,
 ) -> Result<String, String> {
-    let root = repository_root(&path)?;
-    let pathspecs = validate_write_pathspecs(&root, &[file_path])?;
-    let file_path = pathspecs
-        .first()
-        .ok_or_else(|| "File path is required".to_string())?;
-    file_diff_for_source(&root, file_path, source, 8)
+    blocking_command("get_file_status_diff", move || {
+        let root = repository_root(&path)?;
+        let pathspecs = validate_write_pathspecs(&root, &[file_path])?;
+        let file_path = pathspecs
+            .first()
+            .ok_or_else(|| "File path is required".to_string())?;
+        file_diff_for_source(&root, file_path, source, 8)
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn apply_file_change(request: GitFileChangeRequest) -> Result<GitWriteResponse, String> {
-    validate_change_operation(request.source, request.operation)?;
+pub(crate) async fn apply_file_change(
+    request: GitFileChangeRequest,
+) -> Result<GitWriteResponse, String> {
+    blocking_command("apply_file_change", move || {
+        validate_change_operation(request.source, request.operation)?;
 
-    let root = repository_root(&request.path)?;
-    let pathspecs = validate_write_pathspecs(&root, &[request.file_path])?;
-    let file_path = pathspecs
-        .first()
-        .ok_or_else(|| "File path is required".to_string())?;
-    let changed_files = worktree_changed_files(&root)?;
-    validate_patchable_pathspec(&changed_files, file_path, request.source, request.operation)?;
+        let root = repository_root(&request.path)?;
+        let pathspecs = validate_write_pathspecs(&root, &[request.file_path])?;
+        let file_path = pathspecs
+            .first()
+            .ok_or_else(|| "File path is required".to_string())?;
+        let changed_files = worktree_changed_files(&root)?;
+        validate_patchable_pathspec(&changed_files, file_path, request.source, request.operation)?;
 
-    let diff = file_diff_for_source(&root, file_path, request.source, 0)?;
-    let patch = patch_for_change(
-        &diff,
-        request.old_start,
-        request.old_line_count,
-        request.new_start,
-        request.new_line_count,
-    )?;
-    apply_patch_for_operation(&root, request.operation, &patch)?;
-    git_write_response(&root)
+        let diff = file_diff_for_source(&root, file_path, request.source, 0)?;
+        let patch = patch_for_change(
+            &diff,
+            request.old_start,
+            request.old_line_count,
+            request.new_start,
+            request.new_line_count,
+        )?;
+        apply_patch_for_operation(&root, request.operation, &patch)?;
+        git_write_response(&root)
+    })
+    .await
 }
 
 pub(crate) fn validate_write_pathspecs(

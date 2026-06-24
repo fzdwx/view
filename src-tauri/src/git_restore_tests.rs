@@ -1,4 +1,5 @@
-use super::{restore_files, RestoreFilesRequest, RestoreMode};
+use super::{restore_files as async_restore_files, RestoreFilesRequest, RestoreMode};
+use crate::git_write::GitWriteResponse;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -7,6 +8,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[path = "git_test_evidence.rs"]
 mod test_evidence;
+
+fn restore_files(request: RestoreFilesRequest) -> Result<GitWriteResponse, String> {
+    tauri::async_runtime::block_on(async_restore_files(request))
+}
 
 #[test]
 fn restore_files_restores_modified_tracked_file() {

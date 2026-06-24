@@ -101,6 +101,51 @@ export function useTerminalSessionLifecycle(options: TerminalSessionLifecycleOpt
       terminalElement.style.setProperty("--terminal-cell-height", `${nextMetrics.height}px`);
       return nextMetrics;
     };
+    let resizeDebounceTimer: number | null = null;
+    let resizeInFlight = false;
+    let pendingResize: { readonly cols: number; readonly rows: number } | null = null;
+    const sendResize = (sessionId: string, size: { readonly cols: number; readonly rows: number }) => {
+      if (resizeInFlight) {
+        pendingResize = size;
+        return;
+      }
+
+      resizeInFlight = true;
+      void ignoreTerminalLifecycleFailure(
+        terminalResize(sessionId, size.cols, size.rows),
+      ).then(() => {
+        resizeInFlight = false;
+        if (disposed) {
+          pendingResize = null;
+          return;
+        }
+
+        const nextSize = pendingResize;
+        if (resizeDebounceTimer != null) {
+          return;
+        }
+        pendingResize = null;
+        const currentSessionId = options.sessionIdRef.current;
+        if (nextSize && currentSessionId) {
+          sendResize(currentSessionId, nextSize);
+        }
+      });
+    };
+    const queueResize = (sessionId: string, size: { readonly cols: number; readonly rows: number }) => {
+      pendingResize = size;
+      if (resizeDebounceTimer != null) {
+        window.clearTimeout(resizeDebounceTimer);
+      }
+      resizeDebounceTimer = window.setTimeout(() => {
+        resizeDebounceTimer = null;
+        const nextSize = pendingResize;
+        pendingResize = null;
+        const currentSessionId = options.sessionIdRef.current ?? sessionId;
+        if (nextSize) {
+          sendResize(currentSessionId, nextSize);
+        }
+      }, 120);
+    };
     const resizeNow = () => {
       options.resizeFrameRef.current = null;
       const size = sizeFromElement(terminalElement, syncCellMetrics());
@@ -110,7 +155,7 @@ export function useTerminalSessionLifecycle(options: TerminalSessionLifecycleOpt
       options.lastSizeRef.current = size;
       const sessionId = options.sessionIdRef.current;
       if (sessionId) {
-        void ignoreTerminalLifecycleFailure(terminalResize(sessionId, size.cols, size.rows));
+        queueResize(sessionId, size);
       }
     };
     const scheduleResize = () => {
@@ -166,9 +211,7 @@ export function useTerminalSessionLifecycle(options: TerminalSessionLifecycleOpt
         if (size) {
           options.lastSizeRef.current = size;
           if (existingSession) {
-            void ignoreTerminalLifecycleFailure(
-              terminalResize(nextSession.id, size.cols, size.rows),
-            );
+            sendResize(nextSession.id, size);
           }
         }
         connectTerminalSocket(nextSession.wsUrl, terminalElement, resizeNow, disposedRef, options);
@@ -194,6 +237,10 @@ export function useTerminalSessionLifecycle(options: TerminalSessionLifecycleOpt
       if (options.resizeFrameRef.current != null) {
         window.cancelAnimationFrame(options.resizeFrameRef.current);
         options.resizeFrameRef.current = null;
+      }
+      if (resizeDebounceTimer != null) {
+        window.clearTimeout(resizeDebounceTimer);
+        resizeDebounceTimer = null;
       }
       options.lastSizeRef.current = null;
       options.cellMetricsRef.current = DEFAULT_TERMINAL_CELL_METRICS;

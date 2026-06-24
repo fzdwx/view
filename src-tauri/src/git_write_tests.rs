@@ -1,6 +1,7 @@
 use super::{
-    apply_file_change, stage_files, unstage_files, GitChangeOperation, GitChangeSource,
-    GitFileChangeRequest, GitPathsRequest,
+    apply_file_change as async_apply_file_change, stage_files as async_stage_files,
+    unstage_files as async_unstage_files, GitChangeOperation, GitChangeSource,
+    GitFileChangeRequest, GitPathsRequest, GitWriteResponse,
 };
 use std::env;
 use std::fs;
@@ -10,6 +11,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[path = "git_test_evidence.rs"]
 mod test_evidence;
+
+fn stage_files(request: GitPathsRequest) -> Result<GitWriteResponse, String> {
+    tauri::async_runtime::block_on(async_stage_files(request))
+}
+
+fn unstage_files(request: GitPathsRequest) -> Result<GitWriteResponse, String> {
+    tauri::async_runtime::block_on(async_unstage_files(request))
+}
+
+fn apply_file_change(request: GitFileChangeRequest) -> Result<GitWriteResponse, String> {
+    tauri::async_runtime::block_on(async_apply_file_change(request))
+}
 
 #[test]
 fn stage_files_stages_modified_file() {

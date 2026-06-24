@@ -16,6 +16,7 @@ import {
 import type { TreeFile } from "../lib/api";
 import { clipboardFilesFromEvent } from "../lib/clipboardFiles";
 import { parentPathFromPath } from "../lib/pathLabels";
+import { timeSync } from "../lib/performanceLog";
 import type { TreeGitFileActions } from "./TreeContextMenu";
 import { hasTreeContextMenuActions } from "./TreeContextMenu";
 import { TreeEmptyState, TreePanelHeader } from "./TreePanelChrome";
@@ -200,14 +201,24 @@ export const TreePanel = memo(function TreePanel({
   );
 
   useEffect(() => {
-    model.resetPaths(paths, {
-      preparedInput,
-      initialExpandedPaths:
-        initialExpansion === "open" ? directoryPathsFor(paths) : [],
-    });
-    model.setGitStatus(gitStatus);
-    model.setIcons(fileTreeIcons);
-    model.setSearch(null);
+    timeSync(
+      "tree:model-reset",
+      () => {
+        model.resetPaths(paths, {
+          preparedInput,
+          initialExpandedPaths:
+            initialExpansion === "open" ? directoryPathsFor(paths) : [],
+        });
+        model.setGitStatus(gitStatus);
+        model.setIcons(fileTreeIcons);
+        model.setSearch(null);
+      },
+      {
+        paths: paths.length,
+        gitStatus: gitStatus.length,
+        initialExpansion,
+      },
+    );
   }, [initialExpansion, model, paths, preparedInput, gitStatus]);
 
   useEffect(() => {

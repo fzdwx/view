@@ -1,8 +1,9 @@
-import { memo, useRef } from "react";
+import { memo, Profiler, useEffect, useRef } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
+  ProfilerOnRenderCallback,
   ReactNode,
 } from "react";
 import {
@@ -26,6 +27,8 @@ import {
   type TerminalLine,
   type TerminalRun,
 } from "../lib/terminalTypes";
+import { logPerf } from "../lib/performanceLog";
+import { terminalFramePerfFields } from "../lib/terminalPerf";
 import type { TerminalSessionInfo } from "../lib/terminalSessions";
 import { TerminalTabStrip } from "./terminal/TerminalTabStrip";
 
@@ -427,6 +430,19 @@ function TerminalRows({ frame }: { frame: TerminalFrame }) {
   );
 }
 
+const onTerminalRender: ProfilerOnRenderCallback = (
+  id,
+  phase,
+  actualDuration,
+  baseDuration,
+) => {
+  logPerf("terminal:react-render", actualDuration, {
+    id,
+    phase,
+    baseMs: Math.round(baseDuration * 10) / 10,
+  });
+};
+
 function areTerminalLinePropsEqual(
   previous: Readonly<TerminalLineViewProps>,
   next: Readonly<TerminalLineViewProps>,
@@ -547,7 +563,14 @@ export function TerminalSessionView({
       onMouseDown={() => screenRef.current?.focus({ preventScroll: true })}
     >
       <div className={bellActive ? "terminal-output terminal-bell-flash" : "terminal-output"}>
-        {frame ? <TerminalRows frame={frame} /> : null}
+        {frame ? (
+          <Profiler id="TerminalRows" onRender={onTerminalRender}>
+            <TerminalRows frame={frame} />
+          </Profiler>
+        ) : null}
+        {frame ? (
+          <TerminalRenderStats frame={frame} />
+        ) : null}
         {closed ? (
           <div className="terminal-close-line">
             {closed.exitCode == null
@@ -576,6 +599,14 @@ export function TerminalSessionView({
       ) : null}
     </div>
   );
+}
+
+function TerminalRenderStats({ frame }: { readonly frame: TerminalFrame }) {
+  useEffect(() => {
+    logPerf("terminal:render-input", 0, terminalFramePerfFields(frame));
+  }, [frame]);
+
+  return null;
 }
 
 export function TerminalPanel({ active, projectPath }: TerminalPanelProps) {

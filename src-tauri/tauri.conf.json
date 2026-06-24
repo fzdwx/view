@@ -17,6 +17,7 @@
         "backgroundColor": "#000000",
         "backgroundThrottling": "disabled",
         "allowLinkPreview": false,
+        "devtools": true,
         "scrollBarStyle": "fluentOverlay",
         "width": 1320,
         "height": 840,

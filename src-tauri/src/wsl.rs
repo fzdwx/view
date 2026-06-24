@@ -184,12 +184,7 @@ pub fn wsl_display_scale_for_monitor(
     monitor_width: u32,
     monitor_height: u32,
 ) -> Option<f64> {
-    display_scale_factor_for_monitor(
-        monitor_index,
-        monitor_count,
-        monitor_width,
-        monitor_height,
-    )
+    display_scale_factor_for_monitor(monitor_index, monitor_count, monitor_width, monitor_height)
 }
 
 fn sort_windows_monitors(monitors: &mut [WindowsMonitorInfo]) {

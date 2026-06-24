@@ -1,4 +1,9 @@
-use super::{create_commit, push_current_branch, reset_hard_to_reflog};
+use super::{
+    create_commit as async_create_commit, push_current_branch as async_push_current_branch,
+    reset_hard_to_reflog as async_reset_hard_to_reflog, CommitRequest, CommitWriteResponse,
+    ResetHardToReflogRequest,
+};
+use crate::git_write::GitWriteResponse;
 use std::fs;
 
 #[path = "git_commit_push_test_support.rs"]
@@ -9,6 +14,18 @@ use support::{
     create_repo_with_staged_file_without_identity, create_repo_with_tracked_file, git_head,
     git_status, install_hook, reset_hard_to_reflog_request, run_git, run_git_dir, write_evidence,
 };
+
+fn create_commit(request: CommitRequest) -> Result<CommitWriteResponse, String> {
+    tauri::async_runtime::block_on(async_create_commit(request))
+}
+
+fn push_current_branch(path: String) -> Result<GitWriteResponse, String> {
+    tauri::async_runtime::block_on(async_push_current_branch(path))
+}
+
+fn reset_hard_to_reflog(request: ResetHardToReflogRequest) -> Result<GitWriteResponse, String> {
+    tauri::async_runtime::block_on(async_reset_hard_to_reflog(request))
+}
 
 #[test]
 fn commit_rejects_empty_message() {

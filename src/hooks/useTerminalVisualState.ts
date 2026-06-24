@@ -1,5 +1,7 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
+import { logPerf } from "../lib/performanceLog";
+import { terminalFramePerfFields } from "../lib/terminalPerf";
 import {
   DEFAULT_TERMINAL_MODES,
   TERMINAL_SCROLLBACK_HINT_TTL_MS,
@@ -10,6 +12,7 @@ import {
 } from "../lib/terminalTypes";
 
 type ScrollIntent = "up" | "down" | "bottom";
+const TERMINAL_FLUSH_WARN_MS = 50;
 
 export interface TerminalVisualState {
   readonly bellActive: boolean;
@@ -37,6 +40,9 @@ export function useTerminalVisualState(): TerminalVisualState {
   const frameRef = useRef<TerminalFrame | null>(null);
   const pendingFrameRef = useRef<TerminalFrame | null>(null);
   const frameFlushRef = useRef<number | null>(null);
+  const pendingFrameQueuedAtRef = useRef<number | null>(null);
+  const pendingFrameSequenceRef = useRef(0);
+  const coalescedFrameCountRef = useRef(0);
   const modesRef = useRef<TerminalModes>(DEFAULT_TERMINAL_MODES);
   const visualBellTimerRef = useRef<number | null>(null);
   const scrollbackHintTimerRef = useRef<number | null>(null);
@@ -48,6 +54,13 @@ export function useTerminalVisualState(): TerminalVisualState {
   const [closed, setClosed] = useState<TerminalClose | null>(null);
   const [jumpedScrollbackOffset, setJumpedScrollbackOffset] = useState<number | null>(null);
   const [bellActive, setBellActive] = useState(false);
+
+  useEffect(() => {
+    if (!frame) {
+      return;
+    }
+    logPerf("terminal:frame-committed", 0, terminalFramePerfFields(frame));
+  }, [frame]);
 
   const clearScrollbackHint = useCallback(() => {
     if (scrollbackHintTimerRef.current != null) {
@@ -115,7 +128,21 @@ export function useTerminalVisualState(): TerminalVisualState {
     }
     const pendingFrame = pendingFrameRef.current;
     pendingFrameRef.current = null;
+    const queuedAt = pendingFrameQueuedAtRef.current;
+    pendingFrameQueuedAtRef.current = null;
     if (pendingFrame) {
+      const flushWaitMs = queuedAt == null ? 0 : performance.now() - queuedAt;
+      logPerf(
+        "terminal:flush-frame",
+        flushWaitMs,
+        terminalFramePerfFields(pendingFrame, {
+          coalescedFrames: coalescedFrameCountRef.current,
+          documentHidden: document.hidden,
+          flush: "manual",
+        }),
+        { slowThresholdMs: TERMINAL_FLUSH_WARN_MS },
+      );
+      coalescedFrameCountRef.current = 0;
       setFrameState(pendingFrame);
     }
   }, [setFrameState]);
@@ -148,13 +175,40 @@ export function useTerminalVisualState(): TerminalVisualState {
       ) {
         sendInput("\x1b[I");
       }
+      if (pendingFrameRef.current) {
+        coalescedFrameCountRef.current += 1;
+      }
+      pendingFrameSequenceRef.current += 1;
       pendingFrameRef.current = { ...nextFrame, displayOffset: nextDisplayOffset };
+      pendingFrameQueuedAtRef.current = performance.now();
+      logPerf(
+        "terminal:queue-frame",
+        0,
+        terminalFramePerfFields(nextFrame, {
+          coalesced: coalescedFrameCountRef.current > 0,
+          sequence: pendingFrameSequenceRef.current,
+        }),
+      );
       if (frameFlushRef.current == null) {
         frameFlushRef.current = window.requestAnimationFrame(() => {
           frameFlushRef.current = null;
           const pendingFrame = pendingFrameRef.current;
           pendingFrameRef.current = null;
+          const queuedAt = pendingFrameQueuedAtRef.current;
+          pendingFrameQueuedAtRef.current = null;
           if (pendingFrame) {
+            const flushWaitMs = queuedAt == null ? 0 : performance.now() - queuedAt;
+            logPerf(
+              "terminal:flush-frame",
+              flushWaitMs,
+              terminalFramePerfFields(pendingFrame, {
+                coalescedFrames: coalescedFrameCountRef.current,
+                documentHidden: document.hidden,
+                flush: "raf",
+              }),
+              { slowThresholdMs: TERMINAL_FLUSH_WARN_MS },
+            );
+            coalescedFrameCountRef.current = 0;
             setFrameState(pendingFrame);
           }
         });
@@ -177,6 +231,8 @@ export function useTerminalVisualState(): TerminalVisualState {
     setJumpedScrollbackOffset(null);
     frameRef.current = null;
     pendingFrameRef.current = null;
+    pendingFrameQueuedAtRef.current = null;
+    coalescedFrameCountRef.current = 0;
     modesRef.current = DEFAULT_TERMINAL_MODES;
   }, [flushPendingFrame]);
 

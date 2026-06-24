@@ -666,6 +666,7 @@ export function App() {
     refetchRepository: repositoryQuery.refetch,
   });
   useProjectFilesystemPolling({
+    activeCommit,
     activeProjectPath,
   });
 
@@ -987,7 +988,6 @@ export function App() {
     gridTemplateRows: "35px minmax(0, 1fr)",
   };
   const previewDebugEnabled =
-    import.meta.env.DEV &&
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("preview-debug") === "1";
 

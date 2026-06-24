@@ -1,10 +1,25 @@
-use super::{stage_files, unstage_files, GitPathsRequest};
-use crate::git_restore::{restore_files, RestoreFilesRequest, RestoreMode};
+use super::{
+    stage_files as async_stage_files, unstage_files as async_unstage_files, GitPathsRequest,
+    GitWriteResponse,
+};
+use crate::git_restore::{restore_files as async_restore_files, RestoreFilesRequest, RestoreMode};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+fn stage_files(request: GitPathsRequest) -> Result<GitWriteResponse, String> {
+    tauri::async_runtime::block_on(async_stage_files(request))
+}
+
+fn unstage_files(request: GitPathsRequest) -> Result<GitWriteResponse, String> {
+    tauri::async_runtime::block_on(async_unstage_files(request))
+}
+
+fn restore_files(request: RestoreFilesRequest) -> Result<GitWriteResponse, String> {
+    tauri::async_runtime::block_on(async_restore_files(request))
+}
 
 #[test]
 fn stage_files_treats_glob_pathspec_as_literal_when_staging() {

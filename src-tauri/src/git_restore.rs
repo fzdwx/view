@@ -7,7 +7,7 @@ use crate::git_status::TreeFile;
 use crate::git_write::{
     changed_file_for_pathspec, git_write_response, validate_write_pathspecs, GitWriteResponse,
 };
-use crate::{git_owned, repository_root, worktree_changed_files};
+use crate::{blocking_command, git_owned, repository_root, worktree_changed_files};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,19 +27,24 @@ pub(crate) enum RestoreMode {
 }
 
 #[tauri::command]
-pub(crate) fn restore_files(request: RestoreFilesRequest) -> Result<GitWriteResponse, String> {
-    let root = repository_root(&request.path)?;
-    let pathspecs = validate_write_pathspecs(&root, &request.paths)?;
-    let changed_files = worktree_changed_files(&root)?;
-    validate_restorable_pathspecs(&changed_files, &pathspecs, request.mode)?;
+pub(crate) async fn restore_files(
+    request: RestoreFilesRequest,
+) -> Result<GitWriteResponse, String> {
+    blocking_command("restore_files", move || {
+        let root = repository_root(&request.path)?;
+        let pathspecs = validate_write_pathspecs(&root, &request.paths)?;
+        let changed_files = worktree_changed_files(&root)?;
+        validate_restorable_pathspecs(&changed_files, &pathspecs, request.mode)?;
 
-    match request.mode {
-        RestoreMode::Worktree => restore_worktree_pathspecs(&root, &changed_files, &pathspecs)?,
-        RestoreMode::Staged => restore_staged_pathspecs(&root, &pathspecs)?,
-        RestoreMode::All => restore_all_pathspecs(&root, &changed_files, &pathspecs)?,
-    }
+        match request.mode {
+            RestoreMode::Worktree => restore_worktree_pathspecs(&root, &changed_files, &pathspecs)?,
+            RestoreMode::Staged => restore_staged_pathspecs(&root, &pathspecs)?,
+            RestoreMode::All => restore_all_pathspecs(&root, &changed_files, &pathspecs)?,
+        }
 
-    git_write_response(&root)
+        git_write_response(&root)
+    })
+    .await
 }
 
 fn validate_restorable_pathspecs(

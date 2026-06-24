@@ -1,4 +1,25 @@
 import { invoke } from "@tauri-apps/api/core";
+import { timeAsync, type PerfLogFields } from "./performanceLog";
+
+type InvokeArgs = Record<string, unknown> | undefined;
+
+function apiInvoke<T>(command: string, args?: InvokeArgs): Promise<T> {
+  return timeAsync(
+    `api:${command}`,
+    () => invoke<T>(command, args),
+    summarizeInvokeArgs(args),
+    { slowThresholdMs: apiSlowThreshold(command) },
+  );
+}
+
+function apiSlowThreshold(command: string): number {
+  switch (command) {
+    case "get_project_state_fingerprint":
+      return 100;
+    default:
+      return 16;
+  }
+}
 
 export interface StatusCounts {
   added: number;
@@ -109,6 +130,12 @@ export interface RepositoryPayload {
   summary: RepositorySummary;
   commits: CommitInfo[];
   files: TreeFile[];
+}
+
+export interface ProjectStateFingerprint {
+  fingerprint: string;
+  headFingerprint: string;
+  statusFingerprint: string;
 }
 
 export interface FileContent {
@@ -245,7 +272,7 @@ export async function loadRepository(
   commit?: string | null,
   branch?: string | null,
 ): Promise<RepositoryPayload> {
-  return invoke<RepositoryPayload>("load_repository", {
+  return apiInvoke<RepositoryPayload>("load_repository", {
     path,
     commit: commit ?? null,
     branch: branch ?? null,
@@ -257,7 +284,7 @@ export async function getFileDiff(
   filePath: string,
   commit?: string | null,
 ): Promise<string> {
-  return invoke<string>("get_file_diff", {
+  return apiInvoke<string>("get_file_diff", {
     path,
     commit: commit ?? null,
     filePath,
@@ -269,7 +296,7 @@ export async function getFileStatusDiff(
   filePath: string,
   source: GitChangeSource,
 ): Promise<string> {
-  return invoke<string>("get_file_status_diff", {
+  return apiInvoke<string>("get_file_status_diff", {
     path,
     filePath,
     source,
@@ -281,7 +308,7 @@ export async function getCommits(
   branch?: string | null,
   filter?: string | null,
 ): Promise<CommitInfo[]> {
-  return invoke<CommitInfo[]>("get_commits", {
+  return apiInvoke<CommitInfo[]>("get_commits", {
     path,
     branch: branch ?? null,
     filter: filter ?? null,
@@ -292,21 +319,29 @@ export async function getReflog(
   path: string,
   filter?: string | null,
 ): Promise<ReflogEntry[]> {
-  return invoke<ReflogEntry[]>("get_reflog", {
+  return apiInvoke<ReflogEntry[]>("get_reflog", {
     path,
     filter: filter ?? null,
   });
 }
 
 export async function getProjectFiles(path: string): Promise<TreeFile[]> {
-  return invoke<TreeFile[]>("get_project_files", { path });
+  return apiInvoke<TreeFile[]>("get_project_files", { path });
+}
+
+export async function getProjectStateFingerprint(
+  path: string,
+): Promise<ProjectStateFingerprint> {
+  return apiInvoke<ProjectStateFingerprint>("get_project_state_fingerprint", {
+    path,
+  });
 }
 
 export async function getChangedFiles(
   path: string,
   commit?: string | null,
 ): Promise<TreeFile[]> {
-  return invoke<TreeFile[]>("get_changed_files", {
+  return apiInvoke<TreeFile[]>("get_changed_files", {
     path,
     commit: commit ?? null,
   });
@@ -316,14 +351,14 @@ export async function getFileContent(
   path: string,
   filePath: string,
 ): Promise<FileContent> {
-  return invoke<FileContent>("get_file_content", { path, filePath });
+  return apiInvoke<FileContent>("get_file_content", { path, filePath });
 }
 
 export async function getFileBlame(
   path: string,
   filePath: string,
 ): Promise<FileBlameLine[]> {
-  return invoke<FileBlameLine[]>("get_file_blame", { path, filePath });
+  return apiInvoke<FileBlameLine[]>("get_file_blame", { path, filePath });
 }
 
 export async function getFileBlob(
@@ -331,7 +366,7 @@ export async function getFileBlob(
   filePath: string,
   ref: string | null,
 ): Promise<FileContent> {
-  return invoke<FileContent>("get_file_blob", { path, filePath, refName: ref });
+  return apiInvoke<FileContent>("get_file_blob", { path, filePath, refName: ref });
 }
 
 export async function saveFileContent(
@@ -340,7 +375,7 @@ export async function saveFileContent(
   baseContent: string,
   content: string,
 ): Promise<SaveFileResponse> {
-  return invoke<SaveFileResponse>("save_file_content", {
+  return apiInvoke<SaveFileResponse>("save_file_content", {
     request: {
       path,
       filePath,
@@ -354,7 +389,7 @@ export async function createProjectFile(
   path: string,
   filePath: string,
 ): Promise<string> {
-  return invoke<string>("create_project_file", { path, filePath });
+  return apiInvoke<string>("create_project_file", { path, filePath });
 }
 
 export interface PastedFile {
@@ -374,7 +409,7 @@ export async function writePastedFiles(
     relativePath: file.relativePath,
     bytes: Array.from(file.bytes),
   }));
-  return invoke<string[]>("write_pasted_files", {
+  return apiInvoke<string[]>("write_pasted_files", {
     path,
     destDir: destDir ?? null,
     files: serializableFiles,
@@ -385,7 +420,7 @@ export async function pasteClipboardIntoProject(
   path: string,
   destDir: string | null,
 ): Promise<string[]> {
-  return invoke<string[]>("paste_clipboard_into_project", {
+  return apiInvoke<string[]>("paste_clipboard_into_project", {
     path,
     destDir: destDir ?? null,
   });
@@ -397,7 +432,7 @@ export async function pasteProjectFiles(
   sourceFiles: readonly string[],
   destDir: string | null,
 ): Promise<string[]> {
-  return invoke<string[]>("paste_project_files", {
+  return apiInvoke<string[]>("paste_project_files", {
     path,
     sourcePath,
     sourceFiles,
@@ -410,14 +445,14 @@ export async function renameProjectFile(
   fromPath: string,
   toPath: string,
 ): Promise<string> {
-  return invoke<string>("rename_project_file", { path, fromPath, toPath });
+  return apiInvoke<string>("rename_project_file", { path, fromPath, toPath });
 }
 
 export async function deleteProjectFile(
   path: string,
   filePath: string,
 ): Promise<void> {
-  return invoke<void>("delete_project_file", { path, filePath });
+  return apiInvoke<void>("delete_project_file", { path, filePath });
 }
 
 export async function searchFileNames(
@@ -425,7 +460,7 @@ export async function searchFileNames(
   query: string,
   limit?: number,
 ): Promise<FileSearchResult[]> {
-  return invoke<FileSearchResult[]>("search_file_names", {
+  return apiInvoke<FileSearchResult[]>("search_file_names", {
     path,
     query,
     limit: limit ?? null,
@@ -437,7 +472,7 @@ export async function searchFileContents(
   query: string,
   limit?: number,
 ): Promise<FileSearchResult[]> {
-  return invoke<FileSearchResult[]>("search_file_contents", {
+  return apiInvoke<FileSearchResult[]>("search_file_contents", {
     path,
     query,
     limit: limit ?? null,
@@ -454,7 +489,7 @@ export async function searchEditorText(
     };
   }
 
-  return invoke<EditorSearchResponse>("search_editor_text", {
+  return apiInvoke<EditorSearchResponse>("search_editor_text", {
     content,
     query,
   });
@@ -477,7 +512,7 @@ export async function replaceEditorText(
     );
   }
 
-  return invoke<EditorReplaceResponse>("replace_editor_text", {
+  return apiInvoke<EditorReplaceResponse>("replace_editor_text", {
     content,
     query,
     replacement,
@@ -487,14 +522,14 @@ export async function replaceEditorText(
 }
 
 export async function fetchRemotes(path: string): Promise<void> {
-  return invoke<void>("fetch_remotes", { path });
+  return apiInvoke<void>("fetch_remotes", { path });
 }
 
 export async function checkoutBranch(
   path: string,
   refName: string,
 ): Promise<void> {
-  return invoke<void>("checkout_branch", { path, refName });
+  return apiInvoke<void>("checkout_branch", { path, refName });
 }
 
 export async function createBranch(
@@ -502,7 +537,7 @@ export async function createBranch(
   name: string,
   startPoint: string,
 ): Promise<void> {
-  return invoke<void>("create_branch", { path, name, startPoint });
+  return apiInvoke<void>("create_branch", { path, name, startPoint });
 }
 
 export async function renameBranch(
@@ -510,7 +545,7 @@ export async function renameBranch(
   refName: string,
   newName: string,
 ): Promise<void> {
-  return invoke<void>("rename_branch", { path, refName, newName });
+  return apiInvoke<void>("rename_branch", { path, refName, newName });
 }
 
 export async function deleteBranch(
@@ -518,7 +553,7 @@ export async function deleteBranch(
   refName: string,
   force: boolean,
 ): Promise<void> {
-  return invoke<void>("delete_branch", { path, refName, force });
+  return apiInvoke<void>("delete_branch", { path, refName, force });
 }
 
 export type PullMode = "merge" | "rebase";
@@ -527,49 +562,49 @@ export async function pullCurrentBranch(
   path: string,
   mode: PullMode,
 ): Promise<void> {
-  return invoke<void>("pull_current_branch", { path, mode });
+  return apiInvoke<void>("pull_current_branch", { path, mode });
 }
 
 export async function stageFiles(
   request: GitPathsRequest,
 ): Promise<GitWriteResponse> {
-  return invoke<GitWriteResponse>("stage_files", { request });
+  return apiInvoke<GitWriteResponse>("stage_files", { request });
 }
 
 export async function unstageFiles(
   request: GitPathsRequest,
 ): Promise<GitWriteResponse> {
-  return invoke<GitWriteResponse>("unstage_files", { request });
+  return apiInvoke<GitWriteResponse>("unstage_files", { request });
 }
 
 export async function restoreFiles(
   request: RestoreFilesRequest,
 ): Promise<GitWriteResponse> {
-  return invoke<GitWriteResponse>("restore_files", { request });
+  return apiInvoke<GitWriteResponse>("restore_files", { request });
 }
 
 export async function applyFileChange(
   request: GitFileChangeRequest,
 ): Promise<GitWriteResponse> {
-  return invoke<GitWriteResponse>("apply_file_change", { request });
+  return apiInvoke<GitWriteResponse>("apply_file_change", { request });
 }
 
 export async function createCommit(
   request: CommitRequest,
 ): Promise<CommitWriteResponse> {
-  return invoke<CommitWriteResponse>("create_commit", { request });
+  return apiInvoke<CommitWriteResponse>("create_commit", { request });
 }
 
 export async function pushCurrentBranch(
   path: string,
 ): Promise<GitWriteResponse> {
-  return invoke<GitWriteResponse>("push_current_branch", { path });
+  return apiInvoke<GitWriteResponse>("push_current_branch", { path });
 }
 
 export async function resetHardToReflog(
   request: ResetHardToReflogRequest,
 ): Promise<GitWriteResponse> {
-  return invoke<GitWriteResponse>("reset_hard_to_reflog", { request });
+  return apiInvoke<GitWriteResponse>("reset_hard_to_reflog", { request });
 }
 
 export async function terminalSpawn(
@@ -579,7 +614,7 @@ export async function terminalSpawn(
   rows?: number,
   options?: TerminalSpawnOptions,
 ): Promise<TerminalSessionInfo> {
-  return invoke<TerminalSessionInfo>("terminal_spawn", {
+  return apiInvoke<TerminalSessionInfo>("terminal_spawn", {
     path,
     cwd: cwd ?? null,
     cols: cols ?? null,
@@ -593,19 +628,19 @@ export async function terminalResize(
   cols: number,
   rows: number,
 ): Promise<void> {
-  return invoke<void>("terminal_resize", { id, cols, rows });
+  return apiInvoke<void>("terminal_resize", { id, cols, rows });
 }
 
 export async function terminalScroll(id: string, delta: number): Promise<void> {
-  return invoke<void>("terminal_scroll", { id, delta });
+  return apiInvoke<void>("terminal_scroll", { id, delta });
 }
 
 export async function terminalKill(id: string): Promise<void> {
-  return invoke<void>("terminal_kill", { id });
+  return apiInvoke<void>("terminal_kill", { id });
 }
 
 export async function listSystemFonts(): Promise<SystemFont[]> {
-  return invoke<SystemFont[]>("list_system_fonts");
+  return apiInvoke<SystemFont[]>("list_system_fonts");
 }
 
 export interface TerminalShell {
@@ -616,11 +651,11 @@ export interface TerminalShell {
 }
 
 export async function listTerminalShells(): Promise<TerminalShell[]> {
-  return invoke<TerminalShell[]>("list_terminal_shells");
+  return apiInvoke<TerminalShell[]>("list_terminal_shells");
 }
 
 export async function openExternalUrl(url: string): Promise<void> {
-  return invoke<void>("open_external_url", { url });
+  return apiInvoke<void>("open_external_url", { url });
 }
 
 export interface ProjectScript {
@@ -630,7 +665,7 @@ export interface ProjectScript {
 }
 
 export async function detectProjectScripts(path: string): Promise<ProjectScript[]> {
-  return invoke<ProjectScript[]>("detect_project_scripts", { path });
+  return apiInvoke<ProjectScript[]>("detect_project_scripts", { path });
 }
 
 function replaceEditorTextInBrowser(
@@ -775,4 +810,85 @@ function lineForUtf16Offset(
 
 export function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+function summarizeInvokeArgs(args: InvokeArgs): PerfLogFields {
+  if (!args) {
+    return {};
+  }
+
+  const fields: PerfLogFields = {};
+  for (const [key, value] of Object.entries(args)) {
+    if (key === "content" || key === "baseContent") {
+      fields[`${key}Bytes`] = stringByteLength(value);
+      continue;
+    }
+    if (key === "files" && Array.isArray(value)) {
+      fields.files = value.length;
+      continue;
+    }
+    if (key === "path" || key === "filePath" || key === "refName") {
+      fields[key] = summarizePathLike(value);
+      continue;
+    }
+    if (key === "request" && isRecord(value)) {
+      Object.assign(fields, summarizeInvokeRequest(value));
+      continue;
+    }
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      fields[key] = value;
+    }
+  }
+
+  return fields;
+}
+
+function summarizeInvokeRequest(request: Record<string, unknown>): PerfLogFields {
+  const fields: PerfLogFields = {};
+  if ("path" in request) {
+    fields.path = summarizePathLike(request.path);
+  }
+  if ("filePath" in request) {
+    fields.filePath = summarizePathLike(request.filePath);
+  }
+  if ("paths" in request && Array.isArray(request.paths)) {
+    fields.paths = request.paths.length;
+  }
+  if ("mode" in request && typeof request.mode === "string") {
+    fields.mode = request.mode;
+  }
+  if ("source" in request && typeof request.source === "string") {
+    fields.source = request.source;
+  }
+  if ("operation" in request && typeof request.operation === "string") {
+    fields.operation = request.operation;
+  }
+  if ("message" in request) {
+    fields.messageBytes = stringByteLength(request.message);
+  }
+  if ("content" in request) {
+    fields.contentBytes = stringByteLength(request.content);
+  }
+  if ("baseContent" in request) {
+    fields.baseContentBytes = stringByteLength(request.baseContent);
+  }
+  return fields;
+}
+
+function summarizePathLike(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.replaceAll("\\", "/");
+  const parts = normalized.split("/").filter(Boolean);
+  return parts.slice(-3).join("/") || value;
+}
+
+function stringByteLength(value: unknown): number | null {
+  return typeof value === "string" ? new TextEncoder().encode(value).length : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::env;
 use std::fs;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
 #[cfg(unix)]
@@ -47,11 +48,11 @@ mod git_tracking;
 mod git_write;
 mod wsl;
 
-use git_tracking::CommitTrackingInfo;
 use git_status::{
     count_statuses, normalize_git_path, parse_name_status_entries, parse_porcelain_v1_z_status,
     StatusCounts, TreeFile, WORKTREE_STATUS_ARGS,
 };
+use git_tracking::CommitTrackingInfo;
 
 const MAX_TEXT_FILE_BYTES: u64 = 1_048_576;
 const MAX_MEDIA_FILE_BYTES: u64 = 5_242_880;
@@ -63,6 +64,16 @@ const TERMINAL_WS_PENDING_OUTPUT_LIMIT: usize = 64;
 const TERMINAL_WS_OUTPUT_BURST_LIMIT: usize = 8;
 const TERMINAL_SESSION_METADATA_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const ZERO_OID: &str = "0000000000000000000000000000000000000000";
+
+pub(crate) async fn blocking_command<T, F>(name: &'static str, operation: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(operation)
+        .await
+        .map_err(|error| format!("Failed to join {name} task: {error}"))?
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -188,6 +199,14 @@ struct RepositoryPayload {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ProjectStateFingerprint {
+    fingerprint: String,
+    head_fingerprint: String,
+    status_fingerprint: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct FileContent {
     path: String,
     content: String,
@@ -233,98 +252,31 @@ struct ProjectScript {
 }
 
 #[tauri::command]
-fn detect_project_scripts(path: String) -> Result<Vec<ProjectScript>, String> {
-    let root = workspace_root(&path)?;
-    let mut scripts = Vec::new();
+async fn detect_project_scripts(path: String) -> Result<Vec<ProjectScript>, String> {
+    blocking_command("detect_project_scripts", move || {
+        let root = workspace_root(&path)?;
+        let mut scripts = Vec::new();
 
-    // package.json — npm/yarn/pnpm scripts
-    let pkg_path = root.join("package.json");
-    if pkg_path.is_file() {
-        if let Ok(content) = fs::read_to_string(&pkg_path) {
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                if let Some(scripts_obj) = json.get("scripts").and_then(|v| v.as_object()) {
-                    for (name, value) in scripts_obj {
-                        if let Some(_cmd) = value.as_str() {
-                            let pkg_manager = detect_package_manager(&root);
-                            let run_cmd = if pkg_manager == "yarn" {
-                                format!("yarn {name}")
-                            } else if pkg_manager == "pnpm" {
-                                format!("pnpm {name}")
-                            } else {
-                                format!("npm run {name}")
-                            };
-                            scripts.push(ProjectScript {
-                                label: name.clone(),
-                                command: run_cmd,
-                                source: "npm".to_string(),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Cargo.toml — cargo subcommands
-    let cargo_path = root.join("Cargo.toml");
-    if cargo_path.is_file() {
-        let cargo_scripts = [
-            ("build", "cargo build"),
-            ("run", "cargo run"),
-            ("test", "cargo test"),
-            ("check", "cargo check"),
-            ("clippy", "cargo clippy"),
-            ("fmt", "cargo fmt"),
-            ("doc", "cargo doc"),
-        ];
-        for (label, cmd) in cargo_scripts {
-            scripts.push(ProjectScript {
-                label: label.to_string(),
-                command: cmd.to_string(),
-                source: "cargo".to_string(),
-            });
-        }
-    }
-
-    // Makefile — make targets
-    let makefile_path = root.join("Makefile");
-    if makefile_path.is_file() {
-        if let Ok(content) = fs::read_to_string(&makefile_path) {
-            for line in content.lines() {
-                let trimmed = line.trim_start();
-                if trimmed.starts_with('#') || trimmed.is_empty() {
-                    continue;
-                }
-                if let Some(colon_pos) = trimmed.find(':') {
-                    let target = trimmed[..colon_pos].trim();
-                    // Skip pattern rules and special targets
-                    if target.is_empty() || target.contains('%') || target.starts_with('.') {
-                        continue;
-                    }
-                    scripts.push(ProjectScript {
-                        label: target.to_string(),
-                        command: format!("make {target}"),
-                        source: "make".to_string(),
-                    });
-                }
-            }
-        }
-    }
-
-    // deno.json — deno tasks
-    let deno_path = root.join("deno.json");
-    if !deno_path.is_file() {
-        let deno_path2 = root.join("deno.jsonc");
-        if deno_path2.is_file() {
-            if let Ok(content) = fs::read_to_string(&deno_path2) {
+        // package.json — npm/yarn/pnpm scripts
+        let pkg_path = root.join("package.json");
+        if pkg_path.is_file() {
+            if let Ok(content) = fs::read_to_string(&pkg_path) {
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                    if let Some(tasks) = json.get("tasks").and_then(|v| v.as_object()) {
-                        for (name, value) in tasks {
+                    if let Some(scripts_obj) = json.get("scripts").and_then(|v| v.as_object()) {
+                        for (name, value) in scripts_obj {
                             if let Some(_cmd) = value.as_str() {
+                                let pkg_manager = detect_package_manager(&root);
+                                let run_cmd = if pkg_manager == "yarn" {
+                                    format!("yarn {name}")
+                                } else if pkg_manager == "pnpm" {
+                                    format!("pnpm {name}")
+                                } else {
+                                    format!("npm run {name}")
+                                };
                                 scripts.push(ProjectScript {
                                     label: name.clone(),
-                                    command: format!("deno task {name}"),
-                                    source: "deno".to_string(),
+                                    command: run_cmd,
+                                    source: "npm".to_string(),
                                 });
                             }
                         }
@@ -332,43 +284,113 @@ fn detect_project_scripts(path: String) -> Result<Vec<ProjectScript>, String> {
                 }
             }
         }
-    } else if let Ok(content) = fs::read_to_string(&deno_path) {
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-            if let Some(tasks) = json.get("tasks").and_then(|v| v.as_object()) {
-                for (name, value) in tasks {
-                    if let Some(_cmd) = value.as_str() {
+
+        // Cargo.toml — cargo subcommands
+        let cargo_path = root.join("Cargo.toml");
+        if cargo_path.is_file() {
+            let cargo_scripts = [
+                ("build", "cargo build"),
+                ("run", "cargo run"),
+                ("test", "cargo test"),
+                ("check", "cargo check"),
+                ("clippy", "cargo clippy"),
+                ("fmt", "cargo fmt"),
+                ("doc", "cargo doc"),
+            ];
+            for (label, cmd) in cargo_scripts {
+                scripts.push(ProjectScript {
+                    label: label.to_string(),
+                    command: cmd.to_string(),
+                    source: "cargo".to_string(),
+                });
+            }
+        }
+
+        // Makefile — make targets
+        let makefile_path = root.join("Makefile");
+        if makefile_path.is_file() {
+            if let Ok(content) = fs::read_to_string(&makefile_path) {
+                for line in content.lines() {
+                    let trimmed = line.trim_start();
+                    if trimmed.starts_with('#') || trimmed.is_empty() {
+                        continue;
+                    }
+                    if let Some(colon_pos) = trimmed.find(':') {
+                        let target = trimmed[..colon_pos].trim();
+                        // Skip pattern rules and special targets
+                        if target.is_empty() || target.contains('%') || target.starts_with('.') {
+                            continue;
+                        }
                         scripts.push(ProjectScript {
-                            label: name.clone(),
-                            command: format!("deno task {name}"),
-                            source: "deno".to_string(),
+                            label: target.to_string(),
+                            command: format!("make {target}"),
+                            source: "make".to_string(),
                         });
                     }
                 }
             }
         }
-    }
 
-    // go.mod — go commands
-    let gomod_path = root.join("go.mod");
-    if gomod_path.is_file() {
-        let go_scripts = [
-            ("run", "go run ."),
-            ("build", "go build"),
-            ("test", "go test ./..."),
-            ("fmt", "go fmt ./..."),
-            ("vet", "go vet ./..."),
-            ("mod tidy", "go mod tidy"),
-        ];
-        for (label, cmd) in go_scripts {
-            scripts.push(ProjectScript {
-                label: label.to_string(),
-                command: cmd.to_string(),
-                source: "go".to_string(),
-            });
+        // deno.json — deno tasks
+        let deno_path = root.join("deno.json");
+        if !deno_path.is_file() {
+            let deno_path2 = root.join("deno.jsonc");
+            if deno_path2.is_file() {
+                if let Ok(content) = fs::read_to_string(&deno_path2) {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(tasks) = json.get("tasks").and_then(|v| v.as_object()) {
+                            for (name, value) in tasks {
+                                if let Some(_cmd) = value.as_str() {
+                                    scripts.push(ProjectScript {
+                                        label: name.clone(),
+                                        command: format!("deno task {name}"),
+                                        source: "deno".to_string(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else if let Ok(content) = fs::read_to_string(&deno_path) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(tasks) = json.get("tasks").and_then(|v| v.as_object()) {
+                    for (name, value) in tasks {
+                        if let Some(_cmd) = value.as_str() {
+                            scripts.push(ProjectScript {
+                                label: name.clone(),
+                                command: format!("deno task {name}"),
+                                source: "deno".to_string(),
+                            });
+                        }
+                    }
+                }
+            }
         }
-    }
 
-    Ok(scripts)
+        // go.mod — go commands
+        let gomod_path = root.join("go.mod");
+        if gomod_path.is_file() {
+            let go_scripts = [
+                ("run", "go run ."),
+                ("build", "go build"),
+                ("test", "go test ./..."),
+                ("fmt", "go fmt ./..."),
+                ("vet", "go vet ./..."),
+                ("mod tidy", "go mod tidy"),
+            ];
+            for (label, cmd) in go_scripts {
+                scripts.push(ProjectScript {
+                    label: label.to_string(),
+                    command: cmd.to_string(),
+                    source: "go".to_string(),
+                });
+            }
+        }
+
+        Ok(scripts)
+    })
+    .await
 }
 
 fn detect_package_manager(root: &Path) -> &'static str {
@@ -547,9 +569,9 @@ enum TerminalUiEvent {
 
 struct TerminalSession {
     parser_tx: mpsc::Sender<TerminalParserEvent>,
+    resize_tx: mpsc::Sender<PtySize>,
     ws_shutdown_tx: mpsc::Sender<()>,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
-    master: Box<dyn MasterPty + Send>,
 }
 
 #[derive(Clone)]
@@ -663,16 +685,19 @@ struct TerminalState {
 }
 
 #[tauri::command]
-fn default_start_path() -> Result<String, String> {
-    env::current_dir()
-        .or_else(|_| env::var("HOME").map(PathBuf::from))
-        .map(|path| path.to_string_lossy().to_string())
-        .map_err(|error| error.to_string())
+async fn default_start_path() -> Result<String, String> {
+    blocking_command("default_start_path", move || {
+        env::current_dir()
+            .or_else(|_| env::var("HOME").map(PathBuf::from))
+            .map(|path| path.to_string_lossy().to_string())
+            .map_err(|error| error.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-fn list_system_fonts() -> Vec<SystemFontInfo> {
-    system_fonts()
+async fn list_system_fonts() -> Result<Vec<SystemFontInfo>, String> {
+    blocking_command("list_system_fonts", move || Ok(system_fonts())).await
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -685,14 +710,17 @@ struct TerminalShell {
 }
 
 #[tauri::command]
-fn list_terminal_shells() -> Vec<TerminalShell> {
-    detect_terminal_shells()
+async fn list_terminal_shells() -> Result<Vec<TerminalShell>, String> {
+    blocking_command("list_terminal_shells", move || Ok(detect_terminal_shells())).await
 }
 
 #[tauri::command]
-fn open_external_url(url: String) -> Result<(), String> {
-    let url = validated_external_url(&url)?;
-    spawn_external_url_opener(url)
+async fn open_external_url(url: String) -> Result<(), String> {
+    blocking_command("open_external_url", move || {
+        let url = validated_external_url(&url)?;
+        spawn_external_url_opener(url)
+    })
+    .await
 }
 
 fn validated_external_url(url: &str) -> Result<&str, String> {
@@ -840,347 +868,429 @@ fn files_equal(left: &Path, right: &Path) -> bool {
 }
 
 #[tauri::command]
-fn load_repository(
+async fn load_repository(
     path: String,
-    commit: Option<String>,
-    branch: Option<String>,
+    _commit: Option<String>,
+    _branch: Option<String>,
 ) -> Result<RepositoryPayload, String> {
-    let root = project_root(&path)?;
-    let Some(repository_root) = discover_repository_root(&root)? else {
-        return Ok(RepositoryPayload {
-            summary: non_git_project_summary(&root),
+    blocking_command("load_repository", move || {
+        let root = project_root(&path)?;
+        let Some(repository_root) = discover_repository_root(&root)? else {
+            return Ok(RepositoryPayload {
+                summary: non_git_project_summary(&root),
+                commits: Vec::new(),
+                files: Vec::new(),
+            });
+        };
+        let summary = repository_summary(&repository_root)?;
+
+        Ok(RepositoryPayload {
+            summary,
             commits: Vec::new(),
             files: Vec::new(),
-        });
-    };
-    let summary = repository_summary(&repository_root)?;
-    let commits = git_log(&repository_root, branch.as_deref(), None)?;
-    let files = changed_files(&repository_root, commit.as_deref())?;
-
-    Ok(RepositoryPayload {
-        summary,
-        commits,
-        files,
+        })
     })
+    .await
 }
 
 #[tauri::command]
-fn get_diff(path: String, commit: Option<String>) -> Result<String, String> {
-    let root = repository_root(&path)?;
-    match commit {
-        Some(hash) if !hash.trim().is_empty() => git_show(&root, hash.trim()),
-        _ => git_diff(&root),
-    }
+async fn get_diff(path: String, commit: Option<String>) -> Result<String, String> {
+    blocking_command("get_diff", move || {
+        let root = repository_root(&path)?;
+        match commit {
+            Some(hash) if !hash.trim().is_empty() => git_show(&root, hash.trim()),
+            _ => git_diff(&root),
+        }
+    })
+    .await
 }
 
 #[tauri::command]
-fn get_file_diff(
+async fn get_file_diff(
     path: String,
     commit: Option<String>,
     file_path: String,
 ) -> Result<String, String> {
-    let root = repository_root(&path)?;
-    match commit {
-        Some(hash) if !hash.trim().is_empty() => git_show_file(&root, hash.trim(), &file_path),
-        _ => git_worktree_file_diff(&root, &file_path),
-    }
+    blocking_command("get_file_diff", move || {
+        let root = repository_root(&path)?;
+        match commit {
+            Some(hash) if !hash.trim().is_empty() => git_show_file(&root, hash.trim(), &file_path),
+            _ => git_worktree_file_diff(&root, &file_path),
+        }
+    })
+    .await
 }
 
 #[tauri::command]
-fn get_commits(
+async fn get_commits(
     path: String,
     branch: Option<String>,
     filter: Option<String>,
 ) -> Result<Vec<CommitInfo>, String> {
-    let root = repository_root(&path)?;
-    git_log(&root, branch.as_deref(), filter.as_deref())
+    blocking_command("get_commits", move || {
+        let root = repository_root(&path)?;
+        git_log(&root, branch.as_deref(), filter.as_deref())
+    })
+    .await
 }
 
 #[tauri::command]
-fn get_reflog(path: String, filter: Option<String>) -> Result<Vec<ReflogEntry>, String> {
-    let root = repository_root(&path)?;
-    git_reflog(&root, filter.as_deref())
+async fn get_reflog(path: String, filter: Option<String>) -> Result<Vec<ReflogEntry>, String> {
+    blocking_command("get_reflog", move || {
+        let root = repository_root(&path)?;
+        git_reflog(&root, filter.as_deref())
+    })
+    .await
 }
 
 #[tauri::command]
-fn get_project_files(path: String) -> Result<Vec<TreeFile>, String> {
-    let root = project_root(&path)?;
-    match discover_repository_root(&root)? {
-        Some(repository_root) => git_files(&repository_root),
-        None => workspace_files(&root),
-    }
+async fn get_project_files(path: String) -> Result<Vec<TreeFile>, String> {
+    blocking_command("get_project_files", move || {
+        let root = project_root(&path)?;
+        match discover_repository_root(&root)? {
+            Some(repository_root) => git_files(&repository_root),
+            None => workspace_files(&root),
+        }
+    })
+    .await
 }
 
 #[tauri::command]
-fn get_changed_files(path: String, commit: Option<String>) -> Result<Vec<TreeFile>, String> {
-    let root = repository_root(&path)?;
-    changed_files(&root, commit.as_deref())
+async fn get_project_state_fingerprint(path: String) -> Result<ProjectStateFingerprint, String> {
+    blocking_command("get_project_state_fingerprint", move || {
+        let root = project_root(&path)?;
+        let (fingerprint, head_fingerprint, status_fingerprint) =
+            match discover_repository_root(&root)? {
+                Some(repository_root) => git_project_state_fingerprint(&repository_root)?,
+                None => plain_project_state_fingerprint(&root)?,
+            };
+
+        Ok(ProjectStateFingerprint {
+            fingerprint,
+            head_fingerprint,
+            status_fingerprint,
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn get_changed_files(path: String, commit: Option<String>) -> Result<Vec<TreeFile>, String> {
+    blocking_command("get_changed_files", move || {
+        let root = repository_root(&path)?;
+        changed_files(&root, commit.as_deref())
+    })
+    .await
 }
 
 #[tauri::command]
 async fn get_file_content(path: String, file_path: String) -> Result<FileContent, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+    blocking_command("get_file_content", move || {
         let root = workspace_root(&path)?;
         read_file_content(&root, &file_path)
     })
     .await
-    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
 async fn get_file_blame(path: String, file_path: String) -> Result<Vec<FileBlameLine>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+    blocking_command("get_file_blame", move || {
         let root = repository_root(&path)?;
         git_file_blame(&root, &file_path)
     })
     .await
-    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-fn save_file_content(request: SaveFileRequest) -> Result<SaveFileResponse, String> {
-    let root = workspace_root(&request.path)?;
-    write_file_content(
-        &root,
-        &request.file_path,
-        &request.base_content,
-        &request.content,
-    )
-}
-
-#[tauri::command]
-fn create_project_file(path: String, file_path: String) -> Result<String, String> {
-    let root = workspace_root(&path)?;
-    create_repo_file(&root, &file_path)
-}
-
-#[tauri::command]
-fn rename_project_file(path: String, from_path: String, to_path: String) -> Result<String, String> {
-    let root = workspace_root(&path)?;
-    rename_repo_file(&root, &from_path, &to_path)
-}
-
-#[tauri::command]
-fn delete_project_file(path: String, file_path: String) -> Result<(), String> {
-    let root = workspace_root(&path)?;
-    delete_repo_file(&root, &file_path)
-}
-
-#[tauri::command]
-fn search_file_names(
-    path: String,
-    query: String,
-    limit: Option<usize>,
-) -> Result<Vec<FileSearchResult>, String> {
-    let root = workspace_root(&path)?;
-    let query = query.trim();
-    if query.is_empty() {
-        return Ok(Vec::new());
-    }
-    let limit = limit
-        .unwrap_or(DEFAULT_FILE_SEARCH_LIMIT)
-        .clamp(1, MAX_FILE_SEARCH_LIMIT);
-    let shared_picker = SharedFilePicker::default();
-    let shared_frecency = SharedFrecency::default();
-    FilePicker::new_with_shared_state(
-        shared_picker.clone(),
-        shared_frecency,
-        FilePickerOptions {
-            base_path: root.to_string_lossy().to_string(),
-            mode: FFFMode::Ai,
-            watch: false,
-            ..Default::default()
-        },
-    )
-    .map_err(|error| error.to_string())?;
-    if !shared_picker.wait_for_scan(FILE_SEARCH_SCAN_TIMEOUT) {
-        return Err("Timed out while indexing files for search".to_string());
-    }
-    let parsed_query = QueryParser::default().parse(query);
-    let picker_guard = shared_picker.read().map_err(|error| error.to_string())?;
-    let picker = picker_guard
-        .as_ref()
-        .ok_or_else(|| "File search index was not initialized".to_string())?;
-    let file_results = picker.fuzzy_search(
-        &parsed_query,
-        None,
-        FuzzySearchOptions {
-            max_threads: 0,
-            current_file: None,
-            project_path: Some(root.as_path()),
-            pagination: PaginationArgs { offset: 0, limit },
-            ..Default::default()
-        },
-    );
-    let results = file_results
-        .items
-        .iter()
-        .zip(file_results.scores.iter())
-        .map(|(item, score)| FileSearchResult {
-            path: item.relative_path(picker).replace('\\', "/"),
-            score: score.total,
-            line_number: None,
-            line_text: None,
-            context_before: Vec::new(),
-            context_after: Vec::new(),
-            match_ranges: Vec::new(),
-        })
-        .fold(Vec::<FileSearchResult>::new(), |mut results, result| {
-            if results.iter().all(|current| current.path != result.path) {
-                results.push(result);
-            }
-            results
-        });
-    Ok(results)
-}
-
-#[tauri::command]
-fn search_file_contents(
-    path: String,
-    query: String,
-    limit: Option<usize>,
-) -> Result<Vec<FileSearchResult>, String> {
-    let root = workspace_root(&path)?;
-    let query = query.trim();
-    if query.is_empty() {
-        return Ok(Vec::new());
-    }
-    let limit = limit
-        .unwrap_or(DEFAULT_FILE_SEARCH_LIMIT)
-        .clamp(1, MAX_FILE_SEARCH_LIMIT);
-    let shared_picker = SharedFilePicker::default();
-    let shared_frecency = SharedFrecency::default();
-    FilePicker::new_with_shared_state(
-        shared_picker.clone(),
-        shared_frecency,
-        FilePickerOptions {
-            base_path: root.to_string_lossy().to_string(),
-            mode: FFFMode::Ai,
-            watch: false,
-            ..Default::default()
-        },
-    )
-    .map_err(|error| error.to_string())?;
-    if !shared_picker.wait_for_scan(FILE_SEARCH_SCAN_TIMEOUT) {
-        return Err("Timed out while indexing files for search".to_string());
-    }
-    let grep_query = QueryParser::new(GrepConfig).parse(query);
-    let picker_guard = shared_picker.read().map_err(|error| error.to_string())?;
-    let picker = picker_guard
-        .as_ref()
-        .ok_or_else(|| "File search index was not initialized".to_string())?;
-    let grep_results = picker.grep(
-        &grep_query,
-        &GrepSearchOptions {
-            max_matches_per_file: 1,
-            page_limit: limit,
-            mode: GrepMode::PlainText,
-            time_budget_ms: 400,
-            before_context: 2,
-            after_context: 2,
-            trim_whitespace: true,
-            ..Default::default()
-        },
-    );
-    let mut results = Vec::new();
-    for matched in &grep_results.matches {
-        let Some(file) = grep_results.files.get(matched.file_index) else {
-            continue;
-        };
-        results.push(FileSearchResult {
-            path: file.relative_path(picker).replace('\\', "/"),
-            score: matched.fuzzy_score.map(i32::from).unwrap_or(0),
-            line_number: Some(matched.line_number as usize),
-            line_text: Some(matched.line_content.clone()),
-            context_before: matched.context_before.clone(),
-            context_after: matched.context_after.clone(),
-            match_ranges: matched
-                .match_byte_offsets
-                .iter()
-                .map(|(s, e)| (*s, *e))
-                .collect(),
-        });
-        if results.len() >= limit {
-            break;
-        }
-    }
-    Ok(results)
-}
-
-#[tauri::command]
-fn search_editor_text(content: String, query: String) -> Result<EditorSearchResponse, String> {
-    Ok(EditorSearchResponse {
-        matches: editor_text_matches(&content, &query)
-            .into_iter()
-            .map(EditorTextMatch::from)
-            .collect(),
+async fn save_file_content(request: SaveFileRequest) -> Result<SaveFileResponse, String> {
+    blocking_command("save_file_content", move || {
+        let root = workspace_root(&request.path)?;
+        write_file_content(
+            &root,
+            &request.file_path,
+            &request.base_content,
+            &request.content,
+        )
     })
+    .await
 }
 
 #[tauri::command]
-fn replace_editor_text(
+async fn create_project_file(path: String, file_path: String) -> Result<String, String> {
+    blocking_command("create_project_file", move || {
+        let root = workspace_root(&path)?;
+        create_repo_file(&root, &file_path)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rename_project_file(
+    path: String,
+    from_path: String,
+    to_path: String,
+) -> Result<String, String> {
+    blocking_command("rename_project_file", move || {
+        let root = workspace_root(&path)?;
+        rename_repo_file(&root, &from_path, &to_path)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn delete_project_file(path: String, file_path: String) -> Result<(), String> {
+    blocking_command("delete_project_file", move || {
+        let root = workspace_root(&path)?;
+        delete_repo_file(&root, &file_path)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn search_file_names(
+    path: String,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<FileSearchResult>, String> {
+    blocking_command("search_file_names", move || {
+        let root = workspace_root(&path)?;
+        let query = query.trim();
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+        let limit = limit
+            .unwrap_or(DEFAULT_FILE_SEARCH_LIMIT)
+            .clamp(1, MAX_FILE_SEARCH_LIMIT);
+        let shared_picker = SharedFilePicker::default();
+        let shared_frecency = SharedFrecency::default();
+        FilePicker::new_with_shared_state(
+            shared_picker.clone(),
+            shared_frecency,
+            FilePickerOptions {
+                base_path: root.to_string_lossy().to_string(),
+                mode: FFFMode::Ai,
+                watch: false,
+                ..Default::default()
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        if !shared_picker.wait_for_scan(FILE_SEARCH_SCAN_TIMEOUT) {
+            return Err("Timed out while indexing files for search".to_string());
+        }
+        let parsed_query = QueryParser::default().parse(query);
+        let picker_guard = shared_picker.read().map_err(|error| error.to_string())?;
+        let picker = picker_guard
+            .as_ref()
+            .ok_or_else(|| "File search index was not initialized".to_string())?;
+        let file_results = picker.fuzzy_search(
+            &parsed_query,
+            None,
+            FuzzySearchOptions {
+                max_threads: 0,
+                current_file: None,
+                project_path: Some(root.as_path()),
+                pagination: PaginationArgs { offset: 0, limit },
+                ..Default::default()
+            },
+        );
+        let results = file_results
+            .items
+            .iter()
+            .zip(file_results.scores.iter())
+            .map(|(item, score)| FileSearchResult {
+                path: item.relative_path(picker).replace('\\', "/"),
+                score: score.total,
+                line_number: None,
+                line_text: None,
+                context_before: Vec::new(),
+                context_after: Vec::new(),
+                match_ranges: Vec::new(),
+            })
+            .fold(Vec::<FileSearchResult>::new(), |mut results, result| {
+                if results.iter().all(|current| current.path != result.path) {
+                    results.push(result);
+                }
+                results
+            });
+        Ok(results)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn search_file_contents(
+    path: String,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<FileSearchResult>, String> {
+    blocking_command("search_file_contents", move || {
+        let root = workspace_root(&path)?;
+        let query = query.trim();
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+        let limit = limit
+            .unwrap_or(DEFAULT_FILE_SEARCH_LIMIT)
+            .clamp(1, MAX_FILE_SEARCH_LIMIT);
+        let shared_picker = SharedFilePicker::default();
+        let shared_frecency = SharedFrecency::default();
+        FilePicker::new_with_shared_state(
+            shared_picker.clone(),
+            shared_frecency,
+            FilePickerOptions {
+                base_path: root.to_string_lossy().to_string(),
+                mode: FFFMode::Ai,
+                watch: false,
+                ..Default::default()
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        if !shared_picker.wait_for_scan(FILE_SEARCH_SCAN_TIMEOUT) {
+            return Err("Timed out while indexing files for search".to_string());
+        }
+        let grep_query = QueryParser::new(GrepConfig).parse(query);
+        let picker_guard = shared_picker.read().map_err(|error| error.to_string())?;
+        let picker = picker_guard
+            .as_ref()
+            .ok_or_else(|| "File search index was not initialized".to_string())?;
+        let grep_results = picker.grep(
+            &grep_query,
+            &GrepSearchOptions {
+                max_matches_per_file: 1,
+                page_limit: limit,
+                mode: GrepMode::PlainText,
+                time_budget_ms: 400,
+                before_context: 2,
+                after_context: 2,
+                trim_whitespace: true,
+                ..Default::default()
+            },
+        );
+        let mut results = Vec::new();
+        for matched in &grep_results.matches {
+            let Some(file) = grep_results.files.get(matched.file_index) else {
+                continue;
+            };
+            results.push(FileSearchResult {
+                path: file.relative_path(picker).replace('\\', "/"),
+                score: matched.fuzzy_score.map(i32::from).unwrap_or(0),
+                line_number: Some(matched.line_number as usize),
+                line_text: Some(matched.line_content.clone()),
+                context_before: matched.context_before.clone(),
+                context_after: matched.context_after.clone(),
+                match_ranges: matched
+                    .match_byte_offsets
+                    .iter()
+                    .map(|(s, e)| (*s, *e))
+                    .collect(),
+            });
+            if results.len() >= limit {
+                break;
+            }
+        }
+        Ok(results)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn search_editor_text(
+    content: String,
+    query: String,
+) -> Result<EditorSearchResponse, String> {
+    blocking_command("search_editor_text", move || {
+        Ok(EditorSearchResponse {
+            matches: editor_text_matches(&content, &query)
+                .into_iter()
+                .map(EditorTextMatch::from)
+                .collect(),
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn replace_editor_text(
     content: String,
     query: String,
     replacement: String,
     active_index: usize,
     replace_all: bool,
 ) -> Result<EditorReplaceResponse, String> {
-    Ok(replace_editor_content(
-        &content,
-        &query,
-        &replacement,
-        active_index,
-        replace_all,
-    ))
+    blocking_command("replace_editor_text", move || {
+        Ok(replace_editor_content(
+            &content,
+            &query,
+            &replacement,
+            active_index,
+            replace_all,
+        ))
+    })
+    .await
 }
 
 #[tauri::command]
-fn fetch_remotes(path: String) -> Result<(), String> {
-    let root = repository_root(&path)?;
-    git(&root, &["fetch", "--all", "--prune"])?;
-    Ok(())
+async fn fetch_remotes(path: String) -> Result<(), String> {
+    blocking_command("fetch_remotes", move || {
+        let root = repository_root(&path)?;
+        git(&root, &["fetch", "--all", "--prune"])?;
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
-fn checkout_branch(path: String, ref_name: String) -> Result<(), String> {
-    let root = repository_root(&path)?;
-    checkout_branch_ref(&root, &ref_name)
+async fn checkout_branch(path: String, ref_name: String) -> Result<(), String> {
+    blocking_command("checkout_branch", move || {
+        let root = repository_root(&path)?;
+        checkout_branch_ref(&root, &ref_name)
+    })
+    .await
 }
 
 #[tauri::command]
-fn create_branch(path: String, name: String, start_point: String) -> Result<(), String> {
-    let root = repository_root(&path)?;
-    validate_branch_name(&root, &name)?;
-    validate_branch_start_point(&start_point)?;
-    git(&root, &["switch", "-c", &name, &start_point])?;
-    Ok(())
+async fn create_branch(path: String, name: String, start_point: String) -> Result<(), String> {
+    blocking_command("create_branch", move || {
+        let root = repository_root(&path)?;
+        validate_branch_name(&root, &name)?;
+        validate_branch_start_point(&start_point)?;
+        git(&root, &["switch", "-c", &name, &start_point])?;
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
-fn rename_branch(path: String, ref_name: String, new_name: String) -> Result<(), String> {
-    let root = repository_root(&path)?;
-    let current = current_branch(&root);
-    let branch = local_branch_name(&ref_name)?;
-    validate_branch_name(&root, &new_name)?;
-    if current.as_deref() == Some(branch.as_str()) {
-        git(&root, &["branch", "-m", &new_name])?;
-    } else {
-        git(&root, &["branch", "-m", &branch, &new_name])?;
-    }
-    Ok(())
+async fn rename_branch(path: String, ref_name: String, new_name: String) -> Result<(), String> {
+    blocking_command("rename_branch", move || {
+        let root = repository_root(&path)?;
+        let current = current_branch(&root);
+        let branch = local_branch_name(&ref_name)?;
+        validate_branch_name(&root, &new_name)?;
+        if current.as_deref() == Some(branch.as_str()) {
+            git(&root, &["branch", "-m", &new_name])?;
+        } else {
+            git(&root, &["branch", "-m", &branch, &new_name])?;
+        }
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
-fn delete_branch(path: String, ref_name: String, force: bool) -> Result<(), String> {
-    let root = repository_root(&path)?;
-    let current = current_branch(&root);
-    let branch = local_branch_name(&ref_name)?;
-    if current.as_deref() == Some(branch.as_str()) {
-        return Err("Cannot delete the checked-out branch".to_string());
-    }
-    let flag = if force { "-D" } else { "-d" };
-    git(&root, &["branch", flag, &branch])?;
-    Ok(())
+async fn delete_branch(path: String, ref_name: String, force: bool) -> Result<(), String> {
+    blocking_command("delete_branch", move || {
+        let root = repository_root(&path)?;
+        let current = current_branch(&root);
+        let branch = local_branch_name(&ref_name)?;
+        if current.as_deref() == Some(branch.as_str()) {
+            return Err("Cannot delete the checked-out branch".to_string());
+        }
+        let flag = if force { "-D" } else { "-d" };
+        git(&root, &["branch", flag, &branch])?;
+        Ok(())
+    })
+    .await
 }
 
 fn system_fonts() -> Vec<SystemFontInfo> {
@@ -1208,19 +1318,22 @@ fn system_fonts() -> Vec<SystemFontInfo> {
 }
 
 #[tauri::command]
-fn pull_current_branch(path: String, mode: String) -> Result<(), String> {
-    let root = repository_root(&path)?;
-    let branch = current_branch(&root).unwrap_or_default();
-    if branch.is_empty() {
-        return Err("Cannot pull while HEAD is detached".to_string());
-    }
+async fn pull_current_branch(path: String, mode: String) -> Result<(), String> {
+    blocking_command("pull_current_branch", move || {
+        let root = repository_root(&path)?;
+        let branch = current_branch(&root).unwrap_or_default();
+        if branch.is_empty() {
+            return Err("Cannot pull while HEAD is detached".to_string());
+        }
 
-    match mode.as_str() {
-        "merge" => git(&root, &["pull", "--no-rebase"])?,
-        "rebase" => git(&root, &["pull", "--rebase"])?,
-        _ => return Err("Pull mode must be merge or rebase".to_string()),
-    };
-    Ok(())
+        match mode.as_str() {
+            "merge" => git(&root, &["pull", "--no-rebase"])?,
+            "rebase" => git(&root, &["pull", "--rebase"])?,
+            _ => return Err("Pull mode must be merge or rebase".to_string()),
+        };
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1255,14 +1368,14 @@ fn terminal_resize(
         .get(&id)
         .ok_or_else(|| "Terminal session was not found".to_string())?;
     session
-        .master
-        .resize(PtySize {
+        .resize_tx
+        .send(PtySize {
             rows: rows.max(1),
             cols: cols.max(1),
             pixel_width: 0,
             pixel_height: 0,
         })
-        .map_err(|error| format!("Failed to resize terminal: {error}"))?;
+        .map_err(|error| format!("Failed to schedule terminal resize: {error}"))?;
     let _ = session
         .parser_tx
         .send(TerminalParserEvent::Resize(cols.max(1), rows.max(1)));
@@ -2071,6 +2184,52 @@ fn git_files(root: &Path) -> Result<Vec<TreeFile>, String> {
     Ok(files)
 }
 
+fn git_project_state_fingerprint(root: &Path) -> Result<(String, String, String), String> {
+    let status = git(
+        root,
+        &[
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "-uall",
+            "--renames",
+            "--branch",
+        ],
+    )?;
+    let head = git(root, &["rev-parse", "--verify", "HEAD"]).unwrap_or_default();
+    let head_fingerprint = stable_text_fingerprint(&head);
+    let status_fingerprint = stable_text_fingerprint(&status);
+    Ok((
+        format!("{head_fingerprint}:{status_fingerprint}"),
+        head_fingerprint,
+        status_fingerprint,
+    ))
+}
+
+fn plain_project_state_fingerprint(root: &Path) -> Result<(String, String, String), String> {
+    let metadata = fs::metadata(root)
+        .map_err(|error| format!("Failed to read project folder metadata: {error}"))?;
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let status_fingerprint =
+        stable_text_fingerprint(&format!("{}:{modified}", root.to_string_lossy()));
+    Ok((
+        format!("plain:{status_fingerprint}"),
+        String::new(),
+        status_fingerprint,
+    ))
+}
+
+fn stable_text_fingerprint(value: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    value.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
 fn workspace_files(root: &Path) -> Result<Vec<TreeFile>, String> {
     let root = root
         .canonicalize()
@@ -2326,12 +2485,12 @@ fn read_file_content_at_ref(
 }
 
 #[tauri::command]
-fn get_file_blob(
+async fn get_file_blob(
     path: String,
     file_path: String,
     ref_name: Option<String>,
 ) -> Result<FileContent, String> {
-    match ref_name.as_deref() {
+    blocking_command("get_file_blob", move || match ref_name.as_deref() {
         Some(ref_spec) if !ref_spec.trim().is_empty() => {
             let root = repository_root(&path)?;
             read_file_content_at_ref(&root, &file_path, ref_spec.trim())
@@ -2340,7 +2499,8 @@ fn get_file_blob(
             let root = workspace_root(&path)?;
             read_file_content(&root, &file_path)
         }
-    }
+    })
+    .await
 }
 
 fn write_file_content(
@@ -3159,6 +3319,7 @@ fn spawn_terminal_session_with_options(
         .take_writer()
         .map_err(|error| format!("Failed to open terminal writer: {error}"))?;
     let (input_tx, input_rx) = mpsc::channel::<Vec<u8>>();
+    let (resize_tx, resize_rx) = mpsc::channel::<PtySize>();
     let (parser_tx, parser_rx) = mpsc::channel::<TerminalParserEvent>();
     let (ui_event_tx, ui_event_rx) = mpsc::channel::<TerminalUiEvent>();
     let visual_bell = options.visual_bell;
@@ -3174,6 +3335,13 @@ fn spawn_terminal_session_with_options(
                 break;
             }
             if writer.flush().is_err() {
+                break;
+            }
+        }
+    });
+    thread::spawn(move || {
+        while let Ok(size) = resize_rx.recv() {
+            if master.resize(size).is_err() {
                 break;
             }
         }
@@ -3205,9 +3373,9 @@ fn spawn_terminal_session_with_options(
             id.clone(),
             TerminalSession {
                 parser_tx: parser_tx.clone(),
+                resize_tx,
                 ws_shutdown_tx,
                 killer: Mutex::new(killer),
-                master,
             },
         );
     }
@@ -3316,11 +3484,8 @@ fn spawn_terminal_session_with_options(
             }
 
             let display_title = terminal_display_title(&title_root, title.as_deref(), &metadata);
-            match terminal_frame_with_cwd(
-                &term,
-                display_title.as_deref(),
-                metadata.cwd.as_deref(),
-            ) {
+            match terminal_frame_with_cwd(&term, display_title.as_deref(), metadata.cwd.as_deref())
+            {
                 Ok(frame) => {
                     if reader_output_tx
                         .send(TerminalWsEvent::Frame(frame))
@@ -4913,8 +5078,12 @@ mod tests {
         fs::create_dir_all(workspace.join("src")).expect("create src");
         fs::write(workspace.join("src").join("main.ts"), "export {};\n").expect("write file");
 
-        let payload = load_repository(workspace.to_string_lossy().to_string(), None, None)
-            .expect("load plain directory");
+        let payload = tauri::async_runtime::block_on(load_repository(
+            workspace.to_string_lossy().to_string(),
+            None,
+            None,
+        ))
+        .expect("load plain directory");
 
         assert!(!payload.summary.is_git_repo);
         assert_eq!(
@@ -4938,8 +5107,10 @@ mod tests {
         fs::write(workspace.join("top.txt"), "top\n").expect("write top");
         fs::write(workspace.join("nested").join("child.txt"), "child\n").expect("write child");
 
-        let files = get_project_files(workspace.to_string_lossy().to_string())
-            .expect("list plain directory files");
+        let files = tauri::async_runtime::block_on(get_project_files(
+            workspace.to_string_lossy().to_string(),
+        ))
+        .expect("list plain directory files");
 
         assert!(
             files
@@ -5257,9 +5428,11 @@ mod tests {
 
     #[test]
     fn editor_search_returns_utf16_offsets() {
-        let response =
-            search_editor_text("a😀 beta\n第二个 Beta\n".to_string(), "beta".to_string())
-                .expect("editor search");
+        let response = tauri::async_runtime::block_on(search_editor_text(
+            "a😀 beta\n第二个 Beta\n".to_string(),
+            "beta".to_string(),
+        ))
+        .expect("editor search");
 
         assert_eq!(response.matches.len(), 2);
         assert_eq!(response.matches[0].start, 4);
@@ -5272,13 +5445,13 @@ mod tests {
 
     #[test]
     fn editor_replace_can_replace_all_matches() {
-        let response = replace_editor_text(
+        let response = tauri::async_runtime::block_on(replace_editor_text(
             "Alpha beta BETA".to_string(),
             "beta".to_string(),
             "gamma".to_string(),
             0,
             true,
-        )
+        ))
         .expect("editor replace");
 
         assert_eq!(response.content, "Alpha gamma gamma");
@@ -5312,8 +5485,11 @@ mod tests {
         run_git(&repo, &["add", "."]);
         run_git(&repo, &["commit", "-m", "base"]);
 
-        let error = pull_current_branch(repo.to_string_lossy().to_string(), "squash".to_string())
-            .expect_err("unknown pull mode should be rejected");
+        let error = tauri::async_runtime::block_on(pull_current_branch(
+            repo.to_string_lossy().to_string(),
+            "squash".to_string(),
+        ))
+        .expect_err("unknown pull mode should be rejected");
         assert_eq!(error, "Pull mode must be merge or rebase");
 
         fs::remove_dir_all(repo).ok();
@@ -5629,6 +5805,7 @@ pub fn run() {
             get_commits,
             get_reflog,
             get_project_files,
+            get_project_state_fingerprint,
             get_changed_files,
             get_file_blob,
             get_file_content,

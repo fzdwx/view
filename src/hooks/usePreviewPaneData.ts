@@ -23,6 +23,7 @@ import {
 import { buildEditorGitMarkers } from "../lib/editorGitMarkers";
 import type { EditorGitMarker } from "../lib/editorTypes";
 import { isChangedFileStatus } from "../lib/gitStatus";
+import { timeSync } from "../lib/performanceLog";
 import { activePreviewPaneTab, type PreviewPane } from "../lib/previewPanes";
 import { requireQueryInput } from "../lib/queryInput";
 
@@ -90,7 +91,12 @@ export function usePreviewPaneData({
   const selectedProjectPath = tab?.mode === "file" ? tab.path : null;
   const selectedChangePath = tab?.mode === "diff" ? tab.path : null;
   const projectFileByPath = useMemo(
-    () => new Map(projectFiles.map((file) => [file.path, file])),
+    () =>
+      timeSync(
+        "preview:project-file-map",
+        () => new Map(projectFiles.map((file) => [file.path, file])),
+        { files: projectFiles.length },
+      ),
     [projectFiles],
   );
   const selectedProjectFile = useMemo(
@@ -266,22 +272,43 @@ export function usePreviewPaneData({
       ? fileStagedDiffQuery.data.diff
       : "";
   const editorGitMarkers = useMemo(
-    () => [
-      ...buildEditorGitMarkers(currentWorktreeFileDiff, "worktree"),
-      ...buildEditorGitMarkers(currentStagedFileDiff, "staged"),
-    ],
+    () =>
+      timeSync(
+        "preview:editor-git-markers",
+        () => [
+          ...buildEditorGitMarkers(currentWorktreeFileDiff, "worktree"),
+          ...buildEditorGitMarkers(currentStagedFileDiff, "staged"),
+        ],
+        {
+          stagedDiffChars: currentStagedFileDiff.length,
+          worktreeDiffChars: currentWorktreeFileDiff.length,
+        },
+      ),
     [currentStagedFileDiff, currentWorktreeFileDiff],
   );
   const parsedDiff = useMemo(
-    () => parseRepositoryDiff(currentFileDiff?.diff ?? ""),
+    () =>
+      timeSync(
+        "preview:parse-diff",
+        () => parseRepositoryDiff(currentFileDiff?.diff ?? ""),
+        { diffChars: currentFileDiff?.diff.length ?? 0 },
+      ),
     [currentFileDiff?.diff],
   );
   const visibleDiffFiles = useMemo(
-    () => filterDiffFiles(parsedDiff.files, selectedChangePath),
+    () =>
+      timeSync(
+        "preview:filter-diff-files",
+        () => filterDiffFiles(parsedDiff.files, selectedChangePath),
+        { files: parsedDiff.files.length, selected: selectedChangePath },
+      ),
     [parsedDiff.files, selectedChangePath],
   );
   const diffStats = useMemo(
-    () => countDiffStats(visibleDiffFiles),
+    () =>
+      timeSync("preview:diff-stats", () => countDiffStats(visibleDiffFiles), {
+        files: visibleDiffFiles.length,
+      }),
     [visibleDiffFiles],
   );
 

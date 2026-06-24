@@ -1,4 +1,6 @@
 import { parseTerminalSocketMessage } from "./terminalSocketMessage";
+import { logPerf, timeSync } from "./performanceLog";
+import { terminalFramePerfFields } from "./terminalPerf";
 import type {
   TerminalClose,
   TerminalFrame,
@@ -61,11 +63,19 @@ export function connectTerminalSocket(
     if (isDisposed.current || options.socketRef.current !== socket || typeof event.data !== "string") {
       return;
     }
-    const message = parseTerminalSocketMessage(event.data);
+    const message = timeSync(
+      "terminal:socket-parse",
+      () => parseTerminalSocketMessage(event.data),
+    );
     if (!message) {
       return;
     }
     if (message.type === "frame") {
+      logPerf(
+        "terminal:socket-frame",
+        0,
+        terminalFramePerfFields(message),
+      );
       const nextTitle = message.title ?? null;
       if (options.socketTitleRef.current !== nextTitle) {
         options.socketTitleRef.current = nextTitle;
