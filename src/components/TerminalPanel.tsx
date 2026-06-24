@@ -41,6 +41,7 @@ const terminalGraphemeSegmenter =
   typeof Intl !== "undefined" && "Segmenter" in Intl
     ? new Intl.Segmenter(undefined, { granularity: "grapheme" })
     : null;
+const SIMPLE_TERMINAL_TEXT_PATTERN = /^[\x20-\x7e]+$/;
 const EMOJI_GRAPHEME_PATTERN =
   /[\p{Extended_Pictographic}\p{Regional_Indicator}\u{20E3}\u{FE0F}]/u;
 const TERMINAL_WIDE_GRAPHEME_PATTERN =
@@ -161,6 +162,13 @@ function terminalTextColumns(graphemes: readonly string[]): number {
     (totalColumns, grapheme) => totalColumns + terminalGraphemeColumns(grapheme),
     0,
   );
+}
+
+function simpleTerminalTextColumns(text: string): number | null {
+  if (text.length === 0) {
+    return 1;
+  }
+  return SIMPLE_TERMINAL_TEXT_PATTERN.test(text) ? text.length : null;
 }
 
 function terminalCellStyle(columns: number): CSSProperties | undefined {
@@ -294,18 +302,25 @@ function renderRunWithCursor(
   row: number,
   startCol: number,
   frame: TerminalCursorFrame,
-  graphemes: readonly string[],
 ) {
-  const textColumns = terminalTextColumns(graphemes);
+  const text = run.text || " ";
+  const simpleColumns = simpleTerminalTextColumns(text);
+  const textColumns =
+    simpleColumns ?? terminalTextColumns(splitTerminalGraphemes(text));
   const cursorInRun =
     frame.cursorVisible &&
     frame.cursorRow === row &&
     frame.cursorCol >= startCol &&
     frame.cursorCol < startCol + textColumns;
   const style = terminalRunStyle(run);
-  const key = `${startCol}-${graphemes.length}`;
+  const key = `${startCol}-${text.length}`;
 
   if (!cursorInRun) {
+    if (simpleColumns != null) {
+      return renderTerminalRunContainer(run, key, style, textColumns, text);
+    }
+
+    const graphemes = splitTerminalGraphemes(text);
     return renderTerminalRunContainer(
       run,
       key,
@@ -320,6 +335,7 @@ function renderRunWithCursor(
     );
   }
 
+  const graphemes = splitTerminalGraphemes(text);
   const cursorIndex = terminalCursorGraphemeIndex(graphemes, frame.cursorCol - startCol);
 
   return renderTerminalRunContainer(
@@ -394,15 +410,16 @@ const TerminalLineView = memo(
     return (
       <div className="terminal-line">
         {line.cells.map((run) => {
-          const graphemes = splitTerminalGraphemes(run.text || " ");
+          const text = run.text || " ";
           const startColumn = column;
-          column += terminalTextColumns(graphemes);
+          column +=
+            simpleTerminalTextColumns(text) ??
+            terminalTextColumns(splitTerminalGraphemes(text));
           return renderRunWithCursor(
             run,
             row,
             startColumn,
             frameCursor,
-            graphemes,
           );
         })}
         <TrailingCursor row={row} frame={frameCursor} renderedColumns={column} />
@@ -412,7 +429,7 @@ const TerminalLineView = memo(
   areTerminalLinePropsEqual,
 );
 
-function TerminalRows({ frame }: { frame: TerminalFrame }) {
+const TerminalRows = memo(function TerminalRows({ frame }: { frame: TerminalFrame }) {
   return (
     <>
       {frame.lines.map((line, row) => (
@@ -428,7 +445,9 @@ function TerminalRows({ frame }: { frame: TerminalFrame }) {
       ))}
     </>
   );
-}
+});
+
+TerminalRows.displayName = "TerminalRows";
 
 const onTerminalRender: ProfilerOnRenderCallback = (
   id,
@@ -611,7 +630,10 @@ function TerminalRenderStats({ frame }: { readonly frame: TerminalFrame }) {
   return null;
 }
 
-export function TerminalPanel({ active, projectPath }: TerminalPanelProps) {
+export const TerminalPanel = memo(function TerminalPanel({
+  active,
+  projectPath,
+}: TerminalPanelProps) {
   const terminalWorkspace = useTerminalWorkspace(projectPath);
 
   if (!projectPath || !isTauriRuntime()) {
@@ -681,4 +703,6 @@ export function TerminalPanel({ active, projectPath }: TerminalPanelProps) {
       </div>
     </section>
   );
-}
+});
+
+TerminalPanel.displayName = "TerminalPanel";

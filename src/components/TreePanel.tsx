@@ -17,6 +17,7 @@ import type { TreeFile } from "../lib/api";
 import { clipboardFilesFromEvent } from "../lib/clipboardFiles";
 import { parentPathFromPath } from "../lib/pathLabels";
 import { timeSync } from "../lib/performanceLog";
+import { treeFilesSignature } from "../lib/treeFileIdentity";
 import type { TreeGitFileActions } from "./TreeContextMenu";
 import { hasTreeContextMenuActions } from "./TreeContextMenu";
 import { TreeEmptyState, TreePanelHeader } from "./TreePanelChrome";
@@ -73,10 +74,24 @@ export const TreePanel = memo(function TreePanel({
   onSelectPath,
 }: TreePanelProps) {
   const deferredFiles = usePanelResizeDeferredValue(files);
-  const treeData = useMemo(
-    () => buildTreePanelData(deferredFiles),
-    [deferredFiles],
-  );
+  const treeDataCacheRef = useRef<{
+    readonly data: ReturnType<typeof buildTreePanelData>;
+    readonly signature: string;
+  } | null>(null);
+  const treeData = useMemo(() => {
+    const signature = treeFilesSignature(deferredFiles);
+    const cached = treeDataCacheRef.current;
+    if (cached?.signature === signature) {
+      return cached.data;
+    }
+
+    const nextData = buildTreePanelData(deferredFiles);
+    treeDataCacheRef.current = {
+      data: nextData,
+      signature,
+    };
+    return nextData;
+  }, [deferredFiles]);
 
   const { paths, preparedInput, selectablePaths, fileByPath, gitStatus } =
     treeData;

@@ -34,6 +34,7 @@ import type { EditorGitMarker } from "../lib/editorTypes";
 import { isChangedFileStatus } from "../lib/gitStatus";
 import type { PreviewMode } from "../lib/previewTabs";
 import { requireQueryInput } from "../lib/queryInput";
+import { treeFilesSignature } from "../lib/treeFileIdentity";
 
 export interface LoadedFileDiff {
   readonly rootPath: string;
@@ -77,6 +78,7 @@ export interface RepositoryProjectData {
   readonly fileSearchQuery: UseQueryResult<FileSearchResult[], Error>;
   readonly filteredCommits: CommitInfo[];
   readonly payload: RepositoryPayload | undefined;
+  readonly projectFiles: TreeFile[] | undefined;
   readonly projectFilesQuery: UseQueryResult<TreeFile[], Error>;
   readonly reflogEntries: ReflogEntry[];
   readonly reflogQuery: UseQueryResult<ReflogEntry[], Error>;
@@ -241,6 +243,7 @@ export function useRepositoryProjectData({
     placeholderData: keepPreviousData,
     retry: false,
   });
+  const projectFiles = useStableTreeFiles(projectFilesQuery.data);
 
   const searchFn = commandMode === "content" ? searchFileContents : searchFileNames;
   // The whole query object is returned to consumers (App.tsx) that read many
@@ -266,11 +269,11 @@ export function useRepositoryProjectData({
   const projectFileByPath = useMemo(
     () =>
       new Map(
-        (projectFilesQuery.data ?? repositoryQuery.data?.files ?? []).map(
+        (projectFiles ?? repositoryQuery.data?.files ?? []).map(
           (file) => [file.path, file],
         ),
       ),
-    [projectFilesQuery.data, repositoryQuery.data?.files],
+    [projectFiles, repositoryQuery.data?.files],
   );
   const selectedProjectFile = useMemo(
     () =>
@@ -353,6 +356,7 @@ export function useRepositoryProjectData({
     fileSearchQuery,
     filteredCommits,
     payload,
+    projectFiles,
     projectFilesQuery,
     reflogEntries,
     reflogQuery,
@@ -363,6 +367,36 @@ export function useRepositoryProjectData({
     selectedProjectFile,
     selectedProjectStatus,
   };
+}
+
+function useStableTreeFiles(files: TreeFile[] | undefined): TreeFile[] | undefined {
+  const stableRef = useRef<{
+    readonly files: TreeFile[] | undefined;
+    readonly signature: string | null;
+  }>({
+    files: undefined,
+    signature: null,
+  });
+
+  if (!files) {
+    if (stableRef.current.files !== undefined) {
+      stableRef.current = {
+        files: undefined,
+        signature: null,
+      };
+    }
+    return undefined;
+  }
+
+  const signature = treeFilesSignature(files);
+  if (stableRef.current.signature !== signature) {
+    stableRef.current = {
+      files,
+      signature,
+    };
+  }
+
+  return stableRef.current.files;
 }
 
 function mergeCommitLists(

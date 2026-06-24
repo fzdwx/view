@@ -172,6 +172,7 @@ export function App() {
     fileSearchQuery,
     filteredCommits,
     payload,
+    projectFiles,
     projectFilesQuery,
     reflogEntries,
     reflogQuery,
@@ -608,7 +609,7 @@ export function App() {
   }, [saveActiveFile]);
 
   useSelectedPathGuard({
-    items: projectFilesQuery.data,
+    items: projectFiles,
     placeholder: projectFilesQuery.isPlaceholderData,
     selectedPath: selectedProjectPath,
     onClear: clearSelectedProjectPath,
@@ -851,7 +852,7 @@ export function App() {
   const projectTreeContent = (
     <MemoProjectFileTreePanel
       emptyCopy={projectTreeEmptyCopy}
-      files={projectFilesQuery.data}
+      files={projectFiles}
       selectedPath={selectedProjectPath}
       title={projectTreeTitle}
       gitFileActions={activeTreeGitFileActions}
@@ -1149,7 +1150,7 @@ export function App() {
                 gitAvailability={gitAvailability}
                 hasGitRepository={hasGitRepository}
                 layout={previewPaneLayout}
-                projectFiles={projectFilesQuery.data ?? payload?.files ?? []}
+                projectFiles={projectFiles ?? payload?.files ?? []}
                 repositoryLoading={repositoryQuery.isFetching}
                 repositoryReady={Boolean(payload)}
                 saveError={saveError}

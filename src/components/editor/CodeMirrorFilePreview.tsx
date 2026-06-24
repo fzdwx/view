@@ -47,6 +47,10 @@ import type {
 } from "../../lib/editorTypes";
 import { nextMatchIndexAfter } from "../../lib/editorSearch";
 import { clamp, wrapIndex } from "../../lib/numeric";
+import {
+  isPanelResizeInProgress,
+  panelResizeEndEvent,
+} from "../../lib/panelResizeInteraction";
 import type { PreviewTarget } from "../../lib/previewTabs";
 import { GitMarkerPopover } from "./GitMarkerPopover";
 import { MediaViewToolbar } from "./MediaViewToolbar";
@@ -116,6 +120,7 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
   const editorSearchTimerRef = useRef<number | null>(null);
   const editorFindStatesRef = useRef<Map<string, EditorFindState> | null>(null);
   const editorMetricsRef = useRef({ height: 0, width: 0 });
+  const editorMetricsPendingAfterResizeRef = useRef(false);
   if (editorFindStatesRef.current === null) {
     editorFindStatesRef.current = new Map<string, EditorFindState>();
   }
@@ -357,17 +362,32 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
       return;
     }
 
-    const handleScroll = () => syncEditorMetricsEvent();
-    handleScroll();
-    editorView.scrollDOM.addEventListener("scroll", handleScroll, {
+    const syncMetricsUnlessPanelResizing = () => {
+      if (isPanelResizeInProgress()) {
+        editorMetricsPendingAfterResizeRef.current = true;
+        return;
+      }
+      syncEditorMetricsEvent();
+    };
+    const syncMetricsAfterPanelResize = () => {
+      if (!editorMetricsPendingAfterResizeRef.current) {
+        return;
+      }
+      editorMetricsPendingAfterResizeRef.current = false;
+      syncEditorMetricsEvent();
+    };
+    syncMetricsUnlessPanelResizing();
+    editorView.scrollDOM.addEventListener("scroll", syncMetricsUnlessPanelResizing, {
       passive: true,
     });
-    const observer = new ResizeObserver(handleScroll);
+    const observer = new ResizeObserver(syncMetricsUnlessPanelResizing);
     observer.observe(editorView.scrollDOM);
+    window.addEventListener(panelResizeEndEvent, syncMetricsAfterPanelResize);
 
     return () => {
       observer.disconnect();
-      editorView.scrollDOM.removeEventListener("scroll", handleScroll);
+      window.removeEventListener(panelResizeEndEvent, syncMetricsAfterPanelResize);
+      editorView.scrollDOM.removeEventListener("scroll", syncMetricsUnlessPanelResizing);
     };
   }, [editorView]);
 

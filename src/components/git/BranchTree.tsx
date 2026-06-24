@@ -2,7 +2,7 @@ import type {
   CSSProperties,
   MouseEvent as ReactMouseEvent,
 } from "react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ChevronDown,
@@ -37,7 +37,7 @@ type BranchMenuState = {
   readonly top: number;
 };
 
-export function BranchTree({
+export const BranchTree = memo(function BranchTree({
   branches,
   tags,
   activeRef,
@@ -301,7 +301,9 @@ export function BranchTree({
       ) : null}
     </div>
   );
-}
+});
+
+BranchTree.displayName = "BranchTree";
 
 function BranchTreeRow({
   activeRef,

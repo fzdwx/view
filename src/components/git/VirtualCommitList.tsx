@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { usePanelResizeDeferredValue } from "../../hooks/usePanelResizeDeferredValue";
 import { buildCommitGraph } from "../../lib/commitGraph";
@@ -14,7 +14,7 @@ import type { VirtualCommitListProps } from "./CommitListTypes";
 const COMMIT_ROW_ESTIMATE = 34;
 const REFLOG_ROW_ESTIMATE = 34;
 
-export function VirtualCommitList({
+export const VirtualCommitList = memo(function VirtualCommitList({
   commits,
   graphWidthCommits,
   activeCommit,
@@ -275,4 +275,6 @@ export function VirtualCommitList({
       onSelectWorkingTree={onSelectWorkingTree}
     />
   );
-}
+});
+
+VirtualCommitList.displayName = "VirtualCommitList";
