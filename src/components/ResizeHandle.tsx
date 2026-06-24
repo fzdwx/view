@@ -6,10 +6,6 @@ import {
   dispatchPanelResizeEnd,
   dispatchPanelResizeStart,
 } from "../lib/panelResizeInteraction";
-import {
-  createResizeDragController,
-  type ResizeMode,
-} from "../lib/resizeDragController";
 
 export function ResizeHandle({
   axis,
@@ -17,37 +13,32 @@ export function ResizeHandle({
   label,
   onResize,
   onResizeEnd,
-  resizeMode = "live",
 }: {
   axis: "x" | "y";
   className: string;
   label: string;
   onResize(delta: number): void;
   onResizeEnd?(totalDelta: number): void;
-  resizeMode?: ResizeMode;
 }) {
   function startResize(event: ReactPointerEvent<HTMLDivElement>) {
     event.preventDefault();
 
-    const guide =
-      resizeMode === "deferred"
-        ? createResizeGuide(event.currentTarget, axis)
-        : null;
     let lastPosition = axis === "x" ? event.clientX : event.clientY;
     let resizeFrame: number | null = null;
-    const dragController = createResizeDragController({
-      mode: resizeMode,
-      onGuideDelta: (delta) => guide?.setDelta(delta),
-      onResize,
-      onResizeEnd,
-    });
+    let pendingDelta = 0;
+    let totalDelta = 0;
     document.body.classList.add(
       axis === "x" ? "is-resizing-x" : "is-resizing-y",
     );
     dispatchPanelResizeStart();
 
     function flushPendingDelta() {
-      dragController.flush();
+      if (pendingDelta === 0) {
+        return;
+      }
+      const delta = pendingDelta;
+      pendingDelta = 0;
+      onResize(delta);
     }
 
     function scheduleResizeFlush() {
@@ -70,7 +61,8 @@ export function ResizeHandle({
         return;
       }
 
-      dragController.addDelta(delta);
+      pendingDelta += delta;
+      totalDelta += delta;
       scheduleResizeFlush();
     }
 
@@ -79,8 +71,10 @@ export function ResizeHandle({
         window.cancelAnimationFrame(resizeFrame);
         resizeFrame = null;
       }
-      dragController.finish();
-      guide?.destroy();
+      flushPendingDelta();
+      if (totalDelta !== 0) {
+        onResizeEnd?.(totalDelta);
+      }
       document.body.classList.remove("is-resizing-x", "is-resizing-y");
       dispatchPanelResizeEnd();
       window.removeEventListener("pointermove", handleMove);
@@ -120,33 +114,4 @@ export function ResizeHandle({
     // oxlint-disable-next-line react-doctor/prefer-tag-over-role
     <div role="separator" aria-label={label} aria-orientation={axis === "x" ? "vertical" : "horizontal"} tabIndex={0} className={`resize-handle ${axis === "x" ? "resize-handle-x" : "resize-handle-y"} ${className}`} onPointerDown={startResize} onKeyDown={handleKeyDown} />
   );
-}
-
-function createResizeGuide(
-  source: HTMLElement,
-  axis: "x" | "y",
-): {
-  readonly setDelta: (delta: number) => void;
-  readonly destroy: () => void;
-} {
-  const rect = source.getBoundingClientRect();
-  const guide = document.createElement("div");
-  guide.className = `resize-handle-guide resize-handle-guide-${axis}`;
-  guide.style.left = `${rect.left}px`;
-  guide.style.top = `${rect.top}px`;
-  guide.style.width = `${rect.width}px`;
-  guide.style.height = `${rect.height}px`;
-  document.body.appendChild(guide);
-
-  return {
-    setDelta(delta: number) {
-      guide.style.transform =
-        axis === "x"
-          ? `translate3d(${delta}px, 0, 0)`
-          : `translate3d(0, ${delta}px, 0)`;
-    },
-    destroy() {
-      guide.remove();
-    },
-  };
 }

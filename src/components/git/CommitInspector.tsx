@@ -116,7 +116,6 @@ export function CommitInspector({
         label="Resize commit details"
         onResize={handleResizePreview}
         onResizeEnd={handleResizeCommit}
-        resizeMode="deferred"
       />
       <CommitDetails
         branchName={branchName}

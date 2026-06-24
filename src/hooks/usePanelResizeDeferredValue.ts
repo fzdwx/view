@@ -16,6 +16,9 @@ export function usePanelResizeDeferredValue<T>(value: T): T {
 
   useEffect(() => {
     const applyLatestValue = () => {
+      if (Object.is(stableValueRef.current, latestValueRef.current)) {
+        return;
+      }
       stableValueRef.current = latestValueRef.current;
       forceRender();
     };

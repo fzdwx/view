@@ -1460,6 +1460,7 @@ kbd {
 
 .diff-panel.rail-editor-panel {
   grid-area: center;
+  contain: layout paint;
 }
 
 .rail-slot-panel,
@@ -1499,6 +1500,7 @@ kbd {
   grid-area: bottom;
   display: grid;
   grid-template-rows: minmax(0, 1fr);
+  contain: layout paint;
   overflow: hidden;
   background: var(--surface-0);
 }
@@ -1550,6 +1552,7 @@ kbd {
   grid-template-rows: minmax(0, 1fr);
   align-self: stretch;
   justify-self: stretch;
+  contain: layout paint;
 }
 
 .rail-side-terminal-panel {
@@ -1558,12 +1561,18 @@ kbd {
 
 .history-panel,
 .tree-panel,
-.diff-panel,
 .tool-dock-panel,
-.git-log-panel,
-.branch-panel,
 .bottom-terminal-panel,
 .commit-detail-panel {
+  min-width: 0;
+  min-height: 0;
+  contain: layout paint;
+  background: var(--surface-0);
+}
+
+.diff-panel,
+.branch-panel,
+.git-log-panel {
   min-width: 0;
   min-height: 0;
   background: var(--surface-0);
@@ -1634,7 +1643,7 @@ kbd {
 }
 
 .tool-panel-layer-hidden {
-  visibility: hidden;
+  display: none;
   pointer-events: none;
 }
 
@@ -2116,25 +2125,6 @@ kbd {
   cursor: row-resize;
 }
 
-.resize-handle-guide {
-  position: fixed;
-  z-index: 10000;
-  box-sizing: border-box;
-  background: color-mix(in oklch, var(--accent-strong) 54%, var(--line-strong));
-  box-shadow: 0 0 0 1px color-mix(in oklch, var(--surface-0) 60%, transparent);
-  opacity: 0.92;
-  pointer-events: none;
-  will-change: transform;
-}
-
-.resize-handle-guide-x {
-  cursor: col-resize;
-}
-
-.resize-handle-guide-y {
-  cursor: row-resize;
-}
-
 .resize-handle.rail-bottom-splitter {
   min-height: 6px;
   background: var(--surface-0);
@@ -2186,6 +2176,20 @@ body.is-resizing-y,
 body.is-resizing-y * {
   cursor: row-resize !important;
   user-select: none;
+}
+
+body.is-resizing-x *,
+body.is-resizing-y * {
+  transition: none !important;
+}
+
+body.is-resizing-x .rail-slot-panel,
+body.is-resizing-x .rail-editor-panel,
+body.is-resizing-x .rail-bottom-panels,
+body.is-resizing-y .rail-slot-panel,
+body.is-resizing-y .rail-editor-panel,
+body.is-resizing-y .rail-bottom-panels {
+  pointer-events: none;
 }
 
 .panel-toolbar,

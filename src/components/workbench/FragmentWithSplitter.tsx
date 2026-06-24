@@ -31,7 +31,6 @@ export function FragmentWithSplitter({
           label="Resize Git panel"
           onResize={index === 0 ? onResizeFirst : onResizeSecond}
           onResizeEnd={index === 0 ? onResizeFirstEnd : onResizeSecondEnd}
-          resizeMode="deferred"
         />
       ) : null}
     </>
