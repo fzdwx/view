@@ -1135,6 +1135,7 @@ export function App() {
                   label="Resize left rail slot"
                   onResize={handleResizeLeftTop}
                   onResizeEnd={handleResizeLeftTopEnd}
+                  resizeMode="deferred"
                 />
               </>
             ) : null}
@@ -1180,6 +1181,7 @@ export function App() {
                   label="Resize right rail slot"
                   onResize={handleResizeRightTop}
                   onResizeEnd={handleResizeRightTopEnd}
+                  resizeMode="deferred"
                 />
                 <WorkbenchRailSlotStack
                   activeItem={rightTopActiveItem}
@@ -1211,6 +1213,7 @@ export function App() {
                   label="Resize bottom rail slot"
                   onResize={handleResizeBottom}
                   onResizeEnd={handleResizeBottomEnd}
+                  resizeMode="deferred"
                 />
                 <section
                   className="rail-bottom-panels"
@@ -1245,6 +1248,7 @@ export function App() {
                       label="Resize bottom rail panels"
                       onResize={handleResizeBottomLeft}
                       onResizeEnd={handleResizeBottomLeftEnd}
+                      resizeMode="deferred"
                     />
                   ) : null}
                   {hasRightBottomPanel ? (

@@ -33,6 +33,7 @@ import {
   treeDarkThemeStyles,
 } from "./treePanelTheme";
 import { useTreePanelInputHandlers } from "./useTreePanelInputHandlers";
+import { usePanelResizeDeferredValue } from "../hooks/usePanelResizeDeferredValue";
 
 interface TreePanelProps {
   files: TreeFile[];
@@ -71,7 +72,11 @@ export const TreePanel = memo(function TreePanel({
   gitFileActions,
   onSelectPath,
 }: TreePanelProps) {
-  const treeData = useMemo(() => buildTreePanelData(files), [files]);
+  const deferredFiles = usePanelResizeDeferredValue(files);
+  const treeData = useMemo(
+    () => buildTreePanelData(deferredFiles),
+    [deferredFiles],
+  );
 
   const { paths, preparedInput, selectablePaths, fileByPath, gitStatus } =
     treeData;

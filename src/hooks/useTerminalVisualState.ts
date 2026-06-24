@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
+import {
+  isPanelResizeInProgress,
+  panelResizeEndEvent,
+} from "../lib/panelResizeInteraction";
 import { logPerf } from "../lib/performanceLog";
 import { terminalFramePerfFields } from "../lib/terminalPerf";
 import {
@@ -147,6 +151,13 @@ export function useTerminalVisualState(): TerminalVisualState {
     }
   }, [setFrameState]);
 
+  useEffect(() => {
+    const handlePanelResizeEnd = () => flushPendingFrame();
+    window.addEventListener(panelResizeEndEvent, handlePanelResizeEnd);
+    return () =>
+      window.removeEventListener(panelResizeEndEvent, handlePanelResizeEnd);
+  }, [flushPendingFrame]);
+
   const queueFrame = useCallback(
     (
       nextFrame: TerminalFrame,
@@ -181,6 +192,9 @@ export function useTerminalVisualState(): TerminalVisualState {
       pendingFrameSequenceRef.current += 1;
       pendingFrameRef.current = { ...nextFrame, displayOffset: nextDisplayOffset };
       pendingFrameQueuedAtRef.current = performance.now();
+      if (isPanelResizeInProgress()) {
+        return;
+      }
       logPerf(
         "terminal:queue-frame",
         0,
@@ -192,6 +206,9 @@ export function useTerminalVisualState(): TerminalVisualState {
       if (frameFlushRef.current == null) {
         frameFlushRef.current = window.requestAnimationFrame(() => {
           frameFlushRef.current = null;
+          if (isPanelResizeInProgress()) {
+            return;
+          }
           const pendingFrame = pendingFrameRef.current;
           pendingFrameRef.current = null;
           const queuedAt = pendingFrameQueuedAtRef.current;

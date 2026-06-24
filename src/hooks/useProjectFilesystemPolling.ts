@@ -5,6 +5,10 @@ import {
   isTauriRuntime,
   type ProjectStateFingerprint,
 } from "../lib/api";
+import {
+  isPanelResizeInProgress,
+  panelResizeEndEvent,
+} from "../lib/panelResizeInteraction";
 import { logPerf } from "../lib/performanceLog";
 
 const PROJECT_STATE_POLL_INTERVAL_MS = 2500;
@@ -31,8 +35,17 @@ export function useProjectFilesystemPolling({
     const projectPath = activeProjectPath;
     let refreshInFlight = false;
     let lastFingerprint: ProjectStateFingerprint | null = null;
+    let pendingResizeRefresh: ProjectStatePollSource | null = null;
 
     function refresh(source: ProjectStatePollSource): void {
+      if (isPanelResizeInProgress()) {
+        pendingResizeRefresh = source;
+        logPerf("poll:project-state", 0, {
+          source,
+          result: "deferred-panel-resize",
+        });
+        return;
+      }
       if (refreshInFlight) {
         logPerf("poll:project-state", 0, { source, result: "skipped-in-flight" });
         return;
@@ -45,7 +58,10 @@ export function useProjectFilesystemPolling({
           lastFingerprint = fingerprint;
         },
       }).then(
-        () => {
+        (result) => {
+          if (result === "deferred-panel-resize") {
+            pendingResizeRefresh = source;
+          }
           refreshInFlight = false;
         },
         (error: unknown) => {
@@ -60,8 +76,17 @@ export function useProjectFilesystemPolling({
     }
 
     const refreshFromFocus = () => refresh("focus");
+    const refreshAfterPanelResize = () => {
+      if (!pendingResizeRefresh) {
+        return;
+      }
+      const source = pendingResizeRefresh;
+      pendingResizeRefresh = null;
+      refresh(source);
+    };
     refresh("initial");
     window.addEventListener("focus", refreshFromFocus);
+    window.addEventListener(panelResizeEndEvent, refreshAfterPanelResize);
     const pollingTimer = window.setInterval(
       () => refresh("interval"),
       PROJECT_STATE_POLL_INTERVAL_MS,
@@ -70,6 +95,7 @@ export function useProjectFilesystemPolling({
     return () => {
       window.clearInterval(pollingTimer);
       window.removeEventListener("focus", refreshFromFocus);
+      window.removeEventListener(panelResizeEndEvent, refreshAfterPanelResize);
     };
   }, [activeCommit, activeProjectPath, queryClient]);
 }
@@ -83,7 +109,7 @@ async function refreshProjectStateQueries(
     readonly current: ProjectStateFingerprint | null;
     readonly set: (fingerprint: ProjectStateFingerprint) => void;
   },
-): Promise<void> {
+): Promise<"applied" | "deferred-panel-resize" | "primed" | "unchanged"> {
   const startedAt = performance.now();
   const nextFingerprint = await getProjectStateFingerprint(projectPath);
   const durationMs = performance.now() - startedAt;
@@ -96,7 +122,7 @@ async function refreshProjectStateQueries(
         { source, result: "unchanged" },
         { slowThresholdMs: PROJECT_STATE_POLL_WARN_MS },
       );
-      return;
+      return "unchanged";
     }
     if (previousFingerprint == null) {
       lastFingerprintRef.set(nextFingerprint);
@@ -106,7 +132,16 @@ async function refreshProjectStateQueries(
         { source, result: "primed" },
         { slowThresholdMs: PROJECT_STATE_POLL_WARN_MS },
       );
-      return;
+      return "primed";
+    }
+    if (isPanelResizeInProgress()) {
+      logPerf(
+        "poll:project-state",
+        durationMs,
+        { source, result: "deferred-panel-resize-after-fingerprint" },
+        { slowThresholdMs: PROJECT_STATE_POLL_WARN_MS },
+      );
+      return "deferred-panel-resize";
     }
     lastFingerprintRef.set(nextFingerprint);
     logPerf(
@@ -139,4 +174,5 @@ async function refreshProjectStateQueries(
   }
 
   await Promise.all(queries);
+  return "applied";
 }

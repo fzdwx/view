@@ -3,7 +3,7 @@ import type {
   MouseEvent as ReactMouseEvent,
 } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { measureElement, useVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ChevronDown,
   ChevronRight,
@@ -12,6 +12,7 @@ import {
   Search,
   Tag,
 } from "lucide-react";
+import { usePanelResizeDeferredValue } from "../../hooks/usePanelResizeDeferredValue";
 import type { BranchInfo, TagInfo } from "../../lib/api";
 import type { BranchActionKind } from "../../lib/branchModels";
 import {
@@ -22,6 +23,8 @@ import {
   type RefSectionId,
   type VirtualRefRow,
 } from "../../lib/branchTree";
+import { panelResizeEndEvent } from "../../lib/panelResizeInteraction";
+import { measureElementUnlessPanelResizing } from "../../lib/virtualizerMeasurement";
 import { BranchContextMenu } from "./BranchContextMenu";
 
 const BRANCH_HEAD_ROW_ESTIMATE = 32;
@@ -55,31 +58,34 @@ export function BranchTree({
   >(() => new Set());
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const lastScrolledRef = useRef<string | null>(null);
+  const deferredBranches = usePanelResizeDeferredValue(branches);
+  const deferredTags = usePanelResizeDeferredValue(tags);
   const filtering = branchFilter.trim().length > 0;
   const localBranches = useMemo(
     () =>
       filterRefs(
-        branches.filter((branch) => branch.branchType === "local"),
+        deferredBranches.filter((branch) => branch.branchType === "local"),
         branchFilter,
       ),
-    [branches, branchFilter],
+    [branchFilter, deferredBranches],
   );
   const remoteBranches = useMemo(
     () =>
       filterRefs(
-        branches.filter((branch) => branch.branchType === "remote"),
+        deferredBranches.filter((branch) => branch.branchType === "remote"),
         branchFilter,
       ),
-    [branches, branchFilter],
+    [branchFilter, deferredBranches],
   );
   const visibleTags = useMemo(
-    () => filterRefs(tags, branchFilter),
-    [tags, branchFilter],
+    () => filterRefs(deferredTags, branchFilter),
+    [branchFilter, deferredTags],
   );
-  const currentBranch = branches.find((branch) => branch.current) ?? null;
+  const currentBranch =
+    deferredBranches.find((branch) => branch.current) ?? null;
   const showCurrentBranch =
     currentBranch !== null && filterRefs([currentBranch], branchFilter).length > 0;
-  const refCount = branches.length + tags.length;
+  const refCount = deferredBranches.length + deferredTags.length;
   const visibleRefCount =
     localBranches.length + remoteBranches.length + visibleTags.length;
   const refCountLabel = filtering
@@ -119,10 +125,17 @@ export function BranchTree({
     directDomUpdatesMode: "transform",
     estimateSize: (index) => estimateRefRowSize(rows[index]),
     getItemKey: (index) => rows[index]?.key ?? index,
-    measureElement,
+    measureElement: measureElementUnlessPanelResizing,
     overscan: 14,
     useAnimationFrameWithResizeObserver: true,
   });
+
+  useEffect(() => {
+    const measureAfterPanelResize = () => branchVirtualizer.measure();
+    window.addEventListener(panelResizeEndEvent, measureAfterPanelResize);
+    return () =>
+      window.removeEventListener(panelResizeEndEvent, measureAfterPanelResize);
+  }, [branchVirtualizer]);
   const firstVisibleIndex = branchVirtualizer.range?.startIndex ?? 0;
   const firstVisibleRow = rows[firstVisibleIndex] ?? null;
   const firstVisibleItem = branchVirtualizer

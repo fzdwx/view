@@ -1,7 +1,10 @@
 import type { CSSProperties } from "react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { measureElement, useVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { usePanelResizeDeferredValue } from "../../hooks/usePanelResizeDeferredValue";
 import { buildCommitGraph } from "../../lib/commitGraph";
+import { panelResizeEndEvent } from "../../lib/panelResizeInteraction";
+import { measureElementUnlessPanelResizing } from "../../lib/virtualizerMeasurement";
 import { getCommitGraphWidth } from "./CommitGraph";
 import { CommitListView } from "./CommitListView";
 import { HistoryEmptyView, HistoryLoadingView } from "./CommitListStateViews";
@@ -37,13 +40,17 @@ export function VirtualCommitList({
   const lastScrolledReflogRef = useRef<string | null>(null);
   const [reflogMenu, setReflogMenu] = useState<ReflogMenu | null>(null);
   const isReflogMode = historyMode === "reflog";
+  const deferredCommits = usePanelResizeDeferredValue(commits);
+  const deferredGraphWidthCommits =
+    usePanelResizeDeferredValue(graphWidthCommits);
+  const deferredReflogEntries = usePanelResizeDeferredValue(reflogEntries);
   const graphRows = useMemo(
-    () => (isReflogMode ? [] : buildCommitGraph(commits)),
-    [commits, isReflogMode],
+    () => (isReflogMode ? [] : buildCommitGraph(deferredCommits)),
+    [deferredCommits, isReflogMode],
   );
   const graphWidthRows = useMemo(
-    () => buildCommitGraph(graphWidthCommits),
-    [graphWidthCommits],
+    () => buildCommitGraph(deferredGraphWidthCommits),
+    [deferredGraphWidthCommits],
   );
   const commitGraphWidth = useMemo(
     () =>
@@ -63,22 +70,32 @@ export function VirtualCommitList({
     directDomUpdatesMode: "transform",
     estimateSize: () => COMMIT_ROW_ESTIMATE,
     getItemKey: (index) => graphRows[index]?.commit.hash ?? index,
-    measureElement,
+    measureElement: measureElementUnlessPanelResizing,
     overscan: 18,
     useAnimationFrameWithResizeObserver: true,
   });
   const reflogVirtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
-    count: reflogEntries.length,
+    count: deferredReflogEntries.length,
     getScrollElement: () => scrollRef.current,
     directDomUpdates: true,
     directDomUpdatesMode: "transform",
     estimateSize: () => REFLOG_ROW_ESTIMATE,
     getItemKey: (index) =>
-      `${reflogEntries[index]?.selector ?? index}:${reflogEntries[index]?.hash ?? ""}`,
-    measureElement,
+      `${deferredReflogEntries[index]?.selector ?? index}:${deferredReflogEntries[index]?.hash ?? ""}`,
+    measureElement: measureElementUnlessPanelResizing,
     overscan: 14,
     useAnimationFrameWithResizeObserver: true,
   });
+
+  useEffect(() => {
+    const measureAfterPanelResize = () => {
+      commitVirtualizer.measure();
+      reflogVirtualizer.measure();
+    };
+    window.addEventListener(panelResizeEndEvent, measureAfterPanelResize);
+    return () =>
+      window.removeEventListener(panelResizeEndEvent, measureAfterPanelResize);
+  }, [commitVirtualizer, reflogVirtualizer]);
   const activeFilter = isReflogMode ? reflogFilter : filter;
   const activeLoading = isReflogMode ? reflogLoading : loading;
   const activeCommitIndex = useMemo(
@@ -88,9 +105,11 @@ export function VirtualCommitList({
   const activeReflogIndex = useMemo(
     () =>
       activeReflogSelector
-        ? reflogEntries.findIndex((entry) => entry.selector === activeReflogSelector)
+        ? deferredReflogEntries.findIndex(
+            (entry) => entry.selector === activeReflogSelector,
+          )
         : -1,
-    [activeReflogSelector, reflogEntries],
+    [activeReflogSelector, deferredReflogEntries],
   );
 
   useEffect(() => {
@@ -199,7 +218,7 @@ export function VirtualCommitList({
     );
   }
 
-  if (isReflogMode && reflogEntries.length === 0) {
+  if (isReflogMode && deferredReflogEntries.length === 0) {
     return (
       <HistoryEmptyView
         activeCommit={activeCommit}
@@ -225,7 +244,7 @@ export function VirtualCommitList({
         branch={branch}
         filter={reflogFilter}
         gitWriteActions={gitWriteActions}
-        reflogEntries={reflogEntries}
+        reflogEntries={deferredReflogEntries}
         reflogMenu={reflogMenu}
         scrollRef={scrollRef}
         tableStyle={tableStyle}

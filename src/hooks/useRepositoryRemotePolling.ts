@@ -1,5 +1,9 @@
 import { useEffect, useRef } from "react";
 import { fetchRemotes, isTauriRuntime } from "../lib/api";
+import {
+  isPanelResizeInProgress,
+  panelResizeEndEvent,
+} from "../lib/panelResizeInteraction";
 
 type RefetchRepositoryData = () => Promise<unknown>;
 
@@ -25,7 +29,12 @@ export function useRepositoryRemotePolling({
       return;
     }
 
+    let pendingResizeRefresh = false;
     const refreshRemoteRefs = async () => {
+      if (isPanelResizeInProgress()) {
+        pendingResizeRefresh = true;
+        return;
+      }
       if (remoteFetchInFlightRef.current) {
         return;
       }
@@ -33,6 +42,10 @@ export function useRepositoryRemotePolling({
       remoteFetchInFlightRef.current = true;
       try {
         await fetchRemotes(activeProjectPath);
+        if (isPanelResizeInProgress()) {
+          pendingResizeRefresh = true;
+          return;
+        }
         await Promise.all([
           refetchRepository(),
           refetchCommits(),
@@ -44,12 +57,23 @@ export function useRepositoryRemotePolling({
         remoteFetchInFlightRef.current = false;
       }
     };
+    const refreshAfterPanelResize = () => {
+      if (!pendingResizeRefresh) {
+        return;
+      }
+      pendingResizeRefresh = false;
+      void refreshRemoteRefs();
+    };
 
     const timer = window.setInterval(() => {
       void refreshRemoteRefs();
     }, 120_000);
+    window.addEventListener(panelResizeEndEvent, refreshAfterPanelResize);
 
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener(panelResizeEndEvent, refreshAfterPanelResize);
+    };
   }, [
     activeProjectPath,
     hasGitRepository,

@@ -2116,6 +2116,25 @@ kbd {
   cursor: row-resize;
 }
 
+.resize-handle-guide {
+  position: fixed;
+  z-index: 10000;
+  box-sizing: border-box;
+  background: color-mix(in oklch, var(--accent-strong) 54%, var(--line-strong));
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--surface-0) 60%, transparent);
+  opacity: 0.92;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.resize-handle-guide-x {
+  cursor: col-resize;
+}
+
+.resize-handle-guide-y {
+  cursor: row-resize;
+}
+
 .resize-handle.rail-bottom-splitter {
   min-height: 6px;
   background: var(--surface-0);
@@ -3103,6 +3122,7 @@ body.is-resizing-y * {
 .commit-list {
   position: relative;
   min-height: 0;
+  contain: layout paint;
   overflow-x: hidden;
   overflow-y: auto;
   background: var(--surface-0);
@@ -3515,6 +3535,7 @@ body.is-resizing-y * {
 
 .branch-scroll {
   position: relative;
+  contain: layout paint;
   padding: 7px 6px 10px;
   scrollbar-gutter: stable;
   scroll-padding-block: 6px 28px;
@@ -5268,6 +5289,7 @@ body.is-resizing-y * {
   position: relative;
   min-width: 0;
   min-height: 0;
+  contain: layout paint;
   background: var(--surface-0);
 }
 
@@ -5276,6 +5298,7 @@ body.is-resizing-y * {
   inset: 0;
   min-width: 0;
   min-height: 0;
+  contain: layout paint;
 }
 
 .terminal-session-layer-hidden {
