@@ -117,7 +117,6 @@ export function CommitInspector({
         axis={isHorizontal ? "x" : "y"}
         className="commit-info-splitter"
         label="Resize commit details"
-        liveResize={false}
         onResize={handleResizePreview}
         onResizeEnd={handleResizeCommit}
       />

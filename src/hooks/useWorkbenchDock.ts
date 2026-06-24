@@ -6,11 +6,6 @@ import {
 } from "../lib/workbenchLayout";
 import { terminalWorkspaceEmptyEvent } from "../lib/terminalSessions";
 import { terminalPanelEmptyEvent } from "../lib/terminalTabPlacement";
-import {
-  isPanelResizeInProgress,
-  runAfterPanelResizeIdle,
-  type PanelResizeIdleTaskHandle,
-} from "../lib/panelResizeInteraction";
 import { useWorkbenchDockDrag } from "./useWorkbenchDockDrag";
 import type {
   GitPanelId,
@@ -79,7 +74,6 @@ export function useWorkbenchDock(): WorkbenchDockController {
     startRailItemDrag,
   } = useWorkbenchDockDrag();
   const layoutSaveTimerRef = useRef<number | null>(null);
-  const pendingPanelSizeCommitRef = useRef<PanelResizeIdleTaskHandle | null>(null);
   const latestPanelSizesRef = useRef(initialLayout.panelSizes);
   const latestLayoutRef = useRef({
     ...defaultWorkbenchLayout,
@@ -128,10 +122,6 @@ export function useWorkbenchDock(): WorkbenchDockController {
     railActiveItems,
     railLayout,
   ]);
-
-  useEffect(() => {
-    return () => pendingPanelSizeCommitRef.current?.cancel();
-  }, []);
 
   useEffect(() => {
     function flushWorkbenchLayout() {
@@ -195,36 +185,20 @@ export function useWorkbenchDock(): WorkbenchDockController {
         panelSizes: nextPanelSizes,
       };
 
-      const commitPanelSizes = () => {
-        setPanelSizes((currentPanelSizes: PanelSizes) => {
-          if (
-            currentPanelSizes.leftTop === nextPanelSizes.leftTop &&
-            currentPanelSizes.rightTop === nextPanelSizes.rightTop &&
-            currentPanelSizes.bottom === nextPanelSizes.bottom &&
-            currentPanelSizes.bottomLeft === nextPanelSizes.bottomLeft &&
-            currentPanelSizes.branch === nextPanelSizes.branch &&
-            currentPanelSizes.details === nextPanelSizes.details &&
-            currentPanelSizes.commitInfo === nextPanelSizes.commitInfo
-          ) {
-            return currentPanelSizes;
-          }
-          return nextPanelSizes;
-        });
-      };
-
-      pendingPanelSizeCommitRef.current?.cancel();
-      if (!isPanelResizeInProgress()) {
-        commitPanelSizes();
-        return;
-      }
-
-      pendingPanelSizeCommitRef.current = runAfterPanelResizeIdle(
-        () => {
-          pendingPanelSizeCommitRef.current = null;
-          commitPanelSizes();
-        },
-        { idleTimeoutMs: 500, timeoutMs: 16 },
-      );
+      setPanelSizes((currentPanelSizes: PanelSizes) => {
+        if (
+          currentPanelSizes.leftTop === nextPanelSizes.leftTop &&
+          currentPanelSizes.rightTop === nextPanelSizes.rightTop &&
+          currentPanelSizes.bottom === nextPanelSizes.bottom &&
+          currentPanelSizes.bottomLeft === nextPanelSizes.bottomLeft &&
+          currentPanelSizes.branch === nextPanelSizes.branch &&
+          currentPanelSizes.details === nextPanelSizes.details &&
+          currentPanelSizes.commitInfo === nextPanelSizes.commitInfo
+        ) {
+          return currentPanelSizes;
+        }
+        return nextPanelSizes;
+      });
     },
     [],
   );

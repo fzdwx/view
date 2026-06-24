@@ -16,6 +16,8 @@ import {
 } from "../lib/panelResizeInteraction";
 import type { PanelSizes, RailPanelSizeKey } from "../lib/workbenchTypes";
 
+const RAIL_CLAMP_AFTER_RESIZE_DELAY_MS = 120;
+
 interface RailPanelResizeOptions {
   readonly contentGridRef: RefObject<HTMLElement | null>;
   readonly panelSizesRef: RefObject<PanelSizes>;
@@ -155,7 +157,11 @@ export function useRailPanelResize({
           pendingClampHandle = null;
           clampRailPanelsToWorkbenchNow();
         },
-        { idleTimeoutMs: 500, timeoutMs: 32 },
+        {
+          delayMs: RAIL_CLAMP_AFTER_RESIZE_DELAY_MS,
+          idleTimeoutMs: 500,
+          timeoutMs: 32,
+        },
       );
     };
 

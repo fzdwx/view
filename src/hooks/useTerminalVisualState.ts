@@ -3,7 +3,6 @@ import type { RefObject } from "react";
 import {
   isPanelResizeInProgress,
   panelResizeEndEvent,
-  runAfterPanelResizeIdle,
 } from "../lib/panelResizeInteraction";
 import { logPerf } from "../lib/performanceLog";
 import { terminalFramePerfFields } from "../lib/terminalPerf";
@@ -45,6 +44,7 @@ export function useTerminalVisualState(): TerminalVisualState {
   const frameRef = useRef<TerminalFrame | null>(null);
   const pendingFrameRef = useRef<TerminalFrame | null>(null);
   const frameFlushRef = useRef<number | null>(null);
+  const frameFlushTimeoutRef = useRef<number | null>(null);
   const pendingFrameQueuedAtRef = useRef<number | null>(null);
   const pendingFrameSequenceRef = useRef(0);
   const coalescedFrameCountRef = useRef(0);
@@ -128,48 +128,61 @@ export function useTerminalVisualState(): TerminalVisualState {
     setFrame(nextFrame);
   }, []);
 
+  const commitPendingFrame = useCallback((flush: "manual" | "raf") => {
+    const pendingFrame = pendingFrameRef.current;
+    pendingFrameRef.current = null;
+    const queuedAt = pendingFrameQueuedAtRef.current;
+    pendingFrameQueuedAtRef.current = null;
+    if (!pendingFrame) {
+      return;
+    }
+
+    const flushWaitMs = queuedAt == null ? 0 : performance.now() - queuedAt;
+    const panelResizing = isPanelResizeInProgress();
+    const flushFields = {
+      coalescedFrames: coalescedFrameCountRef.current,
+      documentHidden: document.hidden,
+      flush,
+      panelResizing,
+    };
+    logPerf(
+      "terminal:flush-frame",
+      flushWaitMs,
+      () => terminalFramePerfFields(pendingFrame, flushFields),
+      { slowThresholdMs: TERMINAL_FLUSH_WARN_MS },
+    );
+    coalescedFrameCountRef.current = 0;
+    setFrameState(pendingFrame);
+  }, [setFrameState]);
+
   const flushPendingFrame = useCallback(() => {
     if (frameFlushRef.current != null) {
       window.cancelAnimationFrame(frameFlushRef.current);
       frameFlushRef.current = null;
     }
-    const pendingFrame = pendingFrameRef.current;
-    pendingFrameRef.current = null;
-    const queuedAt = pendingFrameQueuedAtRef.current;
-    pendingFrameQueuedAtRef.current = null;
-    if (pendingFrame) {
-      const flushWaitMs = queuedAt == null ? 0 : performance.now() - queuedAt;
-      const flushFields = {
-        coalescedFrames: coalescedFrameCountRef.current,
-        documentHidden: document.hidden,
-        flush: "manual",
-      };
-      logPerf(
-        "terminal:flush-frame",
-        flushWaitMs,
-        () => terminalFramePerfFields(pendingFrame, flushFields),
-        { slowThresholdMs: TERMINAL_FLUSH_WARN_MS },
-      );
-      coalescedFrameCountRef.current = 0;
-      setFrameState(pendingFrame);
+    if (frameFlushTimeoutRef.current != null) {
+      window.clearTimeout(frameFlushTimeoutRef.current);
+      frameFlushTimeoutRef.current = null;
     }
-  }, [setFrameState]);
+    commitPendingFrame("manual");
+  }, [commitPendingFrame]);
 
   useEffect(() => {
-    let pendingFlushHandle: ReturnType<typeof runAfterPanelResizeIdle> | null = null;
+    let pendingFlushFrame: number | null = null;
     const handlePanelResizeEnd = () => {
-      pendingFlushHandle?.cancel();
-      pendingFlushHandle = runAfterPanelResizeIdle(
-        () => {
-          pendingFlushHandle = null;
-          flushPendingFrame();
-        },
-        { idleTimeoutMs: 250, timeoutMs: 16 },
-      );
+      if (pendingFlushFrame !== null) {
+        window.cancelAnimationFrame(pendingFlushFrame);
+      }
+      pendingFlushFrame = window.requestAnimationFrame(() => {
+        pendingFlushFrame = null;
+        flushPendingFrame();
+      });
     };
     window.addEventListener(panelResizeEndEvent, handlePanelResizeEnd);
     return () => {
-      pendingFlushHandle?.cancel();
+      if (pendingFlushFrame !== null) {
+        window.cancelAnimationFrame(pendingFlushFrame);
+      }
       window.removeEventListener(panelResizeEndEvent, handlePanelResizeEnd);
     };
   }, [flushPendingFrame]);
@@ -208,48 +221,36 @@ export function useTerminalVisualState(): TerminalVisualState {
       pendingFrameSequenceRef.current += 1;
       pendingFrameRef.current = { ...nextFrame, displayOffset: nextDisplayOffset };
       pendingFrameQueuedAtRef.current = performance.now();
-      if (isPanelResizeInProgress()) {
-        return;
+      const panelResizing = isPanelResizeInProgress();
+      if (!panelResizing) {
+        const queueFields = {
+          coalesced: coalescedFrameCountRef.current > 0,
+          sequence: pendingFrameSequenceRef.current,
+          panelResizing,
+        };
+        logPerf(
+          "terminal:queue-frame",
+          0,
+          () => terminalFramePerfFields(nextFrame, queueFields),
+        );
       }
-      const queueFields = {
-        coalesced: coalescedFrameCountRef.current > 0,
-        sequence: pendingFrameSequenceRef.current,
-      };
-      logPerf(
-        "terminal:queue-frame",
-        0,
-        () => terminalFramePerfFields(nextFrame, queueFields),
-      );
-      if (frameFlushRef.current == null) {
-        frameFlushRef.current = window.requestAnimationFrame(() => {
-          frameFlushRef.current = null;
-          if (isPanelResizeInProgress()) {
-            return;
-          }
-          const pendingFrame = pendingFrameRef.current;
-          pendingFrameRef.current = null;
-          const queuedAt = pendingFrameQueuedAtRef.current;
-          pendingFrameQueuedAtRef.current = null;
-          if (pendingFrame) {
-            const flushWaitMs = queuedAt == null ? 0 : performance.now() - queuedAt;
-            const flushFields = {
-              coalescedFrames: coalescedFrameCountRef.current,
-              documentHidden: document.hidden,
-              flush: "raf",
-            };
-            logPerf(
-              "terminal:flush-frame",
-              flushWaitMs,
-              () => terminalFramePerfFields(pendingFrame, flushFields),
-              { slowThresholdMs: TERMINAL_FLUSH_WARN_MS },
-            );
-            coalescedFrameCountRef.current = 0;
-            setFrameState(pendingFrame);
-          }
-        });
+      if (frameFlushRef.current == null && frameFlushTimeoutRef.current == null) {
+        const scheduleFrameFlush = () => {
+          frameFlushTimeoutRef.current = null;
+          frameFlushRef.current = window.requestAnimationFrame(() => {
+            frameFlushRef.current = null;
+            commitPendingFrame("raf");
+          });
+        };
+
+        if (!panelResizing) {
+          scheduleFrameFlush();
+        } else if (!frameRef.current) {
+          scheduleFrameFlush();
+        }
       }
     },
-    [clearScrollbackHint, consumePendingScrollIntent, setFrameState, showScrollbackHint],
+    [clearScrollbackHint, commitPendingFrame, consumePendingScrollIntent, showScrollbackHint],
   );
 
   const resetVisualState = useCallback(() => {
@@ -261,6 +262,10 @@ export function useTerminalVisualState(): TerminalVisualState {
     if (visualBellTimerRef.current != null) {
       window.clearTimeout(visualBellTimerRef.current);
       visualBellTimerRef.current = null;
+    }
+    if (frameFlushTimeoutRef.current != null) {
+      window.clearTimeout(frameFlushTimeoutRef.current);
+      frameFlushTimeoutRef.current = null;
     }
     setBellActive(false);
     setJumpedScrollbackOffset(null);

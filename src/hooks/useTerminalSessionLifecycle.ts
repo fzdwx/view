@@ -34,10 +34,10 @@ import {
 import { settingsChangedEvent } from "../lib/settings";
 import {
   isPanelResizeInProgress,
-  panelResizeEndEvent,
-  runAfterPanelResizeIdle,
-  type PanelResizeIdleTaskHandle,
 } from "../lib/panelResizeInteraction";
+
+const TERMINAL_RESIZE_DEBOUNCE_MS = 120;
+const TERMINAL_LIVE_PANEL_RESIZE_DEBOUNCE_MS = 32;
 
 type MutableRef<T> = {
   current: T;
@@ -107,11 +107,13 @@ export function useTerminalSessionLifecycle(options: TerminalSessionLifecycleOpt
       terminalElement.style.setProperty("--terminal-cell-height", `${nextMetrics.height}px`);
       return nextMetrics;
     };
+    const syncCellMetricsAndScheduleResize = () => {
+      syncCellMetrics();
+      scheduleResize();
+    };
     let resizeDebounceTimer: number | null = null;
     let resizeInFlight = false;
     let pendingResize: { readonly cols: number; readonly rows: number } | null = null;
-    let resizeAfterPanelDrag = false;
-    let pendingPanelResizeHandle: PanelResizeIdleTaskHandle | null = null;
     const sendResize = (sessionId: string, size: { readonly cols: number; readonly rows: number }) => {
       if (resizeInFlight) {
         pendingResize = size;
@@ -140,10 +142,19 @@ export function useTerminalSessionLifecycle(options: TerminalSessionLifecycleOpt
       });
     };
     const queueResize = (sessionId: string, size: { readonly cols: number; readonly rows: number }) => {
+      if (isPanelResizeInProgress() && !resizeInFlight && resizeDebounceTimer == null) {
+        pendingResize = null;
+        sendResize(sessionId, size);
+        return;
+      }
+
       pendingResize = size;
       if (resizeDebounceTimer != null) {
         window.clearTimeout(resizeDebounceTimer);
       }
+      const debounceMs = isPanelResizeInProgress()
+        ? TERMINAL_LIVE_PANEL_RESIZE_DEBOUNCE_MS
+        : TERMINAL_RESIZE_DEBOUNCE_MS;
       resizeDebounceTimer = window.setTimeout(() => {
         resizeDebounceTimer = null;
         const nextSize = pendingResize;
@@ -152,11 +163,14 @@ export function useTerminalSessionLifecycle(options: TerminalSessionLifecycleOpt
         if (nextSize) {
           sendResize(currentSessionId, nextSize);
         }
-      }, 120);
+      }, debounceMs);
     };
     const resizeNow = () => {
       options.resizeFrameRef.current = null;
-      const size = sizeFromElement(terminalElement, syncCellMetrics());
+      const size = sizeFromElement(
+        terminalElement,
+        options.cellMetricsRef.current,
+      );
       if (!size || sameSize(options.lastSizeRef.current, size)) {
         return;
       }
@@ -167,27 +181,9 @@ export function useTerminalSessionLifecycle(options: TerminalSessionLifecycleOpt
       }
     };
     const scheduleResize = () => {
-      if (isPanelResizeInProgress()) {
-        resizeAfterPanelDrag = true;
-        return;
-      }
       if (options.resizeFrameRef.current == null) {
         options.resizeFrameRef.current = window.requestAnimationFrame(resizeNow);
       }
-    };
-    const flushResizeAfterPanelDrag = () => {
-      if (!resizeAfterPanelDrag) {
-        return;
-      }
-      resizeAfterPanelDrag = false;
-      pendingPanelResizeHandle?.cancel();
-      pendingPanelResizeHandle = runAfterPanelResizeIdle(
-        () => {
-          pendingPanelResizeHandle = null;
-          scheduleResize();
-        },
-        { idleTimeoutMs: 500, timeoutMs: 32 },
-      );
     };
     const detachHandlers = attachTerminalScreenHandlers({
       cellMetricsRef: options.cellMetricsRef,
@@ -200,8 +196,7 @@ export function useTerminalSessionLifecycle(options: TerminalSessionLifecycleOpt
       wheelScrollAccumulatorRef: options.wheelScrollAccumulatorRef,
     });
     const resizeObserver = new ResizeObserver(scheduleResize);
-    window.addEventListener(settingsChangedEvent, scheduleResize);
-    window.addEventListener(panelResizeEndEvent, flushResizeAfterPanelDrag);
+    window.addEventListener(settingsChangedEvent, syncCellMetricsAndScheduleResize);
     resizeObserver.observe(terminalElement);
 
     const start = async () => {
@@ -256,8 +251,10 @@ export function useTerminalSessionLifecycle(options: TerminalSessionLifecycleOpt
     return () => {
       disposed = true;
       detachHandlers();
-      window.removeEventListener(settingsChangedEvent, scheduleResize);
-      window.removeEventListener(panelResizeEndEvent, flushResizeAfterPanelDrag);
+      window.removeEventListener(
+        settingsChangedEvent,
+        syncCellMetricsAndScheduleResize,
+      );
       resizeObserver.disconnect();
       closeTerminalSocket(options.socketRef);
       options.sessionIdRef.current = null;
@@ -270,8 +267,6 @@ export function useTerminalSessionLifecycle(options: TerminalSessionLifecycleOpt
         window.clearTimeout(resizeDebounceTimer);
         resizeDebounceTimer = null;
       }
-      pendingPanelResizeHandle?.cancel();
-      pendingPanelResizeHandle = null;
       options.lastSizeRef.current = null;
       options.cellMetricsRef.current = DEFAULT_TERMINAL_CELL_METRICS;
       options.wheelScrollAccumulatorRef.current = 0;

@@ -1123,7 +1123,6 @@ export function App() {
                   axis="x"
                   className="rail-left-top-splitter"
                   label="Resize left rail slot"
-                  liveResize={false}
                   onResize={handleResizeLeftTop}
                   onResizeEnd={handleResizeLeftTopEnd}
                 />
@@ -1169,7 +1168,6 @@ export function App() {
                   axis="x"
                   className="rail-right-top-splitter"
                   label="Resize right rail slot"
-                  liveResize={false}
                   onResize={handleResizeRightTop}
                   onResizeEnd={handleResizeRightTopEnd}
                 />
@@ -1201,7 +1199,6 @@ export function App() {
                   axis="y"
                   className="rail-bottom-splitter"
                   label="Resize bottom rail slot"
-                  liveResize={false}
                   onResize={handleResizeBottom}
                   onResizeEnd={handleResizeBottomEnd}
                 />
@@ -1236,7 +1233,6 @@ export function App() {
                       axis="x"
                       className="rail-bottom-inner-splitter"
                       label="Resize bottom rail panels"
-                      liveResize={false}
                       onResize={handleResizeBottomLeft}
                       onResizeEnd={handleResizeBottomLeftEnd}
                     />

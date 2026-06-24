@@ -135,6 +135,7 @@ export interface RepositoryPayload {
 export interface ProjectStateFingerprint {
   fingerprint: string;
   headFingerprint: string;
+  summaryFingerprint: string;
   statusFingerprint: string;
 }
 

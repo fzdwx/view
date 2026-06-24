@@ -21,6 +21,7 @@ export interface PanelResizeIdleTaskHandle {
 }
 
 export interface PanelResizeIdleTaskOptions {
+  readonly delayMs?: number;
   readonly idleTimeoutMs?: number;
   readonly timeoutMs?: number;
 }
@@ -35,10 +36,15 @@ export function runAfterPanelResizeIdle(
   }
 
   let canceled = false;
+  let delayId: number | null = null;
   let timeoutId: number | null = null;
   let idleId: number | null = null;
 
   const cleanup = () => {
+    if (delayId != null) {
+      window.clearTimeout(delayId);
+      delayId = null;
+    }
     if (timeoutId != null) {
       window.clearTimeout(timeoutId);
       timeoutId = null;
@@ -66,6 +72,23 @@ export function runAfterPanelResizeIdle(
 
   function schedule() {
     cleanup();
+    if (canceled) {
+      return;
+    }
+
+    const delayMs = options.delayMs ?? 0;
+    if (delayMs > 0) {
+      delayId = window.setTimeout(() => {
+        delayId = null;
+        scheduleIdleTask();
+      }, delayMs);
+      return;
+    }
+
+    scheduleIdleTask();
+  }
+
+  function scheduleIdleTask() {
     if (canceled) {
       return;
     }

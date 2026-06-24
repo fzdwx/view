@@ -24,10 +24,9 @@ import {
   type VirtualRefRow,
 } from "../../lib/branchTree";
 import {
-  panelResizeEndEvent,
-  runAfterPanelResizeIdle,
-} from "../../lib/panelResizeInteraction";
-import { measureElementUnlessPanelResizing } from "../../lib/virtualizerMeasurement";
+  measureElementByEstimate,
+  observeElementRectDuringPanelResize,
+} from "../../lib/virtualizerMeasurement";
 import { BranchContextMenu } from "./BranchContextMenu";
 
 const BRANCH_HEAD_ROW_ESTIMATE = 32;
@@ -128,29 +127,12 @@ export const BranchTree = memo(function BranchTree({
     directDomUpdatesMode: "transform",
     estimateSize: (index) => estimateRefRowSize(rows[index]),
     getItemKey: (index) => rows[index]?.key ?? index,
-    measureElement: measureElementUnlessPanelResizing,
+    measureElement: measureElementByEstimate,
+    observeElementRect: observeElementRectDuringPanelResize,
     overscan: 14,
     useAnimationFrameWithResizeObserver: true,
   });
 
-  useEffect(() => {
-    let pendingMeasure: ReturnType<typeof runAfterPanelResizeIdle> | null = null;
-    const measureAfterPanelResize = () => {
-      pendingMeasure?.cancel();
-      pendingMeasure = runAfterPanelResizeIdle(
-        () => {
-          pendingMeasure = null;
-          branchVirtualizer.measure();
-        },
-        { idleTimeoutMs: 500, timeoutMs: 32 },
-      );
-    };
-    window.addEventListener(panelResizeEndEvent, measureAfterPanelResize);
-    return () => {
-      pendingMeasure?.cancel();
-      window.removeEventListener(panelResizeEndEvent, measureAfterPanelResize);
-    };
-  }, [branchVirtualizer]);
   const firstVisibleIndex = branchVirtualizer.range?.startIndex ?? 0;
   const firstVisibleRow = rows[firstVisibleIndex] ?? null;
   const firstVisibleItem = branchVirtualizer

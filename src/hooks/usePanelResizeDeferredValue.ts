@@ -6,6 +6,8 @@ import {
   type PanelResizeIdleTaskHandle,
 } from "../lib/panelResizeInteraction";
 
+const DEFERRED_VALUE_AFTER_RESIZE_DELAY_MS = 120;
+
 export function usePanelResizeDeferredValue<T>(value: T): T {
   const stableValueRef = useRef(value);
   const latestValueRef = useRef(value);
@@ -29,7 +31,11 @@ export function usePanelResizeDeferredValue<T>(value: T): T {
           stableValueRef.current = latestValueRef.current;
           forceRender();
         },
-        { idleTimeoutMs: 500, timeoutMs: 16 },
+        {
+          delayMs: DEFERRED_VALUE_AFTER_RESIZE_DELAY_MS,
+          idleTimeoutMs: 500,
+          timeoutMs: 16,
+        },
       );
     };
     window.addEventListener(panelResizeEndEvent, applyLatestValue);

@@ -34,7 +34,10 @@ import {
   treeDarkThemeStyles,
 } from "./treePanelTheme";
 import { useTreePanelInputHandlers } from "./useTreePanelInputHandlers";
+import { usePanelResizeActive } from "../hooks/usePanelResizeActive";
 import { usePanelResizeDeferredValue } from "../hooks/usePanelResizeDeferredValue";
+
+const treePanelOverscan = 6;
 
 interface TreePanelProps {
   files: TreeFile[];
@@ -74,6 +77,7 @@ export const TreePanel = memo(function TreePanel({
   onSelectPath,
 }: TreePanelProps) {
   const deferredFiles = usePanelResizeDeferredValue(files);
+  const panelResizeActive = usePanelResizeActive();
   const treeDataCacheRef = useRef<{
     readonly data: ReturnType<typeof buildTreePanelData>;
     readonly signature: string;
@@ -142,6 +146,7 @@ export const TreePanel = memo(function TreePanel({
     initialSelectedPaths: selectedPath ? [selectedPath] : [],
     density: "compact",
     icons: fileTreeIcons,
+    overscan: treePanelOverscan,
     unsafeCSS: treeContentAlignmentCss,
     renaming: onRenameFile
       ? {
@@ -266,6 +271,7 @@ export const TreePanel = memo(function TreePanel({
       className="file-tree-host"
       model={model}
       style={treeDarkThemeStyles}
+      data-view-panel-resizing={panelResizeActive ? "true" : undefined}
       onClickCapture={handleTreeClickCapture}
       onContextMenuCapture={handleTreeContextMenuCapture}
       onKeyDownCapture={handleTreeKeyDownCapture}

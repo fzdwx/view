@@ -202,6 +202,7 @@ struct RepositoryPayload {
 struct ProjectStateFingerprint {
     fingerprint: String,
     head_fingerprint: String,
+    summary_fingerprint: String,
     status_fingerprint: String,
 }
 
@@ -959,7 +960,7 @@ async fn get_project_files(path: String) -> Result<Vec<TreeFile>, String> {
 async fn get_project_state_fingerprint(path: String) -> Result<ProjectStateFingerprint, String> {
     blocking_command("get_project_state_fingerprint", move || {
         let root = project_root(&path)?;
-        let (fingerprint, head_fingerprint, status_fingerprint) =
+        let (fingerprint, head_fingerprint, summary_fingerprint, status_fingerprint) =
             match discover_repository_root(&root)? {
                 Some(repository_root) => git_project_state_fingerprint(&repository_root)?,
                 None => plain_project_state_fingerprint(&root)?,
@@ -968,6 +969,7 @@ async fn get_project_state_fingerprint(path: String) -> Result<ProjectStateFinge
         Ok(ProjectStateFingerprint {
             fingerprint,
             head_fingerprint,
+            summary_fingerprint,
             status_fingerprint,
         })
     })
@@ -1338,7 +1340,7 @@ async fn pull_current_branch(path: String, mode: String) -> Result<(), String> {
 
 #[tauri::command]
 fn terminal_spawn(
-    state: State<TerminalState>,
+    state: State<'_, TerminalState>,
     path: String,
     cwd: Option<String>,
     cols: Option<u16>,
@@ -1357,46 +1359,73 @@ fn terminal_spawn(
 }
 
 #[tauri::command]
-fn terminal_resize(
-    state: State<TerminalState>,
+async fn terminal_resize(
+    state: State<'_, TerminalState>,
     id: String,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    let sessions = state.sessions.lock().map_err(|error| error.to_string())?;
-    let session = sessions
-        .get(&id)
-        .ok_or_else(|| "Terminal session was not found".to_string())?;
-    session
-        .resize_tx
-        .send(PtySize {
-            rows: rows.max(1),
-            cols: cols.max(1),
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|error| format!("Failed to schedule terminal resize: {error}"))?;
-    let _ = session
-        .parser_tx
-        .send(TerminalParserEvent::Resize(cols.max(1), rows.max(1)));
-    Ok(())
+    resize_terminal_session(&state.sessions, &id, cols, rows)
 }
 
 #[tauri::command]
-fn terminal_scroll(state: State<TerminalState>, id: String, delta: i32) -> Result<(), String> {
-    let sessions = state.sessions.lock().map_err(|error| error.to_string())?;
-    let session = sessions
-        .get(&id)
-        .ok_or_else(|| "Terminal session was not found".to_string())?;
-    // The parser thread applies the scroll and re-emits a frame, so the
-    // connected WebSocket client renders the scrolled view.
-    let _ = session.parser_tx.send(TerminalParserEvent::Scroll(delta));
-    Ok(())
+async fn terminal_scroll(
+    state: State<'_, TerminalState>,
+    id: String,
+    delta: i32,
+) -> Result<(), String> {
+    scroll_terminal_session(&state.sessions, &id, delta)
 }
 
 #[tauri::command]
 fn terminal_kill(state: State<TerminalState>, id: String) -> Result<(), String> {
     kill_terminal_session(state.inner(), &id)
+}
+
+fn resize_terminal_session(
+    sessions: &Arc<Mutex<HashMap<String, TerminalSession>>>,
+    id: &str,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let (resize_tx, parser_tx) = {
+        let sessions = sessions.lock().map_err(|error| error.to_string())?;
+        let session = sessions
+            .get(id)
+            .ok_or_else(|| "Terminal session was not found".to_string())?;
+        (session.resize_tx.clone(), session.parser_tx.clone())
+    };
+    let cols = cols.max(1);
+    let rows = rows.max(1);
+    resize_tx
+        .send(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|error| format!("Failed to schedule terminal resize: {error}"))?;
+    let _ = parser_tx.send(TerminalParserEvent::Resize(cols, rows));
+    Ok(())
+}
+
+fn scroll_terminal_session(
+    sessions: &Arc<Mutex<HashMap<String, TerminalSession>>>,
+    id: &str,
+    delta: i32,
+) -> Result<(), String> {
+    let parser_tx = {
+        let sessions = sessions.lock().map_err(|error| error.to_string())?;
+        sessions
+            .get(id)
+            .ok_or_else(|| "Terminal session was not found".to_string())?
+            .parser_tx
+            .clone()
+    };
+    // The parser thread applies the scroll and re-emits a frame, so the
+    // connected WebSocket client renders the scrolled view.
+    let _ = parser_tx.send(TerminalParserEvent::Scroll(delta));
+    Ok(())
 }
 
 fn kill_terminal_session(state: &TerminalState, id: &str) -> Result<(), String> {
@@ -2184,29 +2213,58 @@ fn git_files(root: &Path) -> Result<Vec<TreeFile>, String> {
     Ok(files)
 }
 
-fn git_project_state_fingerprint(root: &Path) -> Result<(String, String, String), String> {
+fn git_project_state_fingerprint(root: &Path) -> Result<(String, String, String, String), String> {
     let status = git(
         root,
         &[
             "status",
-            "--porcelain=v1",
+            "--porcelain=v2",
             "-z",
             "-uall",
             "--renames",
             "--branch",
         ],
     )?;
-    let head = git(root, &["rev-parse", "--verify", "HEAD"]).unwrap_or_default();
+    let (head, summary, file_status) = split_status_v2_fingerprint_inputs(&status);
     let head_fingerprint = stable_text_fingerprint(&head);
-    let status_fingerprint = stable_text_fingerprint(&status);
+    let summary_fingerprint = stable_text_fingerprint(&summary);
+    let status_fingerprint = stable_text_fingerprint(&file_status);
     Ok((
-        format!("{head_fingerprint}:{status_fingerprint}"),
+        format!("{head_fingerprint}:{summary_fingerprint}:{status_fingerprint}"),
         head_fingerprint,
+        summary_fingerprint,
         status_fingerprint,
     ))
 }
 
-fn plain_project_state_fingerprint(root: &Path) -> Result<(String, String, String), String> {
+fn split_status_v2_fingerprint_inputs(status: &str) -> (String, String, String) {
+    let mut head = String::new();
+    let mut summary = String::new();
+    let mut file_status = String::with_capacity(status.len());
+
+    for entry in status.split('\0') {
+        if entry.is_empty() {
+            continue;
+        }
+        if let Some(oid) = entry.strip_prefix("# branch.oid ") {
+            head = oid.to_string();
+            continue;
+        }
+        if entry.starts_with("# branch.") {
+            summary.push_str(entry);
+            summary.push('\0');
+            continue;
+        }
+        file_status.push_str(entry);
+        file_status.push('\0');
+    }
+
+    (head, summary, file_status)
+}
+
+fn plain_project_state_fingerprint(
+    root: &Path,
+) -> Result<(String, String, String, String), String> {
     let metadata = fs::metadata(root)
         .map_err(|error| format!("Failed to read project folder metadata: {error}"))?;
     let modified = metadata
@@ -2219,6 +2277,7 @@ fn plain_project_state_fingerprint(root: &Path) -> Result<(String, String, Strin
         stable_text_fingerprint(&format!("{}:{modified}", root.to_string_lossy()));
     Ok((
         format!("plain:{status_fingerprint}"),
+        String::new(),
         String::new(),
         status_fingerprint,
     ))
@@ -5353,6 +5412,25 @@ mod tests {
         );
 
         fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn status_v2_fingerprint_inputs_separate_head_summary_and_status() {
+        let status = [
+            "# branch.oid abc123",
+            "# branch.head main",
+            "# branch.ab +0 -0",
+            "1 .M N... file.txt",
+        ]
+        .join("\0");
+        let (head, summary, file_status) = split_status_v2_fingerprint_inputs(&status);
+
+        assert_eq!(head, "abc123");
+        assert!(!summary.contains("branch.oid"));
+        assert!(summary.contains("# branch.head main"));
+        assert!(summary.contains("# branch.ab +0 -0"));
+        assert!(!file_status.contains("branch."));
+        assert!(file_status.contains("1 .M N... file.txt"));
     }
 
     #[test]

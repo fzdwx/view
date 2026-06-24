@@ -29,7 +29,6 @@ export function FragmentWithSplitter({
           axis={dock === "bottom" ? "x" : "y"}
           className={`git-panel-splitter-${index + 1}`}
           label="Resize Git panel"
-          liveResize={false}
           onResize={index === 0 ? onResizeFirst : onResizeSecond}
           onResizeEnd={index === 0 ? onResizeFirstEnd : onResizeSecondEnd}
         />

@@ -4,11 +4,9 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { usePanelResizeDeferredValue } from "../../hooks/usePanelResizeDeferredValue";
 import { buildCommitGraph } from "../../lib/commitGraph";
 import {
-  panelResizeEndEvent,
-  runAfterPanelResizeIdle,
-  type PanelResizeIdleTaskHandle,
-} from "../../lib/panelResizeInteraction";
-import { measureElementUnlessPanelResizing } from "../../lib/virtualizerMeasurement";
+  measureElementByEstimate,
+  observeElementRectDuringPanelResize,
+} from "../../lib/virtualizerMeasurement";
 import { getCommitGraphWidth } from "./CommitGraph";
 import { CommitListView } from "./CommitListView";
 import { HistoryEmptyView, HistoryLoadingView } from "./CommitListStateViews";
@@ -74,7 +72,8 @@ export const VirtualCommitList = memo(function VirtualCommitList({
     directDomUpdatesMode: "transform",
     estimateSize: () => COMMIT_ROW_ESTIMATE,
     getItemKey: (index) => graphRows[index]?.commit.hash ?? index,
-    measureElement: measureElementUnlessPanelResizing,
+    measureElement: measureElementByEstimate,
+    observeElementRect: observeElementRectDuringPanelResize,
     overscan: 18,
     useAnimationFrameWithResizeObserver: true,
   });
@@ -86,30 +85,12 @@ export const VirtualCommitList = memo(function VirtualCommitList({
     estimateSize: () => REFLOG_ROW_ESTIMATE,
     getItemKey: (index) =>
       `${deferredReflogEntries[index]?.selector ?? index}:${deferredReflogEntries[index]?.hash ?? ""}`,
-    measureElement: measureElementUnlessPanelResizing,
+    measureElement: measureElementByEstimate,
+    observeElementRect: observeElementRectDuringPanelResize,
     overscan: 14,
     useAnimationFrameWithResizeObserver: true,
   });
 
-  useEffect(() => {
-    let pendingMeasureHandle: PanelResizeIdleTaskHandle | null = null;
-    const measureAfterPanelResize = () => {
-      pendingMeasureHandle?.cancel();
-      pendingMeasureHandle = runAfterPanelResizeIdle(
-        () => {
-          pendingMeasureHandle = null;
-          commitVirtualizer.measure();
-          reflogVirtualizer.measure();
-        },
-        { idleTimeoutMs: 500, timeoutMs: 16 },
-      );
-    };
-    window.addEventListener(panelResizeEndEvent, measureAfterPanelResize);
-    return () => {
-      pendingMeasureHandle?.cancel();
-      window.removeEventListener(panelResizeEndEvent, measureAfterPanelResize);
-    };
-  }, [commitVirtualizer, reflogVirtualizer]);
   const activeFilter = isReflogMode ? reflogFilter : filter;
   const activeLoading = isReflogMode ? reflogLoading : loading;
   const activeCommitIndex = useMemo(

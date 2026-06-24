@@ -8,6 +8,7 @@ import {
 } from "../lib/panelResizeInteraction";
 
 type RefetchRepositoryData = () => Promise<unknown>;
+const REMOTE_REFETCH_AFTER_RESIZE_DELAY_MS = 420;
 
 export interface UseRepositoryRemotePollingOptions {
   readonly activeProjectPath: string | null;
@@ -33,6 +34,7 @@ export function useRepositoryRemotePolling({
 
     let pendingResizeRefresh = false;
     let scheduledRefetch: PanelResizeIdleTaskHandle | null = null;
+    let scheduledRemoteFetch: PanelResizeIdleTaskHandle | null = null;
     const scheduleRepositoryRefetch = () => {
       scheduledRefetch?.cancel();
       scheduledRefetch = runAfterPanelResizeIdle(
@@ -44,7 +46,11 @@ export function useRepositoryRemotePolling({
             refetchProjectFiles(),
           ]).catch(reportRemoteRefreshError);
         },
-        { idleTimeoutMs: 1_000, timeoutMs: 80 },
+        {
+          delayMs: REMOTE_REFETCH_AFTER_RESIZE_DELAY_MS,
+          idleTimeoutMs: 1_000,
+          timeoutMs: 80,
+        },
       );
     };
     const refreshRemoteRefs = async () => {
@@ -71,7 +77,18 @@ export function useRepositoryRemotePolling({
         return;
       }
       pendingResizeRefresh = false;
-      void refreshRemoteRefs();
+      scheduledRemoteFetch?.cancel();
+      scheduledRemoteFetch = runAfterPanelResizeIdle(
+        () => {
+          scheduledRemoteFetch = null;
+          void refreshRemoteRefs();
+        },
+        {
+          delayMs: REMOTE_REFETCH_AFTER_RESIZE_DELAY_MS,
+          idleTimeoutMs: 1_000,
+          timeoutMs: 80,
+        },
+      );
     };
 
     const timer = window.setInterval(() => {
@@ -80,6 +97,7 @@ export function useRepositoryRemotePolling({
     window.addEventListener(panelResizeEndEvent, refreshAfterPanelResize);
 
     return () => {
+      scheduledRemoteFetch?.cancel();
       scheduledRefetch?.cancel();
       window.clearInterval(timer);
       window.removeEventListener(panelResizeEndEvent, refreshAfterPanelResize);

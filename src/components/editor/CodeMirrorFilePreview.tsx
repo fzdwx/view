@@ -61,6 +61,8 @@ import {
 } from "./MergeConflictEditor";
 import { CodeMirrorView } from "./CodeMirrorView";
 
+const EDITOR_METRICS_AFTER_RESIZE_DELAY_MS = 80;
+
 // CodeMirrorFilePreview bundles an editor + find/replace + git markers;
 // splitting it is a separate, behavior-sensitive refactor tracked elsewhere.
 /* oxlint-disable react-doctor/no-giant-component, react-doctor/prefer-useReducer */
@@ -382,7 +384,11 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
           pendingMetricsSync = null;
           syncEditorMetricsEvent();
         },
-        { idleTimeoutMs: 500, timeoutMs: 32 },
+        {
+          delayMs: EDITOR_METRICS_AFTER_RESIZE_DELAY_MS,
+          idleTimeoutMs: 500,
+          timeoutMs: 32,
+        },
       );
     };
     syncMetricsUnlessPanelResizing();

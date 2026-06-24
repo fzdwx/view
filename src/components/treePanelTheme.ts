@@ -47,6 +47,10 @@ export const treeContentAlignmentCss = `
     -moz-osx-font-smoothing: auto;
   }
 
+  :host([data-view-panel-resizing='true']) [data-file-tree-sticky-overlay] {
+    display: none !important;
+  }
+
   [data-type='item'] {
     cursor: default;
     line-height: 1.2;

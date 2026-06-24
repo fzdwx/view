@@ -138,7 +138,7 @@ function flushDeferredResizeLogs(): void {
   deferredResizeLogs = [];
   deferredResizeLogOverflow = 0;
 
-  window.setTimeout(() => {
+  scheduleDeferredResizeLogFlush(() => {
     for (const log of logs) {
       writePerfLog(
         `deferred:${log.label}`,
@@ -158,7 +158,22 @@ function flushDeferredResizeLogs(): void {
         slowThresholdMs,
       );
     }
-  }, 0);
+  });
+}
+
+function scheduleDeferredResizeLogFlush(callback: () => void): void {
+  const runWhenIdle = () => {
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(callback, { timeout: 1_000 });
+      return;
+    }
+
+    window.setTimeout(callback, 180);
+  };
+
+  window.requestAnimationFrame(() => {
+    window.setTimeout(runWhenIdle, 180);
+  });
 }
 
 function resolvePerfFields(fields: PerfLogFieldSource | undefined): PerfLogFields | undefined {

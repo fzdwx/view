@@ -9,11 +9,13 @@ import {
   isPanelResizeInProgress,
   panelResizeEndEvent,
   runAfterPanelResizeIdle,
+  type PanelResizeIdleTaskHandle,
 } from "../lib/panelResizeInteraction";
 import { logPerf } from "../lib/performanceLog";
 
-const PROJECT_STATE_POLL_INTERVAL_MS = 2500;
+const PROJECT_STATE_POLL_INTERVAL_MS = 5000;
 const PROJECT_STATE_POLL_WARN_MS = 100;
+const BACKGROUND_INVALIDATION_AFTER_RESIZE_DELAY_MS = 320;
 
 type ProjectStatePollSource = "focus" | "initial" | "interval";
 
@@ -37,6 +39,7 @@ export function useProjectFilesystemPolling({
     let refreshInFlight = false;
     let lastFingerprint: ProjectStateFingerprint | null = null;
     let pendingResizeRefresh: ProjectStatePollSource | null = null;
+    let pendingResizeRefreshHandle: PanelResizeIdleTaskHandle | null = null;
 
     function refresh(source: ProjectStatePollSource): void {
       if (isPanelResizeInProgress()) {
@@ -83,7 +86,18 @@ export function useProjectFilesystemPolling({
       }
       const source = pendingResizeRefresh;
       pendingResizeRefresh = null;
-      refresh(source);
+      pendingResizeRefreshHandle?.cancel();
+      pendingResizeRefreshHandle = runAfterPanelResizeIdle(
+        () => {
+          pendingResizeRefreshHandle = null;
+          refresh(source);
+        },
+        {
+          delayMs: BACKGROUND_INVALIDATION_AFTER_RESIZE_DELAY_MS,
+          idleTimeoutMs: 1_000,
+          timeoutMs: 80,
+        },
+      );
     };
     refresh("initial");
     window.addEventListener("focus", refreshFromFocus);
@@ -94,6 +108,7 @@ export function useProjectFilesystemPolling({
     );
 
     return () => {
+      pendingResizeRefreshHandle?.cancel();
       window.clearInterval(pollingTimer);
       window.removeEventListener("focus", refreshFromFocus);
       window.removeEventListener(panelResizeEndEvent, refreshAfterPanelResize);
@@ -114,6 +129,9 @@ async function refreshProjectStateQueries(
   const startedAt = performance.now();
   const nextFingerprint = await getProjectStateFingerprint(projectPath);
   const durationMs = performance.now() - startedAt;
+  let headChanged = true;
+  let summaryChanged = true;
+  let statusChanged = true;
   if (lastFingerprintRef) {
     const previousFingerprint = lastFingerprintRef.current;
     if (previousFingerprint?.fingerprint === nextFingerprint.fingerprint) {
@@ -144,6 +162,13 @@ async function refreshProjectStateQueries(
       );
       return "deferred-panel-resize";
     }
+    headChanged =
+      previousFingerprint.headFingerprint !== nextFingerprint.headFingerprint;
+    summaryChanged =
+      previousFingerprint.summaryFingerprint !==
+      nextFingerprint.summaryFingerprint;
+    statusChanged =
+      previousFingerprint.statusFingerprint !== nextFingerprint.statusFingerprint;
     lastFingerprintRef.set(nextFingerprint);
     logPerf(
       "poll:project-state",
@@ -151,22 +176,30 @@ async function refreshProjectStateQueries(
       {
         source,
         result: "changed",
-        headChanged:
-          previousFingerprint.headFingerprint !== nextFingerprint.headFingerprint,
-        statusChanged:
-          previousFingerprint.statusFingerprint !== nextFingerprint.statusFingerprint,
+        headChanged,
+        summaryChanged,
+        statusChanged,
         activeCommit: Boolean(activeCommit),
       },
       { slowThresholdMs: PROJECT_STATE_POLL_WARN_MS },
     );
   }
 
-  const invalidations: Array<() => Promise<unknown>> = [
-    () => queryClient.invalidateQueries({ queryKey: ["repository", projectPath] }),
-    () => queryClient.invalidateQueries({ queryKey: ["project-files", projectPath] }),
-  ];
+  const invalidations: Array<() => Promise<unknown>> = [];
 
-  if (!activeCommit) {
+  if (headChanged || summaryChanged) {
+    invalidations.push(
+      () => queryClient.invalidateQueries({ queryKey: ["repository", projectPath] }),
+    );
+  }
+
+  if (headChanged || statusChanged) {
+    invalidations.push(
+      () => queryClient.invalidateQueries({ queryKey: ["project-files", projectPath] }),
+    );
+  }
+
+  if (!activeCommit && (headChanged || statusChanged)) {
     invalidations.push(
       () => queryClient.invalidateQueries({
         queryKey: ["changed-files", projectPath, null],
@@ -174,7 +207,9 @@ async function refreshProjectStateQueries(
     );
   }
 
-  await runBackgroundInvalidationsAfterResizeIdle(invalidations);
+  if (invalidations.length > 0) {
+    await runBackgroundInvalidationsAfterResizeIdle(invalidations);
+  }
   return "applied";
 }
 
@@ -189,7 +224,11 @@ function runBackgroundInvalidationsAfterResizeIdle(
           (error: unknown) => reject(error),
         );
       },
-      { idleTimeoutMs: 1_000, timeoutMs: 80 },
+      {
+        delayMs: BACKGROUND_INVALIDATION_AFTER_RESIZE_DELAY_MS,
+        idleTimeoutMs: 1_000,
+        timeoutMs: 80,
+      },
     );
   });
 }
