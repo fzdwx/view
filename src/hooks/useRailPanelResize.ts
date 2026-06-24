@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 import type { RefObject } from "react";
 import {
   railBottomInnerPanelMaxForElement,
@@ -61,6 +61,26 @@ export function useRailPanelResize({
   commitRailPanelResize,
   resizePanel,
 }: RailPanelResizeOptions): RailPanelResizeHandlers {
+  const resizeMaxCacheRef = useRef<Partial<Record<RailPanelSizeKey, number>>>({});
+
+  const cachedResizeMax = useCallback(
+    (key: RailPanelSizeKey, calculate: () => number) => {
+      const cached = resizeMaxCacheRef.current[key];
+      if (typeof cached === "number") {
+        return cached;
+      }
+
+      const next = calculate();
+      resizeMaxCacheRef.current[key] = next;
+      return next;
+    },
+    [],
+  );
+
+  const clearCachedResizeMax = useCallback((key: RailPanelSizeKey) => {
+    delete resizeMaxCacheRef.current[key];
+  }, []);
+
   useLayoutEffect(() => {
     const element = contentGridRef.current;
     if (!element) {
@@ -134,13 +154,21 @@ export function useRailPanelResize({
         "leftTop",
         delta,
         railSidePanelMin,
-        railSidePanelMaxForElement(contentGridRef.current, {
-          hasOppositePanel: hasRightTopPanel,
-          oppositePanelWidth: panelSizesRef.current.rightTop,
-        }),
+        cachedResizeMax("leftTop", () =>
+          railSidePanelMaxForElement(contentGridRef.current, {
+            hasOppositePanel: hasRightTopPanel,
+            oppositePanelWidth: panelSizesRef.current.rightTop,
+          }),
+        ),
       );
     },
-    [contentGridRef, hasRightTopPanel, panelSizesRef, previewRailPanelResize],
+    [
+      cachedResizeMax,
+      contentGridRef,
+      hasRightTopPanel,
+      panelSizesRef,
+      previewRailPanelResize,
+    ],
   );
 
   const handleResizeLeftTopEnd = useCallback(
@@ -149,13 +177,23 @@ export function useRailPanelResize({
         "leftTop",
         delta,
         railSidePanelMin,
-        railSidePanelMaxForElement(contentGridRef.current, {
-          hasOppositePanel: hasRightTopPanel,
-          oppositePanelWidth: panelSizesRef.current.rightTop,
-        }),
+        cachedResizeMax("leftTop", () =>
+          railSidePanelMaxForElement(contentGridRef.current, {
+            hasOppositePanel: hasRightTopPanel,
+            oppositePanelWidth: panelSizesRef.current.rightTop,
+          }),
+        ),
       );
+      clearCachedResizeMax("leftTop");
     },
-    [commitRailPanelResize, contentGridRef, hasRightTopPanel, panelSizesRef],
+    [
+      cachedResizeMax,
+      clearCachedResizeMax,
+      commitRailPanelResize,
+      contentGridRef,
+      hasRightTopPanel,
+      panelSizesRef,
+    ],
   );
 
   const handleResizeRightTop = useCallback(
@@ -164,13 +202,21 @@ export function useRailPanelResize({
         "rightTop",
         -delta,
         railSidePanelMin,
-        railSidePanelMaxForElement(contentGridRef.current, {
-          hasOppositePanel: hasLeftTopPanel,
-          oppositePanelWidth: panelSizesRef.current.leftTop,
-        }),
+        cachedResizeMax("rightTop", () =>
+          railSidePanelMaxForElement(contentGridRef.current, {
+            hasOppositePanel: hasLeftTopPanel,
+            oppositePanelWidth: panelSizesRef.current.leftTop,
+          }),
+        ),
       );
     },
-    [contentGridRef, hasLeftTopPanel, panelSizesRef, previewRailPanelResize],
+    [
+      cachedResizeMax,
+      contentGridRef,
+      hasLeftTopPanel,
+      panelSizesRef,
+      previewRailPanelResize,
+    ],
   );
 
   const handleResizeRightTopEnd = useCallback(
@@ -179,13 +225,23 @@ export function useRailPanelResize({
         "rightTop",
         -delta,
         railSidePanelMin,
-        railSidePanelMaxForElement(contentGridRef.current, {
-          hasOppositePanel: hasLeftTopPanel,
-          oppositePanelWidth: panelSizesRef.current.leftTop,
-        }),
+        cachedResizeMax("rightTop", () =>
+          railSidePanelMaxForElement(contentGridRef.current, {
+            hasOppositePanel: hasLeftTopPanel,
+            oppositePanelWidth: panelSizesRef.current.leftTop,
+          }),
+        ),
       );
+      clearCachedResizeMax("rightTop");
     },
-    [commitRailPanelResize, contentGridRef, hasLeftTopPanel, panelSizesRef],
+    [
+      cachedResizeMax,
+      clearCachedResizeMax,
+      commitRailPanelResize,
+      contentGridRef,
+      hasLeftTopPanel,
+      panelSizesRef,
+    ],
   );
 
   const handleResizeBottom = useCallback(
@@ -194,10 +250,12 @@ export function useRailPanelResize({
         "bottom",
         -delta,
         railBottomPanelMin,
-        railBottomPanelMaxForElement(contentGridRef.current),
+        cachedResizeMax("bottom", () =>
+          railBottomPanelMaxForElement(contentGridRef.current),
+        ),
       );
     },
-    [contentGridRef, previewRailPanelResize],
+    [cachedResizeMax, contentGridRef, previewRailPanelResize],
   );
 
   const handleResizeBottomEnd = useCallback(
@@ -206,10 +264,13 @@ export function useRailPanelResize({
         "bottom",
         -delta,
         railBottomPanelMin,
-        railBottomPanelMaxForElement(contentGridRef.current),
+        cachedResizeMax("bottom", () =>
+          railBottomPanelMaxForElement(contentGridRef.current),
+        ),
       );
+      clearCachedResizeMax("bottom");
     },
-    [commitRailPanelResize, contentGridRef],
+    [cachedResizeMax, clearCachedResizeMax, commitRailPanelResize, contentGridRef],
   );
 
   const handleResizeBottomLeft = useCallback(
@@ -218,10 +279,12 @@ export function useRailPanelResize({
         "bottomLeft",
         delta,
         railBottomInnerPanelMin,
-        railBottomInnerPanelMaxForElement(contentGridRef.current),
+        cachedResizeMax("bottomLeft", () =>
+          railBottomInnerPanelMaxForElement(contentGridRef.current),
+        ),
       );
     },
-    [contentGridRef, previewRailPanelResize],
+    [cachedResizeMax, contentGridRef, previewRailPanelResize],
   );
 
   const handleResizeBottomLeftEnd = useCallback(
@@ -230,10 +293,13 @@ export function useRailPanelResize({
         "bottomLeft",
         delta,
         railBottomInnerPanelMin,
-        railBottomInnerPanelMaxForElement(contentGridRef.current),
+        cachedResizeMax("bottomLeft", () =>
+          railBottomInnerPanelMaxForElement(contentGridRef.current),
+        ),
       );
+      clearCachedResizeMax("bottomLeft");
     },
-    [commitRailPanelResize, contentGridRef],
+    [cachedResizeMax, clearCachedResizeMax, commitRailPanelResize, contentGridRef],
   );
 
   return {

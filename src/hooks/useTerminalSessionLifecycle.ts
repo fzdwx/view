@@ -32,6 +32,10 @@ import {
   sizeFromElement,
 } from "../lib/terminalViewport";
 import { settingsChangedEvent } from "../lib/settings";
+import {
+  isPanelResizeInProgress,
+  panelResizeEndEvent,
+} from "../lib/panelResizeInteraction";
 
 type MutableRef<T> = {
   current: T;
@@ -104,6 +108,7 @@ export function useTerminalSessionLifecycle(options: TerminalSessionLifecycleOpt
     let resizeDebounceTimer: number | null = null;
     let resizeInFlight = false;
     let pendingResize: { readonly cols: number; readonly rows: number } | null = null;
+    let resizeAfterPanelDrag = false;
     const sendResize = (sessionId: string, size: { readonly cols: number; readonly rows: number }) => {
       if (resizeInFlight) {
         pendingResize = size;
@@ -159,9 +164,20 @@ export function useTerminalSessionLifecycle(options: TerminalSessionLifecycleOpt
       }
     };
     const scheduleResize = () => {
+      if (isPanelResizeInProgress()) {
+        resizeAfterPanelDrag = true;
+        return;
+      }
       if (options.resizeFrameRef.current == null) {
         options.resizeFrameRef.current = window.requestAnimationFrame(resizeNow);
       }
+    };
+    const flushResizeAfterPanelDrag = () => {
+      if (!resizeAfterPanelDrag) {
+        return;
+      }
+      resizeAfterPanelDrag = false;
+      scheduleResize();
     };
     const detachHandlers = attachTerminalScreenHandlers({
       cellMetricsRef: options.cellMetricsRef,
@@ -175,6 +191,7 @@ export function useTerminalSessionLifecycle(options: TerminalSessionLifecycleOpt
     });
     const resizeObserver = new ResizeObserver(scheduleResize);
     window.addEventListener(settingsChangedEvent, scheduleResize);
+    window.addEventListener(panelResizeEndEvent, flushResizeAfterPanelDrag);
     resizeObserver.observe(terminalElement);
 
     const start = async () => {
@@ -230,6 +247,7 @@ export function useTerminalSessionLifecycle(options: TerminalSessionLifecycleOpt
       disposed = true;
       detachHandlers();
       window.removeEventListener(settingsChangedEvent, scheduleResize);
+      window.removeEventListener(panelResizeEndEvent, flushResizeAfterPanelDrag);
       resizeObserver.disconnect();
       closeTerminalSocket(options.socketRef);
       options.sessionIdRef.current = null;

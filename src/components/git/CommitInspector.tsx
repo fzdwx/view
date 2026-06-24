@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useLayoutEffect, useMemo, useRef } from "react";
 import { GitBranch, RotateCcw } from "lucide-react";
 import type { CommitInfo, ReflogEntry, RepositoryPayload } from "../../lib/api";
 import { formatDate } from "../../lib/dateFormat";
@@ -41,47 +41,59 @@ export function CommitInspector({
   onResizeDetails(delta: number): void;
   onSelectPath(path: string): void;
 }) {
-  const [draftDetail, setDraftDetail] = useState<{
-    forDetail: number;
-    value: number;
-  } | null>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
+  const draftDetailRef = useRef<number | null>(null);
   const isHorizontal = orientation === "horizontal";
-  const effectiveDetailHeight =
-    draftDetail?.forDetail === detailHeight ? draftDetail.value : detailHeight;
   const panelStyle = useMemo(
     () =>
       isHorizontal
-        ? { gridTemplateColumns: `minmax(0, 1fr) 6px ${effectiveDetailHeight}px` }
-        : { gridTemplateRows: `minmax(0, 1fr) 6px ${effectiveDetailHeight}px` },
-    [effectiveDetailHeight, isHorizontal],
+        ? { gridTemplateColumns: commitInspectorGridTemplate(detailHeight) }
+        : { gridTemplateRows: commitInspectorGridTemplate(detailHeight) },
+    [detailHeight, isHorizontal],
   );
+
+  useLayoutEffect(() => {
+    draftDetailRef.current = null;
+    applyCommitInspectorSize(panelRef.current, isHorizontal, detailHeight);
+  }, [detailHeight, isHorizontal]);
+
   const handleResizePreview = useCallback(
     (delta: number) => {
-      setDraftDetail((current) => {
-        const base =
-          current?.forDetail === detailHeight ? current.value : detailHeight;
-        return {
-          forDetail: detailHeight,
-          value: clamp(base + delta, minCommitDetailHeight, maxCommitDetailHeight),
-        };
-      });
-    },
-    [detailHeight],
-  );
-  const handleResizeCommit = useCallback(
-    (totalDelta: number) => {
-      if (totalDelta === 0) {
+      const base = draftDetailRef.current ?? detailHeight;
+      const next = clamp(
+        base + delta,
+        minCommitDetailHeight,
+        maxCommitDetailHeight,
+      );
+      if (next === base) {
         return;
       }
 
-      onResizeDetails(totalDelta);
-      setDraftDetail(null);
+      draftDetailRef.current = next;
+      applyCommitInspectorSize(panelRef.current, isHorizontal, next);
     },
-    [onResizeDetails],
+    [detailHeight, isHorizontal],
+  );
+  const handleResizeCommit = useCallback(
+    () => {
+      const next = draftDetailRef.current;
+      draftDetailRef.current = null;
+      if (next == null) {
+        return;
+      }
+
+      const delta = next - detailHeight;
+      applyCommitInspectorSize(panelRef.current, isHorizontal, next);
+      if (delta !== 0) {
+        onResizeDetails(delta);
+      }
+    },
+    [detailHeight, isHorizontal, onResizeDetails],
   );
 
   return (
     <aside
+      ref={panelRef}
       className={`commit-detail-panel${isHorizontal ? " commit-detail-panel-horizontal" : ""}`}
       style={panelStyle}
     >
@@ -117,6 +129,30 @@ export function CommitInspector({
       />
     </aside>
   );
+}
+
+function commitInspectorGridTemplate(size: number): string {
+  return `minmax(0, 1fr) 6px ${size}px`;
+}
+
+function applyCommitInspectorSize(
+  element: HTMLElement | null,
+  isHorizontal: boolean,
+  size: number,
+): void {
+  if (!element) {
+    return;
+  }
+
+  const template = commitInspectorGridTemplate(size);
+  if (isHorizontal) {
+    element.style.gridTemplateColumns = template;
+    element.style.gridTemplateRows = "";
+    return;
+  }
+
+  element.style.gridTemplateRows = template;
+  element.style.gridTemplateColumns = "";
 }
 
 const CommitDetails = memo(function CommitDetails({

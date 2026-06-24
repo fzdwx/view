@@ -2,6 +2,10 @@ import type {
   KeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
+import {
+  dispatchPanelResizeEnd,
+  dispatchPanelResizeStart,
+} from "../lib/panelResizeInteraction";
 
 export function ResizeHandle({
   axis,
@@ -26,6 +30,7 @@ export function ResizeHandle({
     document.body.classList.add(
       axis === "x" ? "is-resizing-x" : "is-resizing-y",
     );
+    dispatchPanelResizeStart();
 
     function flushPendingDelta() {
       if (pendingDelta === 0) {
@@ -71,6 +76,7 @@ export function ResizeHandle({
         onResizeEnd?.(totalDelta);
       }
       document.body.classList.remove("is-resizing-x", "is-resizing-y");
+      dispatchPanelResizeEnd();
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", stopResize);
       window.removeEventListener("pointercancel", stopResize);
