@@ -32,4 +32,19 @@ describe("terminalRunStyle", () => {
     expect(style.backgroundColor).toBe("#00ced1");
     expect(style.opacity).toBeUndefined();
   });
+
+  test("does not synthesize bold font weight in fixed terminal cells", () => {
+    const style = terminalRunStyle({
+      fg: "#88e0a1",
+      bg: null,
+      bold: true,
+      dim: false,
+      italic: false,
+      underline: false,
+      inverse: false,
+    });
+
+    expect(style.color).toBe("#88e0a1");
+    expect(style.fontWeight).toBeUndefined();
+  });
 });

@@ -23,7 +23,8 @@ export function terminalRunStyle(run: TerminalRunStyleInput): TerminalRunStyle {
     "--terminal-run-fg": visibleForeground,
     color: run.inverse ? background : (run.fg ?? undefined),
     backgroundColor: run.inverse ? foreground : (run.bg ?? undefined),
-    fontWeight: run.bold ? 760 : undefined,
+    // The backend maps ANSI bold colors to bright colors. Avoid synthetic CSS
+    // bold here because terminal runs are clipped to exact cell widths.
     fontStyle: run.italic ? "italic" : undefined,
     textDecoration: run.underline ? "underline" : undefined,
   };

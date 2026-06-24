@@ -171,6 +171,14 @@ function simpleTerminalTextColumns(text: string): number | null {
   return SIMPLE_TERMINAL_TEXT_PATTERN.test(text) ? text.length : null;
 }
 
+function terminalRunGraphemes(text: string, simpleColumns: number | null): string[] {
+  if (simpleColumns != null) {
+    return Array.from(text || " ");
+  }
+
+  return splitTerminalGraphemes(text);
+}
+
 function terminalCellStyle(columns: number): CSSProperties | undefined {
   return columns === 1
     ? undefined
@@ -305,8 +313,8 @@ function renderRunWithCursor(
 ) {
   const text = run.text || " ";
   const simpleColumns = simpleTerminalTextColumns(text);
-  const textColumns =
-    simpleColumns ?? terminalTextColumns(splitTerminalGraphemes(text));
+  const graphemes = terminalRunGraphemes(text, simpleColumns);
+  const textColumns = simpleColumns ?? terminalTextColumns(graphemes);
   const cursorInRun =
     frame.cursorVisible &&
     frame.cursorRow === row &&
@@ -316,11 +324,6 @@ function renderRunWithCursor(
   const key = `${startCol}-${text.length}`;
 
   if (!cursorInRun) {
-    if (simpleColumns != null) {
-      return renderTerminalRunContainer(run, key, style, textColumns, text);
-    }
-
-    const graphemes = splitTerminalGraphemes(text);
     return renderTerminalRunContainer(
       run,
       key,
@@ -335,7 +338,6 @@ function renderRunWithCursor(
     );
   }
 
-  const graphemes = splitTerminalGraphemes(text);
   const cursorIndex = terminalCursorGraphemeIndex(graphemes, frame.cursorCol - startCol);
 
   return renderTerminalRunContainer(
