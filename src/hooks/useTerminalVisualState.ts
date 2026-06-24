@@ -3,6 +3,7 @@ import type { RefObject } from "react";
 import {
   isPanelResizeInProgress,
   panelResizeEndEvent,
+  runAfterPanelResizeIdle,
 } from "../lib/panelResizeInteraction";
 import { logPerf } from "../lib/performanceLog";
 import { terminalFramePerfFields } from "../lib/terminalPerf";
@@ -155,10 +156,22 @@ export function useTerminalVisualState(): TerminalVisualState {
   }, [setFrameState]);
 
   useEffect(() => {
-    const handlePanelResizeEnd = () => flushPendingFrame();
+    let pendingFlushHandle: ReturnType<typeof runAfterPanelResizeIdle> | null = null;
+    const handlePanelResizeEnd = () => {
+      pendingFlushHandle?.cancel();
+      pendingFlushHandle = runAfterPanelResizeIdle(
+        () => {
+          pendingFlushHandle = null;
+          flushPendingFrame();
+        },
+        { idleTimeoutMs: 250, timeoutMs: 16 },
+      );
+    };
     window.addEventListener(panelResizeEndEvent, handlePanelResizeEnd);
-    return () =>
+    return () => {
+      pendingFlushHandle?.cancel();
       window.removeEventListener(panelResizeEndEvent, handlePanelResizeEnd);
+    };
   }, [flushPendingFrame]);
 
   const queueFrame = useCallback(

@@ -6,6 +6,11 @@ import {
 } from "../lib/workbenchLayout";
 import { terminalWorkspaceEmptyEvent } from "../lib/terminalSessions";
 import { terminalPanelEmptyEvent } from "../lib/terminalTabPlacement";
+import {
+  isPanelResizeInProgress,
+  runAfterPanelResizeIdle,
+  type PanelResizeIdleTaskHandle,
+} from "../lib/panelResizeInteraction";
 import { useWorkbenchDockDrag } from "./useWorkbenchDockDrag";
 import type {
   GitPanelId,
@@ -74,6 +79,8 @@ export function useWorkbenchDock(): WorkbenchDockController {
     startRailItemDrag,
   } = useWorkbenchDockDrag();
   const layoutSaveTimerRef = useRef<number | null>(null);
+  const pendingPanelSizeCommitRef = useRef<PanelResizeIdleTaskHandle | null>(null);
+  const latestPanelSizesRef = useRef(initialLayout.panelSizes);
   const latestLayoutRef = useRef({
     ...defaultWorkbenchLayout,
     gitPanelOrder: initialLayout.gitPanelOrder,
@@ -84,13 +91,17 @@ export function useWorkbenchDock(): WorkbenchDockController {
   });
 
   useEffect(() => {
+    latestPanelSizesRef.current = panelSizes;
+  }, [panelSizes]);
+
+  useEffect(() => {
     const nextLayout = {
       ...defaultWorkbenchLayout,
       gitPanelOrder,
       detachedGitPanels,
       railLayout,
       railActiveItems,
-      panelSizes,
+      panelSizes: latestPanelSizesRef.current,
     };
     latestLayoutRef.current = nextLayout;
 
@@ -117,6 +128,10 @@ export function useWorkbenchDock(): WorkbenchDockController {
     railActiveItems,
     railLayout,
   ]);
+
+  useEffect(() => {
+    return () => pendingPanelSizeCommitRef.current?.cancel();
+  }, []);
 
   useEffect(() => {
     function flushWorkbenchLayout() {
@@ -164,17 +179,52 @@ export function useWorkbenchDock(): WorkbenchDockController {
 
   const resizePanel = useCallback(
     (key: keyof PanelSizes, delta: number, min: number, max: number) => {
-      setPanelSizes((current: PanelSizes) => {
-        const nextSize = clamp(current[key] + delta, min, max);
-        if (nextSize === current[key]) {
-          return current;
-        }
+      const current = latestPanelSizesRef.current;
+      const nextSize = clamp(current[key] + delta, min, max);
+      if (nextSize === current[key]) {
+        return;
+      }
 
-        return {
-          ...current,
-          [key]: nextSize,
-        };
-      });
+      const nextPanelSizes = {
+        ...current,
+        [key]: nextSize,
+      };
+      latestPanelSizesRef.current = nextPanelSizes;
+      latestLayoutRef.current = {
+        ...latestLayoutRef.current,
+        panelSizes: nextPanelSizes,
+      };
+
+      const commitPanelSizes = () => {
+        setPanelSizes((currentPanelSizes: PanelSizes) => {
+          if (
+            currentPanelSizes.leftTop === nextPanelSizes.leftTop &&
+            currentPanelSizes.rightTop === nextPanelSizes.rightTop &&
+            currentPanelSizes.bottom === nextPanelSizes.bottom &&
+            currentPanelSizes.bottomLeft === nextPanelSizes.bottomLeft &&
+            currentPanelSizes.branch === nextPanelSizes.branch &&
+            currentPanelSizes.details === nextPanelSizes.details &&
+            currentPanelSizes.commitInfo === nextPanelSizes.commitInfo
+          ) {
+            return currentPanelSizes;
+          }
+          return nextPanelSizes;
+        });
+      };
+
+      pendingPanelSizeCommitRef.current?.cancel();
+      if (!isPanelResizeInProgress()) {
+        commitPanelSizes();
+        return;
+      }
+
+      pendingPanelSizeCommitRef.current = runAfterPanelResizeIdle(
+        () => {
+          pendingPanelSizeCommitRef.current = null;
+          commitPanelSizes();
+        },
+        { idleTimeoutMs: 500, timeoutMs: 16 },
+      );
     },
     [],
   );

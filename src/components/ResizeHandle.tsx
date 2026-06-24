@@ -6,7 +6,7 @@ import {
   dispatchPanelResizeEnd,
   dispatchPanelResizeStart,
 } from "../lib/panelResizeInteraction";
-import { logPerf } from "../lib/performanceLog";
+import { isPerfLogEnabled, logPerf } from "../lib/performanceLog";
 
 export function ResizeHandle({
   axis,
@@ -29,6 +29,13 @@ export function ResizeHandle({
     let resizeFrameStartedAt: number | null = null;
     let pendingDelta = 0;
     let totalDelta = 0;
+    const collectPerf = isPerfLogEnabled();
+    const resizeStats = {
+      frames: 0,
+      maxFlushMs: 0,
+      totalFlushMs: 0,
+      maxRafWaitMs: 0,
+    };
     document.body.classList.add(
       axis === "x" ? "is-resizing-x" : "is-resizing-y",
     );
@@ -40,21 +47,20 @@ export function ResizeHandle({
       }
       const delta = pendingDelta;
       pendingDelta = 0;
-      const startedAt = performance.now();
+      const startedAt = collectPerf ? performance.now() : 0;
       onResize(delta);
-      logPerf(
-        "resize:flush",
-        performance.now() - startedAt,
-        {
-          axis,
-          delta,
-          rafWaitMs:
-            resizeFrameStartedAt == null
-              ? null
-              : Math.round((startedAt - resizeFrameStartedAt) * 10) / 10,
-        },
-        { slowThresholdMs: 8 },
-      );
+      if (collectPerf) {
+        const flushMs = performance.now() - startedAt;
+        resizeStats.frames += 1;
+        resizeStats.maxFlushMs = Math.max(resizeStats.maxFlushMs, flushMs);
+        resizeStats.totalFlushMs += flushMs;
+        if (resizeFrameStartedAt != null) {
+          resizeStats.maxRafWaitMs = Math.max(
+            resizeStats.maxRafWaitMs,
+            startedAt - resizeFrameStartedAt,
+          );
+        }
+      }
       resizeFrameStartedAt = null;
     }
 
@@ -95,6 +101,22 @@ export function ResizeHandle({
       }
       document.body.classList.remove("is-resizing-x", "is-resizing-y");
       dispatchPanelResizeEnd();
+      if (collectPerf && resizeStats.frames > 0) {
+        logPerf(
+          "resize:session",
+          resizeStats.maxFlushMs,
+          {
+            axis,
+            frames: resizeStats.frames,
+            totalDelta,
+            avgFlushMs: Math.round(
+              (resizeStats.totalFlushMs / resizeStats.frames) * 10,
+            ) / 10,
+            maxRafWaitMs: Math.round(resizeStats.maxRafWaitMs * 10) / 10,
+          },
+          { slowThresholdMs: 8 },
+        );
+      }
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", stopResize);
       window.removeEventListener("pointercancel", stopResize);

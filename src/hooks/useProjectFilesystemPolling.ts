@@ -8,6 +8,7 @@ import {
 import {
   isPanelResizeInProgress,
   panelResizeEndEvent,
+  runAfterPanelResizeIdle,
 } from "../lib/panelResizeInteraction";
 import { logPerf } from "../lib/performanceLog";
 
@@ -160,19 +161,35 @@ async function refreshProjectStateQueries(
     );
   }
 
-  const queries: Promise<unknown>[] = [
-    queryClient.invalidateQueries({ queryKey: ["repository", projectPath] }),
-    queryClient.invalidateQueries({ queryKey: ["project-files", projectPath] }),
+  const invalidations: Array<() => Promise<unknown>> = [
+    () => queryClient.invalidateQueries({ queryKey: ["repository", projectPath] }),
+    () => queryClient.invalidateQueries({ queryKey: ["project-files", projectPath] }),
   ];
 
   if (!activeCommit) {
-    queries.push(
-      queryClient.invalidateQueries({
+    invalidations.push(
+      () => queryClient.invalidateQueries({
         queryKey: ["changed-files", projectPath, null],
       }),
     );
   }
 
-  await Promise.all(queries);
+  await runBackgroundInvalidationsAfterResizeIdle(invalidations);
   return "applied";
+}
+
+function runBackgroundInvalidationsAfterResizeIdle(
+  invalidations: readonly (() => Promise<unknown>)[],
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    runAfterPanelResizeIdle(
+      () => {
+        void Promise.all(invalidations.map((invalidate) => invalidate())).then(
+          () => resolve(),
+          (error: unknown) => reject(error),
+        );
+      },
+      { idleTimeoutMs: 1_000, timeoutMs: 80 },
+    );
+  });
 }

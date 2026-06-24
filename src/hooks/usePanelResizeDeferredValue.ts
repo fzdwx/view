@@ -2,6 +2,8 @@ import { useEffect, useReducer, useRef } from "react";
 import {
   isPanelResizeInProgress,
   panelResizeEndEvent,
+  runAfterPanelResizeIdle,
+  type PanelResizeIdleTaskHandle,
 } from "../lib/panelResizeInteraction";
 
 export function usePanelResizeDeferredValue<T>(value: T): T {
@@ -15,16 +17,26 @@ export function usePanelResizeDeferredValue<T>(value: T): T {
   }
 
   useEffect(() => {
+    let pendingApplyHandle: PanelResizeIdleTaskHandle | null = null;
     const applyLatestValue = () => {
-      if (Object.is(stableValueRef.current, latestValueRef.current)) {
-        return;
-      }
-      stableValueRef.current = latestValueRef.current;
-      forceRender();
+      pendingApplyHandle?.cancel();
+      pendingApplyHandle = runAfterPanelResizeIdle(
+        () => {
+          pendingApplyHandle = null;
+          if (Object.is(stableValueRef.current, latestValueRef.current)) {
+            return;
+          }
+          stableValueRef.current = latestValueRef.current;
+          forceRender();
+        },
+        { idleTimeoutMs: 500, timeoutMs: 16 },
+      );
     };
     window.addEventListener(panelResizeEndEvent, applyLatestValue);
-    return () =>
+    return () => {
+      pendingApplyHandle?.cancel();
       window.removeEventListener(panelResizeEndEvent, applyLatestValue);
+    };
   }, []);
 
   return isPanelResizeInProgress() ? stableValueRef.current : value;

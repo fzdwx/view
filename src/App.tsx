@@ -937,6 +937,10 @@ export function App() {
 
       applyRailPanelSizeVar(contentGridRef.current, key, nextSize);
       if (delta !== 0) {
+        panelSizesRef.current = {
+          ...panelSizesRef.current,
+          [key]: nextSize,
+        };
         resizePanel(key, delta, min, max);
       }
     },

@@ -20,21 +20,28 @@ interface DeferredPerfLogEntry {
 let deferredResizeLogs: DeferredPerfLogEntry[] = [];
 let deferredResizeLogOverflow = 0;
 let resizeLogFlushAttached = false;
+let cachedPerfLogEnabled: boolean | null = null;
 
 export function isPerfLogEnabled(): boolean {
   if (typeof window === "undefined") {
     return false;
   }
+  if (cachedPerfLogEnabled != null) {
+    return cachedPerfLogEnabled;
+  }
 
   const params = new URLSearchParams(window.location.search);
   if (params.get("perf") === "0") {
-    return false;
+    cachedPerfLogEnabled = false;
+    return cachedPerfLogEnabled;
   }
   if (params.get("perf") === "1") {
-    return true;
+    cachedPerfLogEnabled = true;
+    return cachedPerfLogEnabled;
   }
 
-  return window.localStorage.getItem(perfLogStorageKey) !== "0";
+  cachedPerfLogEnabled = window.localStorage.getItem(perfLogStorageKey) !== "0";
+  return cachedPerfLogEnabled;
 }
 
 export function timeSync<T>(
@@ -167,4 +174,12 @@ function isPanelResizeInProgress(): boolean {
     document.body.classList.contains("is-resizing-x") ||
     document.body.classList.contains("is-resizing-y")
   );
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event) => {
+    if (event.key === perfLogStorageKey) {
+      cachedPerfLogEnabled = null;
+    }
+  });
 }

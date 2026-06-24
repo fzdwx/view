@@ -3,7 +3,11 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "rea
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { usePanelResizeDeferredValue } from "../../hooks/usePanelResizeDeferredValue";
 import { buildCommitGraph } from "../../lib/commitGraph";
-import { panelResizeEndEvent } from "../../lib/panelResizeInteraction";
+import {
+  panelResizeEndEvent,
+  runAfterPanelResizeIdle,
+  type PanelResizeIdleTaskHandle,
+} from "../../lib/panelResizeInteraction";
 import { measureElementUnlessPanelResizing } from "../../lib/virtualizerMeasurement";
 import { getCommitGraphWidth } from "./CommitGraph";
 import { CommitListView } from "./CommitListView";
@@ -88,13 +92,23 @@ export const VirtualCommitList = memo(function VirtualCommitList({
   });
 
   useEffect(() => {
+    let pendingMeasureHandle: PanelResizeIdleTaskHandle | null = null;
     const measureAfterPanelResize = () => {
-      commitVirtualizer.measure();
-      reflogVirtualizer.measure();
+      pendingMeasureHandle?.cancel();
+      pendingMeasureHandle = runAfterPanelResizeIdle(
+        () => {
+          pendingMeasureHandle = null;
+          commitVirtualizer.measure();
+          reflogVirtualizer.measure();
+        },
+        { idleTimeoutMs: 500, timeoutMs: 16 },
+      );
     };
     window.addEventListener(panelResizeEndEvent, measureAfterPanelResize);
-    return () =>
+    return () => {
+      pendingMeasureHandle?.cancel();
       window.removeEventListener(panelResizeEndEvent, measureAfterPanelResize);
+    };
   }, [commitVirtualizer, reflogVirtualizer]);
   const activeFilter = isReflogMode ? reflogFilter : filter;
   const activeLoading = isReflogMode ? reflogLoading : loading;

@@ -148,6 +148,7 @@ export const GitPanels = memo(function GitPanels({
 
       applyGitPanelSizeVar(panelRef.current, "branch", nextSize);
       if (delta !== 0) {
+        panelSizesRef.current.branch = nextSize;
         resizePanel("branch", delta, branchMin, 460);
       }
     },
@@ -181,6 +182,7 @@ export const GitPanels = memo(function GitPanels({
 
       applyGitPanelSizeVar(panelRef.current, "details", nextSize);
       if (delta !== 0) {
+        panelSizesRef.current.details = nextSize;
         resizePanel("details", delta, detailsMin, 460);
       }
     },

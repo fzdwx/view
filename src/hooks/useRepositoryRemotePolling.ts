@@ -3,6 +3,8 @@ import { fetchRemotes, isTauriRuntime } from "../lib/api";
 import {
   isPanelResizeInProgress,
   panelResizeEndEvent,
+  runAfterPanelResizeIdle,
+  type PanelResizeIdleTaskHandle,
 } from "../lib/panelResizeInteraction";
 
 type RefetchRepositoryData = () => Promise<unknown>;
@@ -30,6 +32,21 @@ export function useRepositoryRemotePolling({
     }
 
     let pendingResizeRefresh = false;
+    let scheduledRefetch: PanelResizeIdleTaskHandle | null = null;
+    const scheduleRepositoryRefetch = () => {
+      scheduledRefetch?.cancel();
+      scheduledRefetch = runAfterPanelResizeIdle(
+        () => {
+          scheduledRefetch = null;
+          void Promise.all([
+            refetchRepository(),
+            refetchCommits(),
+            refetchProjectFiles(),
+          ]).catch(reportRemoteRefreshError);
+        },
+        { idleTimeoutMs: 1_000, timeoutMs: 80 },
+      );
+    };
     const refreshRemoteRefs = async () => {
       if (isPanelResizeInProgress()) {
         pendingResizeRefresh = true;
@@ -42,15 +59,7 @@ export function useRepositoryRemotePolling({
       remoteFetchInFlightRef.current = true;
       try {
         await fetchRemotes(activeProjectPath);
-        if (isPanelResizeInProgress()) {
-          pendingResizeRefresh = true;
-          return;
-        }
-        await Promise.all([
-          refetchRepository(),
-          refetchCommits(),
-          refetchProjectFiles(),
-        ]);
+        scheduleRepositoryRefetch();
       } catch (error) {
         reportRemoteRefreshError(error);
       } finally {
@@ -71,6 +80,7 @@ export function useRepositoryRemotePolling({
     window.addEventListener(panelResizeEndEvent, refreshAfterPanelResize);
 
     return () => {
+      scheduledRefetch?.cancel();
       window.clearInterval(timer);
       window.removeEventListener(panelResizeEndEvent, refreshAfterPanelResize);
     };
