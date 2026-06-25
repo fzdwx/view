@@ -174,6 +174,7 @@ export function App() {
     selectedBranchRef,
     selectedCommit,
     selectedProjectFile,
+    worktreeChangedFiles,
   } = useRepositoryProjectData({
     activeBranchRef,
     activeCommit,
@@ -320,6 +321,7 @@ export function App() {
     gitWriteGuard,
     hasGitRepository,
     repositoryPayload: payload,
+    worktreeFiles: worktreeChangedFiles,
   });
   const refetchFileWorktreeDiff = useCallback(
     () =>
@@ -768,7 +770,7 @@ export function App() {
       activeCommit,
       activeReflogSelector,
       changedFiles,
-      commitFiles: commitPanelFiles(payload),
+      commitFiles: commitPanelFiles(worktreeChangedFiles),
       commitFilter,
       commits,
       commitsLoading: commitsQuery.isLoading,
@@ -827,6 +829,7 @@ export function App() {
       selectedReflogEntry,
       setReflogFilter,
       activeTreeGitFileActions,
+      worktreeChangedFiles,
     ],
   );
   const projectTreeEmptyCopy =

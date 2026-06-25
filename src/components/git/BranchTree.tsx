@@ -331,8 +331,9 @@ function BranchTreeRow({
           onClick={() => onSelect(row.branch.refName)}
           onContextMenu={(event) => onBranchContextMenu(event, row.branch)}
         >
-          <span className="branch-row-label">HEAD</span>
-          <small>{row.branch.name}</small>
+          <GitBranch size={13} />
+          <span className="branch-row-label">{row.branch.name}</span>
+          <BranchTrackingBadge branch={row.branch} currentLabel="CURRENT" />
         </button>
       );
     case "section":
@@ -403,12 +404,23 @@ function BranchTreeRow({
   }
 }
 
-function BranchTrackingBadge({ branch }: { branch: RefLeaf }) {
+type BranchTrackingRef = Pick<RefLeaf, "ahead" | "behind" | "branchType" | "current">;
+
+function BranchTrackingBadge({
+  branch,
+  currentLabel = "HEAD",
+  showCurrent = true,
+}: {
+  branch: BranchTrackingRef;
+  currentLabel?: string;
+  showCurrent?: boolean;
+}) {
   const hasAhead = Boolean(branch.ahead && branch.ahead > 0);
   const hasBehind = Boolean(branch.behind && branch.behind > 0);
+  const showCurrentBadge = showCurrent && branch.current;
   const otherLabel = branch.branchType === "remote" ? "remote" : "upstream";
 
-  if (branch.current || hasAhead || hasBehind) {
+  if (showCurrentBadge || hasAhead || hasBehind) {
     return (
       <small className="branch-badges">
         {hasBehind ? (
@@ -421,7 +433,7 @@ function BranchTrackingBadge({ branch }: { branch: RefLeaf }) {
             ↗ {branch.ahead}
           </span>
         ) : null}
-        {branch.current ? <span className="branch-head-badge">HEAD</span> : null}
+        {showCurrentBadge ? <span className="branch-head-badge">{currentLabel}</span> : null}
       </small>
     );
   }

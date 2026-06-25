@@ -11,6 +11,7 @@ import {
   pushCurrentBranch,
   type BranchInfo,
   type RepositoryPayload,
+  type TreeFile,
 } from "../lib/api";
 import { countDirtyDraftsForProject } from "../lib/editorDrafts";
 import type { EditorDraft } from "../lib/editorTypes";
@@ -39,6 +40,7 @@ export interface UseGitWriteActionsOptions {
   readonly gitWriteGuard: GitWriteGuard;
   readonly hasGitRepository: boolean;
   readonly repositoryPayload: RepositoryPayload | undefined;
+  readonly worktreeFiles: readonly TreeFile[];
 }
 
 export interface GitWriteActions {
@@ -74,6 +76,7 @@ export function useGitWriteActions({
   gitWriteGuard,
   hasGitRepository,
   repositoryPayload,
+  worktreeFiles,
 }: UseGitWriteActionsOptions): GitWriteActions {
   const activeProjectPath = activeProject?.activePath ?? null;
   const refreshProjectFileState = useProjectFileStateRefresh();
@@ -88,12 +91,12 @@ export function useGitWriteActions({
     gitWriteOperationPendingTitle(pendingOperation);
 
   const stagedCount = useMemo(
-    () => countStagedFiles(repositoryPayload?.files ?? []),
-    [repositoryPayload?.files],
+    () => countStagedFiles(worktreeFiles),
+    [worktreeFiles],
   );
   const conflictCount = useMemo(
-    () => countConflictFiles(repositoryPayload?.files ?? []),
-    [repositoryPayload?.files],
+    () => countConflictFiles(worktreeFiles),
+    [worktreeFiles],
   );
   const dirtyDraftCount = useMemo(
     () =>

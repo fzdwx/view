@@ -1,10 +1,7 @@
 import type { RepositoryPayload } from "./api";
 
-type RepositoryFiles = Pick<RepositoryPayload, "files">;
-
 export function commitPanelFiles(
-  repositoryPayload: RepositoryFiles | undefined,
-  _activeCommitFiles?: RepositoryPayload["files"],
+  worktreeFiles: RepositoryPayload["files"] | undefined,
 ): RepositoryPayload["files"] {
-  return repositoryPayload?.files ?? [];
+  return worktreeFiles ?? [];
 }

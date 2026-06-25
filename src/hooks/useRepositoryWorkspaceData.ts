@@ -88,6 +88,7 @@ export interface RepositoryProjectData {
   readonly selectedCommit: CommitInfo | null;
   readonly selectedProjectFile: TreeFile | null;
   readonly selectedProjectStatus: GitStatus | null;
+  readonly worktreeChangedFiles: TreeFile[];
 }
 
 export interface RepositoryPreviewDataOptions {
@@ -193,6 +194,19 @@ export function useRepositoryProjectData({
     retry: false,
   });
 
+  // The commit panel is tied to the current branch worktree, not to the
+  // selected history commit, so it needs an explicit worktree status query.
+  const worktreeChangedFilesQuery = useQuery({
+    queryKey: ["changed-files", activeProjectPath, null],
+    queryFn: () =>
+      getChangedFiles(
+        requireQueryInput(activeProjectPath, "worktree changed files path"),
+        null,
+      ),
+    enabled: gitQueriesEnabled,
+    retry: false,
+  });
+
   // The whole query object is returned to consumers (App.tsx) that read many
   // fields (data/isFetching/isError/refetch/isPlaceholderData), so it must be
   // held as one value per the rule's own false-positive guidance.
@@ -284,6 +298,7 @@ export function useRepositoryProjectData({
   );
   const selectedProjectStatus = selectedProjectFile?.status ?? null;
   const changedFiles = changedFilesQuery.data ?? payload?.files ?? [];
+  const worktreeChangedFiles = worktreeChangedFilesQuery.data ?? [];
   const filteredCommits = commitsQuery.data ?? payload?.commits ?? [];
   const reflogEntries = reflogQuery.data ?? [];
   const reflogCommits = useMemo(
@@ -366,6 +381,7 @@ export function useRepositoryProjectData({
     selectedCommit,
     selectedProjectFile,
     selectedProjectStatus,
+    worktreeChangedFiles,
   };
 }
 
