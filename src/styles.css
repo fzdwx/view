@@ -3671,9 +3671,9 @@ body.is-resizing-y .rail-bottom-panels {
 .branch-head-row {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 6px;
-  height: 32px;
-  min-height: 32px;
-  padding: 3px 6px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 6px;
 }
 
 .branch-row {

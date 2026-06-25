@@ -29,7 +29,7 @@ import {
 } from "../../lib/virtualizerMeasurement";
 import { BranchContextMenu } from "./BranchContextMenu";
 
-const BRANCH_HEAD_ROW_ESTIMATE = 32;
+const BRANCH_HEAD_ROW_ESTIMATE = 28;
 const BRANCH_SECTION_ROW_ESTIMATE = 28;
 const BRANCH_ITEM_ROW_ESTIMATE = 28;
 
