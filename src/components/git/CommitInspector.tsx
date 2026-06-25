@@ -61,7 +61,7 @@ export function CommitInspector({
     (delta: number) => {
       const base = draftDetailRef.current ?? detailHeight;
       const next = clamp(
-        base + delta,
+        base - delta,
         minCommitDetailHeight,
         maxCommitDetailHeight,
       );
@@ -79,7 +79,7 @@ export function CommitInspector({
       const next =
         draftDetailRef.current ??
         clamp(
-          detailHeight + totalDelta,
+          detailHeight - totalDelta,
           minCommitDetailHeight,
           maxCommitDetailHeight,
         );

@@ -4582,6 +4582,42 @@ body.is-resizing-y .rail-bottom-panels {
   text-align: right;
 }
 
+.code-mirror-editor-shell .cm-run-target-gutter {
+  width: 32px;
+  background: var(--surface-0);
+}
+
+.code-mirror-editor-shell .cm-run-target-gutter .cm-gutterElement {
+  box-sizing: border-box;
+  width: 32px;
+  padding: 0 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.code-mirror-editor-shell .cm-run-target-button {
+  height: 17px;
+  min-width: 24px;
+  padding: 0 4px;
+  border: 1px solid color-mix(in oklch, var(--line) 70%, transparent);
+  border-radius: 4px;
+  background: color-mix(in oklch, var(--surface-1) 84%, transparent);
+  color: var(--faint);
+  font-family: var(--ui-font);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 15px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.code-mirror-editor-shell .cm-run-target-button:hover {
+  border-color: color-mix(in oklch, var(--accent) 42%, var(--line));
+  background: color-mix(in oklch, var(--surface-2) 78%, var(--accent));
+  color: var(--ink);
+}
+
 .code-mirror-editor-shell .cm-git-gutter {
   width: 10px;
 }

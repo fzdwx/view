@@ -52,6 +52,11 @@ export interface EditorPaneGridProps {
     terminalTabId: string,
     title: string,
   ) => void;
+  readonly onRunCommand: (
+    command: string,
+    label: string,
+    cwd: string | null,
+  ) => void;
   readonly onSave: () => void;
   readonly onSelectTab: (paneId: PreviewPaneId, tab: PreviewTab) => void;
   readonly onStageGitChange: (

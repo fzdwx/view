@@ -4,10 +4,13 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { usePanelResizeDeferredValue } from "../../hooks/usePanelResizeDeferredValue";
 import { buildCommitGraph } from "../../lib/commitGraph";
 import {
+  commitGraphWidthRows,
+  getCommitGraphColumnWidth,
+} from "../../lib/commitGraphLayout";
+import {
   measureElementByEstimate,
   observeElementRectDuringPanelResize,
 } from "../../lib/virtualizerMeasurement";
-import { getCommitGraphWidth } from "./CommitGraph";
 import { CommitListView } from "./CommitListView";
 import { HistoryEmptyView, HistoryLoadingView } from "./CommitListStateViews";
 import { ReflogListView, type ReflogMenu } from "./ReflogListView";
@@ -54,13 +57,19 @@ export const VirtualCommitList = memo(function VirtualCommitList({
     () => buildCommitGraph(deferredGraphWidthCommits),
     [deferredGraphWidthCommits],
   );
-  const commitGraphWidth = useMemo(
+  const hasCommitFilter = !isReflogMode && filter.trim().length > 0;
+  const visibleGraphWidthRows = useMemo(
     () =>
-      Math.max(
-        24,
-        ...graphWidthRows.map((row) => getCommitGraphWidth(row.laneCount)),
-      ),
-    [graphWidthRows],
+      commitGraphWidthRows({
+        filteredRows: graphRows,
+        fullRows: graphWidthRows,
+        hasFilter: hasCommitFilter,
+      }),
+    [graphRows, graphWidthRows, hasCommitFilter],
+  );
+  const commitGraphWidth = useMemo(
+    () => getCommitGraphColumnWidth(visibleGraphWidthRows),
+    [visibleGraphWidthRows],
   );
   const tableStyle = {
     "--commit-graph-width": `${commitGraphWidth}px`,

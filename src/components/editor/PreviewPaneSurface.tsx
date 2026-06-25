@@ -12,6 +12,7 @@ import {
 } from "../../lib/previewPanes";
 import { isTerminalPreviewTab, type PreviewTab } from "../../lib/previewTabs";
 import { usePreviewPaneData } from "../../hooks/usePreviewPaneData";
+import { useFileRunTargets } from "../../hooks/useFileRunTargets";
 import { PreviewPaneDiffBody } from "./PreviewPaneDiffBody";
 import { paneLoading } from "./previewPaneLoading";
 import { TerminalEditorPane } from "./TerminalEditorPane";
@@ -62,6 +63,11 @@ interface PreviewPaneSurfaceProps {
     terminalTabId: string,
     title: string,
   ) => void;
+  readonly onRunCommand: (
+    command: string,
+    label: string,
+    cwd: string | null,
+  ) => void;
   readonly onSave: () => void;
   readonly onSelectTab: (paneId: PreviewPaneId, tab: PreviewTab) => void;
   readonly onStageGitChange: (
@@ -104,6 +110,7 @@ export function PreviewPaneSurface({
   onDiscardGitChange,
   onOpenTerminalTab,
   onReorderTabs,
+  onRunCommand,
   onSave,
   onSelectTab,
   onStageGitChange,
@@ -138,6 +145,18 @@ export function PreviewPaneSurface({
     draft.baseContent !== data.currentFileContent.content
       ? null
       : draft;
+  const editorContent =
+    effectiveDraft?.content ?? data.currentFileContent?.content ?? "";
+  const runTargets = useFileRunTargets({
+    content: editorContent,
+    enabled: Boolean(
+      data.currentFileContent &&
+        !data.currentFileContent.binary &&
+        !data.currentFileContent.tooLarge,
+    ),
+    filePath: data.selectedProjectPath,
+    projectPath: activeProjectPath,
+  });
   const handleChangeDraft = useCallback(
     (content: string) => {
       if (activeProjectPath && data.selectedProjectPath && data.currentFileContent) {
@@ -260,6 +279,7 @@ export function PreviewPaneSurface({
                 data.fileContentQuery.isFetching &&
                 !data.currentFileContent,
             )}
+            runTargets={runTargets}
             saveError={isActive ? saveError : null}
             saving={isActive && savingActiveFile}
             selectedPath={data.selectedProjectPath}
@@ -268,6 +288,7 @@ export function PreviewPaneSurface({
             onChangeDraft={handleChangeDraft}
             onDiscardConflict={onDiscardConflict}
             onDiscardGitChange={onDiscardGitChange}
+            onRunCommand={onRunCommand}
             onSave={onSave}
             onStageGitChange={onStageGitChange}
             onSetConflictDraftContent={handleSetConflictDraftContent}

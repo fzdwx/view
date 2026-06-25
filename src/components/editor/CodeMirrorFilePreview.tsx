@@ -27,6 +27,7 @@ import {
   type EditorTextMatch,
   type FileBlameLine,
   type FileContent,
+  type FileRunTarget,
   replaceEditorText,
   searchEditorText,
 } from "../../lib/api";
@@ -77,6 +78,7 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
   gitConflictStatus,
   gitMarkers,
   loading,
+  runTargets,
   saveError,
   saving,
   selectedPath,
@@ -86,6 +88,7 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
   onDiscardConflict,
   onDiscardGitChange,
   onSave,
+  onRunCommand,
   onStageGitChange,
   onSetConflictDraftContent,
   onUnstageGitChange,
@@ -100,6 +103,7 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
   gitConflictStatus?: boolean | null;
   gitMarkers: EditorGitMarker[];
   loading: boolean;
+  runTargets: readonly FileRunTarget[];
   saveError: string | null;
   saving: boolean;
   selectedPath: string | null;
@@ -108,6 +112,7 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
   onChangeDraft(content: string): void;
   onDiscardConflict(): void;
   onDiscardGitChange(filePath: string, marker: EditorGitMarker): Promise<boolean>;
+  onRunCommand(command: string, label: string, cwd: string | null): void;
   onSave(): void;
   onStageGitChange(filePath: string, marker: EditorGitMarker): Promise<boolean>;
   onSetConflictDraftContent(content: string): void;
@@ -200,6 +205,11 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
   const showBlameAnnotations =
     blameLoading || blameLines.length > 0 || Boolean(blameError);
   const showGitGutter = visibleGitMarkers.length > 0;
+  const runTargetByLine = useMemo(
+    () => new Map(runTargets.map((target) => [target.line, target])),
+    [runTargets],
+  );
+  const showRunTargetGutter = runTargets.length > 0;
   const gitMarkerSegmentsByLine = useMemo(() => {
     const segments = new Map<number, GitMarkerSegment>();
 
@@ -736,6 +746,32 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
   }
 
   const editorExtensions = useMemo<Extension[]>(() => {
+    class RunTargetGutterMarker extends GutterMarker {
+      constructor(private readonly target: FileRunTarget) {
+        super();
+      }
+
+      eq(other: GutterMarker) {
+        return (
+          other instanceof RunTargetGutterMarker &&
+          other.target.id === this.target.id &&
+          other.target.name === this.target.name &&
+          other.target.command === this.target.command
+        );
+      }
+
+      toDOM() {
+        const element = document.createElement("button");
+        element.type = "button";
+        element.tabIndex = -1;
+        element.className = `cm-run-target-button ${this.target.kind}`;
+        element.title = `${this.target.label}: ${this.target.command}`;
+        element.setAttribute("aria-label", this.target.label);
+        element.textContent = "run";
+        return element;
+      }
+    }
+
     class GitGutterMarker extends GutterMarker {
       constructor(private readonly segment: GitMarkerSegment) {
         super();
@@ -824,6 +860,35 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
         },
       ]),
       lineNumbers(),
+      ...(showRunTargetGutter
+        ? [
+            gutter({
+              class: "cm-run-target-gutter",
+              lineMarker(view, line) {
+                const target = runTargetByLine.get(
+                  view.state.doc.lineAt(line.from).number,
+                );
+                return target ? new RunTargetGutterMarker(target) : null;
+              },
+              domEventHandlers: {
+                click(view, line, event) {
+                  const target = runTargetByLine.get(
+                    view.state.doc.lineAt(line.from).number,
+                  );
+                  if (!target) {
+                    return false;
+                  }
+
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onRunCommand(target.command, target.label, target.cwd);
+                  view.focus();
+                  return true;
+                },
+              },
+            }),
+          ]
+        : []),
       ...(showBlameAnnotations
         ? [
             layer({
@@ -924,9 +989,12 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
     blameLines.length,
     blameLoading,
     gitMarkerSegmentsByLine,
+    onRunCommand,
     openEditorFind,
+    runTargetByLine,
     showBlameAnnotations,
     showGitGutter,
+    showRunTargetGutter,
     selectEditorMatch,
     toggleGitMarker,
   ]);

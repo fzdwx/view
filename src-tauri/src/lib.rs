@@ -48,6 +48,7 @@ mod git_restore;
 mod git_status;
 mod git_tracking;
 mod git_write;
+mod run_targets;
 mod wsl;
 
 use git_status::{
@@ -55,6 +56,7 @@ use git_status::{
     StatusCounts, TreeFile, WORKTREE_STATUS_ARGS,
 };
 use git_tracking::CommitTrackingInfo;
+use run_targets::FileRunTarget;
 
 const MAX_TEXT_FILE_BYTES: u64 = 1_048_576;
 const MAX_MEDIA_FILE_BYTES: u64 = 5_242_880;
@@ -392,6 +394,21 @@ async fn detect_project_scripts(path: String) -> Result<Vec<ProjectScript>, Stri
         }
 
         Ok(scripts)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn get_file_run_targets(
+    path: String,
+    file_path: String,
+    content: String,
+) -> Result<Vec<FileRunTarget>, String> {
+    blocking_command("get_file_run_targets", move || {
+        let root = workspace_root(&path)?;
+        let normalized = normalize_git_path(&file_path);
+        resolve_repo_child_path(&root, &normalized)?;
+        run_targets::file_run_targets(&root, &normalized, &content)
     })
     .await
 }
@@ -6086,6 +6103,7 @@ pub fn run() {
             search_file_names,
             search_file_contents,
             detect_project_scripts,
+            get_file_run_targets,
             search_editor_text,
             replace_editor_text,
             fetch_remotes,

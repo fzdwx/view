@@ -1,12 +1,13 @@
 import type { CSSProperties } from "react";
 import type { CommitGraphRow } from "../../lib/commitGraph";
+import {
+  COMMIT_GRAPH_LANE_GAP,
+  COMMIT_GRAPH_LEFT_INSET,
+  getCommitGraphWidth,
+} from "../../lib/commitGraphLayout";
 
 const COMMIT_GRAPH_ROW_HEIGHT = 28;
 const COMMIT_GRAPH_MID_Y = 14;
-const COMMIT_GRAPH_LANE_GAP = 10;
-const COMMIT_GRAPH_LEFT_INSET = 7.5;
-const COMMIT_GRAPH_RIGHT_INSET = 10;
-const COMMIT_GRAPH_MIN_WIDTH = 24;
 
 const laneX = (lane: number) =>
   lane * COMMIT_GRAPH_LANE_GAP + COMMIT_GRAPH_LEFT_INSET;
@@ -118,20 +119,6 @@ export function CommitGraph({ row }: { row: CommitGraphRow }) {
         />
       </svg>
     </span>
-  );
-}
-
-// Pure helper co-located with the component for its callers; Fast Refresh is
-// not a concern for this non-component export.
-// oxlint-disable-next-line react-doctor/only-export-components
-export function getCommitGraphWidth(laneCount: number) {
-  return Math.ceil(
-    Math.max(
-      COMMIT_GRAPH_MIN_WIDTH,
-      COMMIT_GRAPH_LEFT_INSET +
-        (laneCount - 1) * COMMIT_GRAPH_LANE_GAP +
-        COMMIT_GRAPH_RIGHT_INSET,
-    ),
   );
 }
 

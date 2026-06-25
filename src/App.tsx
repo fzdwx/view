@@ -66,7 +66,7 @@ import {
   buildRailWorkbenchGridStyle,
   railSideHasIcons,
 } from "./lib/workbenchLayout";
-import { closeTerminalTab, runInTerminal } from "./lib/terminalSessions";
+import { closeTerminalTab, runInTerminal, runInTerminalAt } from "./lib/terminalSessions";
 import {
   clearTerminalTabPlacement,
   dockTerminalTabToEditor,
@@ -570,6 +570,20 @@ export function App() {
     },
     [activeProjectPath, railLayout, selectRailItem],
   );
+  const runProjectCommand = useCallback(
+    (command: string, label: string, cwd: string | null) => {
+      if (!activeProjectPath) {
+        return;
+      }
+
+      runInTerminalAt(activeProjectPath, command, label, cwd);
+      const placement = findRailItemPlacement(railLayout, "terminal");
+      if (placement) {
+        selectRailItem(placement.side, placement.slot, "terminal");
+      }
+    },
+    [activeProjectPath, railLayout, selectRailItem],
+  );
   const clearSelectedProjectPath = useCallback(() => {
     setSelectedProjectPath(null);
   }, []);
@@ -723,7 +737,7 @@ export function App() {
   );
   const resizeCommitInfo = useCallback(
     (delta: number) => {
-      resizePanel("commitInfo", -delta, 110, 360);
+      resizePanel("commitInfo", delta, 110, 360);
     },
     [resizePanel],
   );
@@ -1156,6 +1170,7 @@ export function App() {
                 onDiscardGitChange={discardChange}
                 onReorderTabs={reorderPreviewTabs}
                 onOpenTerminalTab={openTerminalTabInEditor}
+                onRunCommand={runProjectCommand}
                 onSave={saveActivePreviewFile}
                 onSelectTab={activatePreviewTab}
                 onChangeDraftForFile={updateEditorDraftForFile}

@@ -357,6 +357,7 @@ export function PreviewDebugPage({
               file={file}
               gitMarkers={gitMarkers}
               loading={loading}
+              runTargets={[]}
               saveError={saveError}
               saving={false}
               selectedPath={file?.path ?? null}
@@ -365,6 +366,7 @@ export function PreviewDebugPage({
               onChangeDraft={setDraftContent}
               onDiscardConflict={() => applyScenario("text")}
               onDiscardGitChange={() => Promise.resolve(false)}
+              onRunCommand={() => undefined}
               onSave={handleSave}
               onStageGitChange={() => Promise.resolve(false)}
               onSetConflictDraftContent={setDraftContent}

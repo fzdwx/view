@@ -160,6 +160,15 @@ export function addTerminalTab(
  * it to the PTY via the WebSocket input channel.
  */
 export function runInTerminal(projectPath: string, command: string, label?: string): void {
+  runInTerminalAt(projectPath, command, label, null);
+}
+
+export function runInTerminalAt(
+  projectPath: string,
+  command: string,
+  label?: string,
+  cwd: string | null = null,
+): void {
   updateTerminalWorkspace(projectPath, (workspace) => {
     const nextIndex = workspace.nextTabIndex + 1;
     const baseTitle = label ?? defaultTerminalBaseTitle(projectPath, nextIndex);
@@ -167,7 +176,7 @@ export function runInTerminal(projectPath: string, command: string, label?: stri
       id: `terminal-${Date.now()}-${nextIndex}`,
       baseTitle,
       title: baseTitle,
-      cwd: null,
+      cwd,
       session: null,
       closed: false,
       exitCode: null,

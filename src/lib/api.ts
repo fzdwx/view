@@ -14,6 +14,8 @@ function apiInvoke<T>(command: string, args?: InvokeArgs): Promise<T> {
 
 function apiSlowThreshold(command: string): number {
   switch (command) {
+    case "get_file_run_targets":
+      return 40;
     case "get_project_state_fingerprint":
       return 100;
     default:
@@ -667,6 +669,29 @@ export interface ProjectScript {
 
 export async function detectProjectScripts(path: string): Promise<ProjectScript[]> {
   return apiInvoke<ProjectScript[]>("detect_project_scripts", { path });
+}
+
+export interface FileRunTarget {
+  readonly id: string;
+  readonly language: string;
+  readonly kind: string;
+  readonly name: string;
+  readonly label: string;
+  readonly line: number;
+  readonly command: string;
+  readonly cwd: string | null;
+}
+
+export async function getFileRunTargets(
+  path: string,
+  filePath: string,
+  content: string,
+): Promise<FileRunTarget[]> {
+  return apiInvoke<FileRunTarget[]>("get_file_run_targets", {
+    path,
+    filePath,
+    content,
+  });
 }
 
 function replaceEditorTextInBrowser(

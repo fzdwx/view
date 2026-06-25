@@ -21,10 +21,9 @@ describe("commitPanelFiles", () => {
     ];
 
     expect(
-      commitPanelFiles(
-        { files: worktreeFiles },
-        activeCommitFiles,
-      ).map((file) => file.path),
+      commitPanelFiles(worktreeFiles, activeCommitFiles).map(
+        (file) => file.path,
+      ),
     ).toEqual(["staged.ts"]);
   });
 
