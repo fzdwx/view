@@ -12,12 +12,18 @@ import type { TerminalSessionInfo as ApiTerminalSessionInfo } from "./api";
 import { projectNameFromPath } from "./projects";
 
 export type TerminalSessionInfo = ApiTerminalSessionInfo;
+export type TerminalTabKind = "terminal" | "run";
 
 export interface TerminalTab {
   readonly id: string;
+  readonly kind: TerminalTabKind;
   readonly baseTitle: string;
   readonly title: string;
   readonly cwd: string | null;
+  /** Stable identity for run configurations so Run clicks can reuse one tab. */
+  readonly runConfigurationId?: string;
+  /** Environment overrides applied when spawning the tab's PTY. */
+  readonly env: Readonly<Record<string, string>>;
   /** Live PTY session for this tab, if one has been spawned. */
   readonly session: TerminalSessionInfo | null;
   /** Set when the PTY exits so the tab can render a closed state. */
@@ -91,9 +97,11 @@ export function createInitialTerminalWorkspace(
     tabs: [
       {
         id: "terminal-1",
+        kind: "terminal",
         baseTitle,
         title: baseTitle,
         cwd: null,
+        env: {},
         session: null,
         closed: false,
         exitCode: null,
@@ -127,15 +135,35 @@ export function addTerminalTab(
   projectPath: string,
   cwd: string | null = null,
 ): TerminalTab {
+  return addWorkspaceTab(projectPath, "terminal", cwd);
+}
+
+export function addRunTab(
+  projectPath: string,
+  cwd: string | null = null,
+): TerminalTab {
+  return addWorkspaceTab(projectPath, "run", cwd);
+}
+
+function addWorkspaceTab(
+  projectPath: string,
+  kind: TerminalTabKind,
+  cwd: string | null = null,
+): TerminalTab {
   let createdTab: TerminalTab | null = null;
   updateTerminalWorkspace(projectPath, (workspace) => {
     const nextIndex = workspace.nextTabIndex + 1;
-    const baseTitle = defaultTerminalBaseTitle(projectPath, nextIndex);
+    const baseTitle =
+      kind === "run"
+        ? `Run ${nextIndex}`
+        : defaultTerminalBaseTitle(projectPath, nextIndex);
     const tab: TerminalTab = {
-      id: `terminal-${Date.now()}-${nextIndex}`,
+      id: `${kind}-${Date.now()}-${nextIndex}`,
+      kind,
       baseTitle,
       title: baseTitle,
       cwd,
+      env: {},
       session: null,
       closed: false,
       exitCode: null,
@@ -169,19 +197,81 @@ export function runInTerminalAt(
   label?: string,
   cwd: string | null = null,
 ): void {
+  runInWorkspaceTab(projectPath, "terminal", command, label, cwd, {});
+}
+
+export function runInRunTab(
+  projectPath: string,
+  command: string,
+  label?: string,
+  cwd: string | null = null,
+  env: Readonly<Record<string, string>> = {},
+  runConfigurationId?: string,
+): void {
+  runInWorkspaceTab(
+    projectPath,
+    "run",
+    command,
+    label,
+    cwd,
+    env,
+    runConfigurationId,
+  );
+}
+
+function runInWorkspaceTab(
+  projectPath: string,
+  kind: TerminalTabKind,
+  command: string,
+  label?: string,
+  cwd: string | null = null,
+  env: Readonly<Record<string, string>> = {},
+  runConfigurationId?: string,
+): void {
   updateTerminalWorkspace(projectPath, (workspace) => {
     const nextIndex = workspace.nextTabIndex + 1;
-    const baseTitle = label ?? defaultTerminalBaseTitle(projectPath, nextIndex);
+    const baseTitle =
+      label ??
+      (kind === "run"
+        ? `Run ${nextIndex}`
+        : defaultTerminalBaseTitle(projectPath, nextIndex));
     const tab: TerminalTab = {
-      id: `terminal-${Date.now()}-${nextIndex}`,
+      id: `${kind}-${Date.now()}-${nextIndex}`,
+      kind,
       baseTitle,
       title: baseTitle,
       cwd,
+      runConfigurationId:
+        kind === "run" && runConfigurationId ? runConfigurationId : undefined,
+      env: { ...env },
       session: null,
       closed: false,
       exitCode: null,
       pendingCommand: command,
     };
+    if (kind === "run" && runConfigurationId) {
+      const existingIndex = workspace.tabs.findIndex(
+        (entry) =>
+          entry.kind === "run" &&
+          entry.runConfigurationId === runConfigurationId,
+      );
+      if (existingIndex >= 0) {
+        const existing = workspace.tabs[existingIndex];
+        if (!existing.closed) {
+          return {
+            ...workspace,
+            activeTabId: existing.id,
+          };
+        }
+        return {
+          tabs: workspace.tabs.map((entry, index) =>
+            index === existingIndex ? tab : entry,
+          ),
+          activeTabId: tab.id,
+          nextTabIndex: nextIndex,
+        };
+      }
+    }
     return {
       tabs: [...workspace.tabs, tab],
       activeTabId: tab.id,

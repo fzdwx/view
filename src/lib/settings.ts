@@ -3,6 +3,7 @@ export type ShortcutAction =
   | "saveFile"
   | "pullCurrentBranch"
   | "openGitLog"
+  | "openRunPanel"
   | "openTerminal"
   | "switchProject"
   | "closeTab"
@@ -96,6 +97,7 @@ export const defaultAppSettings: AppSettings = {
     saveFile: "Mod+S",
     pullCurrentBranch: "Mod+T",
     openGitLog: "Mod+G",
+    openRunPanel: "Alt+2",
     openTerminal: "Mod+`",
     switchProject: "Mod+O",
     closeTab: "Mod+W",
@@ -128,6 +130,11 @@ export const shortcutRows: readonly ShortcutRow[] = [
     action: "openGitLog",
     label: "Open Git log",
     description: "Focus the Git panel",
+  },
+  {
+    action: "openRunPanel",
+    label: "Open Run",
+    description: "Focus the Run panel",
   },
   {
     action: "openTerminal",

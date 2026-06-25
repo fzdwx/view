@@ -133,7 +133,7 @@ function FontSettings({
 const shortcutGroups: readonly { readonly title: string; readonly actions: readonly ShortcutAction[] }[] = [
   { title: "Navigation", actions: ["commandPanel", "switchProject"] },
   { title: "File & editor", actions: ["saveFile", "closeTab", "nextTab", "prevTab", "jumpToDiffFile"] },
-  { title: "Git", actions: ["pullCurrentBranch", "openGitLog", "openTerminal"] },
+  { title: "Git", actions: ["pullCurrentBranch", "openGitLog", "openRunPanel", "openTerminal"] },
   { title: "Search", actions: ["findFiles", "findInFiles"] },
 ];
 

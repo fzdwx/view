@@ -112,7 +112,7 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
   onChangeDraft(content: string): void;
   onDiscardConflict(): void;
   onDiscardGitChange(filePath: string, marker: EditorGitMarker): Promise<boolean>;
-  onRunCommand(command: string, label: string, cwd: string | null): void;
+  onRunCommand(target: FileRunTarget): void;
   onSave(): void;
   onStageGitChange(filePath: string, marker: EditorGitMarker): Promise<boolean>;
   onSetConflictDraftContent(content: string): void;
@@ -881,7 +881,7 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
 
                   event.preventDefault();
                   event.stopPropagation();
-                  onRunCommand(target.command, target.label, target.cwd);
+                  onRunCommand(target);
                   view.focus();
                   return true;
                 },

@@ -3,7 +3,7 @@ import { PreviewTabBar } from "../PreviewTabBar";
 import { CodeMirrorFilePreview } from "./CodeMirrorFilePreview";
 import { editorDraftKey } from "../../lib/editorDrafts";
 import type { EditorDraft, EditorGitMarker } from "../../lib/editorTypes";
-import type { TreeFile } from "../../lib/api";
+import type { FileRunTarget, TreeFile } from "../../lib/api";
 import type { GitAvailability } from "../workbench/GitPanels";
 import {
   type PreviewPane,
@@ -63,11 +63,7 @@ interface PreviewPaneSurfaceProps {
     terminalTabId: string,
     title: string,
   ) => void;
-  readonly onRunCommand: (
-    command: string,
-    label: string,
-    cwd: string | null,
-  ) => void;
+  readonly onRunCommand: (target: FileRunTarget) => void;
   readonly onSave: () => void;
   readonly onSelectTab: (paneId: PreviewPaneId, tab: PreviewTab) => void;
   readonly onStageGitChange: (

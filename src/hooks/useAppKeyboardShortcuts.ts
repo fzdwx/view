@@ -110,6 +110,14 @@ export function useAppKeyboardShortcuts({
         return;
       }
 
+      if (matchesShortcut(event, shortcuts.openRunPanel)) {
+        event.preventDefault();
+        if (canUseProjectCommands) {
+          onSelectToolPanelView("run");
+        }
+        return;
+      }
+
       if (matchesShortcut(event, shortcuts.openTerminal)) {
         event.preventDefault();
         if (canUseProjectCommands) {

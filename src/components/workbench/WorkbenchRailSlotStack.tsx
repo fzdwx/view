@@ -1,5 +1,6 @@
 import { isValidElement, memo, type ReactNode } from "react";
 import { CommitInspector } from "../git/CommitInspector";
+import { RunPanel } from "../RunPanel";
 import { TerminalPanel } from "../TerminalPanel";
 import {
   GitPanels,
@@ -163,6 +164,29 @@ export const WorkbenchRailSlotStack = memo(
               >
                 <TerminalPanel
                   active={activeItem === "terminal"}
+                  projectPath={activeProjectPath}
+                />
+              </div>
+            </section>
+          ) : null}
+          {items.includes("run") ? (
+            <section
+              className={
+                activeItem === "run"
+                  ? "tool-panel-layer"
+                  : "tool-panel-layer tool-panel-layer-hidden"
+              }
+              aria-hidden={activeItem !== "run"}
+            >
+              <div
+                className={
+                  isBottomSlot
+                    ? "bottom-run-panel"
+                    : "bottom-run-panel rail-side-terminal-panel"
+                }
+              >
+                <RunPanel
+                  active={activeItem === "run"}
                   projectPath={activeProjectPath}
                 />
               </div>

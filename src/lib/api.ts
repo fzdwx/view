@@ -206,6 +206,8 @@ export type TerminalCursorStyle = "block" | "bar" | "underline" | "hollowBlock";
 export interface TerminalSpawnOptions {
   /** Shell executable to launch, or empty for the platform default. */
   readonly shell: string;
+  /** Environment variables applied to this terminal process. */
+  readonly env?: Readonly<Record<string, string>>;
   /** Scrollback history size in lines. */
   readonly scrollbackLines: number;
   /** Cursor shape for the terminal. */

@@ -214,7 +214,13 @@ function normalizeRailItems(value: unknown): RailItemId[] {
 }
 
 function isRailItemId(value: unknown): value is RailItemId {
-  return value === "fileTree" || value === "git" || value === "commit" || value === "terminal";
+  return (
+    value === "fileTree" ||
+    value === "git" ||
+    value === "commit" ||
+    value === "run" ||
+    value === "terminal"
+  );
 }
 
 function normalizeGitPanelOrder(value: unknown): GitPanelId[] {
@@ -333,6 +339,7 @@ function isToolPanelId(value: unknown): value is ToolPanelId {
   return (
     value === "project" ||
     value === "git" ||
+    value === "run" ||
     value === "terminal" ||
     isGitPanelId(typeof value === "string" ? value : null)
   );

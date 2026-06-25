@@ -13,6 +13,7 @@ import { useTerminalVisualState } from "./useTerminalVisualState";
 export interface TerminalSessionOptions {
   readonly active: boolean;
   readonly cwd: string | null;
+  readonly env?: Readonly<Record<string, string>>;
   readonly onClosed: (exitCode: number | null) => void;
   readonly onPendingCommandSent: () => void;
   readonly onSessionReady: (session: TerminalSessionInfo) => void;
@@ -29,6 +30,7 @@ export function useTerminalSession(options: TerminalSessionOptions) {
   const {
     active,
     cwd,
+    env,
     onClosed,
     onPendingCommandSent,
     onSessionReady,
@@ -53,7 +55,10 @@ export function useTerminalSession(options: TerminalSessionOptions) {
   const onSessionReadyRef = useRef(onSessionReady);
   const onPendingCommandSentRef = useRef(onPendingCommandSent);
   const onClosedRef = useRef(onClosed);
-  const terminalOptionsRef = useRef(terminalOptions);
+  const terminalOptionsRef = useRef<TerminalSpawnOptions>({
+    ...terminalOptions,
+    env,
+  });
   const pendingCommandRef = useRef(pendingCommand);
   const cellMetricsRef = useRef<TerminalCellMetrics>(DEFAULT_TERMINAL_CELL_METRICS);
   const lastSizeRef = useRef<{ readonly cols: number; readonly rows: number } | null>(null);
@@ -89,7 +94,7 @@ export function useTerminalSession(options: TerminalSessionOptions) {
     onSessionReadyRef.current = onSessionReady;
     onPendingCommandSentRef.current = onPendingCommandSent;
     onClosedRef.current = onClosed;
-    terminalOptionsRef.current = terminalOptions;
+    terminalOptionsRef.current = { ...terminalOptions, env };
     pendingCommandRef.current = pendingCommand;
   }, [
     active,
@@ -101,6 +106,7 @@ export function useTerminalSession(options: TerminalSessionOptions) {
     onWorkingDirectoryChange,
     pendingCommand,
     session,
+    env,
     terminalOptions,
   ]);
 

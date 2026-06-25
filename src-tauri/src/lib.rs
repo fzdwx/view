@@ -270,17 +270,11 @@ async fn detect_project_scripts(path: String) -> Result<Vec<ProjectScript>, Stri
                     if let Some(scripts_obj) = json.get("scripts").and_then(|v| v.as_object()) {
                         for (name, value) in scripts_obj {
                             if let Some(_cmd) = value.as_str() {
-                                let pkg_manager = detect_package_manager(&root);
-                                let run_cmd = if pkg_manager == "yarn" {
-                                    format!("yarn {name}")
-                                } else if pkg_manager == "pnpm" {
-                                    format!("pnpm {name}")
-                                } else {
-                                    format!("npm run {name}")
-                                };
                                 scripts.push(ProjectScript {
                                     label: name.clone(),
-                                    command: run_cmd,
+                                    command: run_targets::package_script_command(
+                                        &root, &root, name,
+                                    ),
                                     source: "npm".to_string(),
                                 });
                             }
@@ -413,16 +407,6 @@ async fn get_file_run_targets(
     .await
 }
 
-fn detect_package_manager(root: &Path) -> &'static str {
-    if root.join("pnpm-lock.yaml").is_file() {
-        "pnpm"
-    } else if root.join("yarn.lock").is_file() {
-        "yarn"
-    } else {
-        "npm"
-    }
-}
-
 #[derive(Clone)]
 struct EditorTextMatchRange {
     start_byte: usize,
@@ -528,6 +512,9 @@ struct TerminalSpawnOptions {
     /// Shell executable to launch, or empty for the platform default.
     #[serde(default)]
     shell: String,
+    /// Environment variables applied to this terminal process.
+    #[serde(default)]
+    env: HashMap<String, String>,
     /// Scrollback history size in lines.
     #[serde(default = "default_terminal_scrollback")]
     scrollback_lines: usize,
@@ -547,6 +534,7 @@ impl Default for TerminalSpawnOptions {
     fn default() -> Self {
         Self {
             shell: String::new(),
+            env: HashMap::new(),
             scrollback_lines: default_terminal_scrollback(),
             cursor_style: TerminalCursorShape::default(),
             visual_bell: false,
@@ -3474,6 +3462,11 @@ fn spawn_terminal_session_with_options(
     let portable_pty::PtyPair { master, slave } = pair;
     let mut command = build_terminal_command(&options.shell, &cwd);
     command.env("TERM", "xterm-256color");
+    for (key, value) in options.env {
+        if is_valid_terminal_env_key(&key) {
+            command.env(key, value);
+        }
+    }
 
     let mut child = slave
         .spawn_command(command)
@@ -3697,6 +3690,10 @@ fn spawn_terminal_session_with_options(
         pid,
         ws_url,
     })
+}
+
+fn is_valid_terminal_env_key(key: &str) -> bool {
+    !key.is_empty() && !key.contains('=') && !key.contains('\0')
 }
 
 fn run_terminal_ws(
@@ -4928,6 +4925,14 @@ mod tests {
             std::env::remove_var("NO_COLOR");
         }
         assert_eq!(command.get_env("NO_COLOR"), None);
+    }
+
+    #[test]
+    fn terminal_env_keys_reject_shell_invalid_names() {
+        assert!(is_valid_terminal_env_key("VIEW_ENV"));
+        assert!(!is_valid_terminal_env_key(""));
+        assert!(!is_valid_terminal_env_key("BAD=NAME"));
+        assert!(!is_valid_terminal_env_key("BAD\0NAME"));
     }
 
     #[test]

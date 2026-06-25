@@ -1,4 +1,4 @@
-import type { TreeFile } from "../../lib/api";
+import type { FileRunTarget, TreeFile } from "../../lib/api";
 import type { EditorDraft, EditorGitMarker } from "../../lib/editorTypes";
 import type {
   PreviewPane,
@@ -52,11 +52,7 @@ export interface EditorPaneGridProps {
     terminalTabId: string,
     title: string,
   ) => void;
-  readonly onRunCommand: (
-    command: string,
-    label: string,
-    cwd: string | null,
-  ) => void;
+  readonly onRunCommand: (target: FileRunTarget) => void;
   readonly onSave: () => void;
   readonly onSelectTab: (paneId: PreviewPaneId, tab: PreviewTab) => void;
   readonly onStageGitChange: (

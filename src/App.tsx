@@ -50,7 +50,7 @@ import { useRepositoryRemotePolling } from "./hooks/useRepositoryRemotePolling";
 import { useRepositoryProjectData } from "./hooks/useRepositoryWorkspaceData";
 import { useSelectedPathGuard } from "./hooks/useSelectedPathGuard";
 import { useWorkbenchDock } from "./hooks/useWorkbenchDock";
-import { type FileSearchResult, type ProjectScript, detectProjectScripts, terminalKill, type ReflogEntry } from "./lib/api";
+import { type FileSearchResult, type FileRunTarget, type ProjectScript, detectProjectScripts, terminalKill, type ReflogEntry } from "./lib/api";
 import { pasteDestinationFromSelectedPath } from "./lib/clipboardFiles";
 import { commitPanelFiles } from "./lib/commitPanelFiles";
 import {
@@ -66,7 +66,14 @@ import {
   buildRailWorkbenchGridStyle,
   railSideHasIcons,
 } from "./lib/workbenchLayout";
-import { closeTerminalTab, runInTerminal, runInTerminalAt } from "./lib/terminalSessions";
+import { closeTerminalTab, runInRunTab } from "./lib/terminalSessions";
+import {
+  loadRunConfigurations,
+  runConfigurationCommand,
+  runConfigurationEnvRecord,
+  saveRunConfigurations,
+  upsertRunConfiguration,
+} from "./lib/runConfigurations";
 import {
   clearTerminalTabPlacement,
   dockTerminalTabToEditor,
@@ -555,34 +562,76 @@ export function App() {
       });
   }, [activeProjectPath]);
 
-  const handleSelectScript = useCallback(
-    (script: ProjectScript) => {
-      if (!activeProjectPath) {
-        return;
-      }
-      runInTerminal(activeProjectPath, script.command, script.label);
-      setRunScriptState({ loading: false, scripts: [], error: null });
-      // Switch to terminal panel
-      const placement = findRailItemPlacement(railLayout, "terminal");
+  const selectRailPanel = useCallback(
+    (item: RailItemId) => {
+      const placement = findRailItemPlacement(railLayout, item);
       if (placement) {
-        selectRailItem(placement.side, placement.slot, "terminal");
+        selectRailItem(placement.side, placement.slot, item);
       }
     },
-    [activeProjectPath, railLayout, selectRailItem],
+    [railLayout, selectRailItem],
   );
-  const runProjectCommand = useCallback(
-    (command: string, label: string, cwd: string | null) => {
+  const runProjectConfiguration = useCallback(
+    ({
+      sourceId,
+      label,
+      command,
+      cwd = null,
+    }: {
+      readonly sourceId: string;
+      readonly label: string;
+      readonly command: string;
+      readonly cwd?: string | null;
+    }) => {
       if (!activeProjectPath) {
         return;
       }
 
-      runInTerminalAt(activeProjectPath, command, label, cwd);
-      const placement = findRailItemPlacement(railLayout, "terminal");
-      if (placement) {
-        selectRailItem(placement.side, placement.slot, "terminal");
-      }
+      const currentConfigurations = loadRunConfigurations(activeProjectPath);
+      const { configuration, configurations } = upsertRunConfiguration(
+        currentConfigurations,
+        {
+          projectPath: activeProjectPath,
+          sourceId,
+          label,
+          command,
+          cwd,
+        },
+      );
+      saveRunConfigurations(activeProjectPath, configurations);
+      runInRunTab(
+        activeProjectPath,
+        runConfigurationCommand(configuration),
+        configuration.label,
+        configuration.cwd,
+        runConfigurationEnvRecord(configuration),
+        configuration.id,
+      );
+      selectRailPanel("run");
     },
-    [activeProjectPath, railLayout, selectRailItem],
+    [activeProjectPath, selectRailPanel],
+  );
+  const handleSelectScript = useCallback(
+    (script: ProjectScript) => {
+      runProjectConfiguration({
+        sourceId: `project-script:${script.label}:${script.command}`,
+        label: script.label,
+        command: script.command,
+      });
+      setRunScriptState({ loading: false, scripts: [], error: null });
+    },
+    [runProjectConfiguration],
+  );
+  const runProjectCommand = useCallback(
+    (target: FileRunTarget) => {
+      runProjectConfiguration({
+        sourceId: target.id,
+        label: target.label,
+        command: target.command,
+        cwd: target.cwd,
+      });
+    },
+    [runProjectConfiguration],
   );
   const clearSelectedProjectPath = useCallback(() => {
     setSelectedProjectPath(null);
@@ -637,6 +686,8 @@ export function App() {
       const item =
         view === "project"
           ? "fileTree"
+          : view === "run"
+            ? "run"
           : view === "terminal"
             ? "terminal"
             : "git";

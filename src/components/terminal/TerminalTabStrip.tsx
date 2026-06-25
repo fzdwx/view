@@ -5,6 +5,8 @@ import { writeTerminalTabDragData } from "../../lib/terminalTabDrag";
 
 export interface TerminalTabStripProps {
   readonly activeTabId: string;
+  readonly draggableTabs?: boolean;
+  readonly label?: string;
   readonly projectPath: string;
   readonly tabs: readonly TerminalTab[];
   readonly onAddTab: () => void;
@@ -14,6 +16,8 @@ export interface TerminalTabStripProps {
 
 export function TerminalTabStrip({
   activeTabId,
+  draggableTabs = true,
+  label = "Terminal",
   projectPath,
   tabs,
   onAddTab,
@@ -22,23 +26,24 @@ export function TerminalTabStrip({
 }: TerminalTabStripProps) {
   return (
     <div className="terminal-header">
-      <div className="terminal-header-title" aria-label="Terminal">
+      <div className="terminal-header-title" aria-label={label}>
         <TerminalSquare size={14} />
       </div>
       <button
         type="button"
         className="terminal-tab-add"
-        aria-label="New terminal"
-        title="New terminal"
+        aria-label={`New ${label.toLowerCase()}`}
+        title={`New ${label.toLowerCase()}`}
         onClick={onAddTab}
       >
         <Plus size={14} />
       </button>
-      <div className="terminal-tabs" role="tablist" aria-label="Terminals">
+      <div className="terminal-tabs" role="tablist" aria-label={label}>
         {tabs.map((tab) => (
           <TerminalTabItem
             key={tab.id}
             active={tab.id === activeTabId}
+            draggable={draggableTabs}
             projectPath={projectPath}
             tab={tab}
             onCloseTab={onCloseTab}
@@ -52,12 +57,14 @@ export function TerminalTabStrip({
 
 function TerminalTabItem({
   active,
+  draggable,
   projectPath,
   tab,
   onCloseTab,
   onSelectTab,
 }: {
   readonly active: boolean;
+  readonly draggable: boolean;
   readonly projectPath: string;
   readonly tab: TerminalTab;
   readonly onCloseTab: (tabId: string) => void;
@@ -66,8 +73,12 @@ function TerminalTabItem({
   return (
     <div
       className={active ? "terminal-tab-shell terminal-tab-active" : "terminal-tab-shell"}
-      draggable
-      onDragStart={(event) => handleDragStart(event, projectPath, tab)}
+      draggable={draggable}
+      onDragStart={(event) => {
+        if (draggable) {
+          handleDragStart(event, projectPath, tab);
+        }
+      }}
     >
       <button
         type="button"

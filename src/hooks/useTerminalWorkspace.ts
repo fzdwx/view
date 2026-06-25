@@ -5,6 +5,7 @@ import {
 } from "../lib/api";
 import { type AppSettings, loadAppSettings, settingsChangedEvent } from "../lib/settings";
 import {
+  addRunTab,
   addTerminalTab,
   clearPendingCommand,
   closeTerminalTab,
@@ -18,6 +19,7 @@ import {
   subscribeTerminalWorkspaces,
   type TerminalSessionInfo,
   type TerminalTab,
+  type TerminalTabKind,
   type TerminalWorkspace,
 } from "../lib/terminalSessions";
 import {
@@ -45,6 +47,7 @@ export interface TerminalWorkspaceController {
 
 export function useTerminalWorkspace(
   projectPath: string | null,
+  kind: TerminalTabKind = "terminal",
 ): TerminalWorkspaceController {
   const workspace = useSyncExternalStore(
     subscribeTerminalWorkspaces,
@@ -78,10 +81,12 @@ export function useTerminalWorkspace(
     () =>
       projectPath
         ? workspace.tabs.filter(
-            (tab) => terminalTabPlacement(projectPath, tab.id) === "panel",
+            (tab) =>
+              tab.kind === kind &&
+              terminalTabPlacement(projectPath, tab.id) === "panel",
           )
         : [],
-    [placementVersion, projectPath, workspace],
+    [kind, placementVersion, projectPath, workspace],
   );
   const activePanelTab =
     panelTabs.find((tab) => tab.id === workspace.activeTabId) ??
@@ -96,7 +101,9 @@ export function useTerminalWorkspace(
     workspace,
     addTab: (cwd = null) => {
       if (projectPath) {
-        return addTerminalTab(projectPath, cwd);
+        return kind === "run"
+          ? addRunTab(projectPath, cwd)
+          : addTerminalTab(projectPath, cwd);
       }
       return null;
     },

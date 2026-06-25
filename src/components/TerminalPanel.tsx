@@ -34,11 +34,16 @@ import {
 } from "../lib/terminalFrameWindow";
 import { logPerf } from "../lib/performanceLog";
 import { terminalFramePerfFields } from "../lib/terminalPerf";
-import type { TerminalSessionInfo } from "../lib/terminalSessions";
+import type {
+  TerminalSessionInfo,
+  TerminalTabKind,
+} from "../lib/terminalSessions";
 import { TerminalTabStrip } from "./terminal/TerminalTabStrip";
 
 interface TerminalPanelProps {
   active: boolean;
+  kind?: TerminalTabKind;
+  label?: string;
   projectPath: string | null;
 }
 
@@ -648,6 +653,7 @@ export interface TerminalSessionViewProps {
   /** Existing live PTY session to reconnect to, or null to spawn a new one. */
   session: TerminalSessionInfo | null;
   terminalOptions: TerminalSpawnOptions;
+  env?: Readonly<Record<string, string>>;
   /** Command to send to the PTY once the WebSocket is open. */
   pendingCommand: string | null;
   onTitleChange(title: string | null): void;
@@ -663,6 +669,7 @@ export function TerminalSessionView({
   projectPath,
   session,
   terminalOptions,
+  env,
   pendingCommand,
   onTitleChange,
   onSessionReady,
@@ -684,6 +691,7 @@ export function TerminalSessionView({
     projectPath,
     session,
     terminalOptions,
+    env,
     pendingCommand,
     screenRef,
     onTitleChange,
@@ -756,25 +764,28 @@ function TerminalRenderStats({ frame }: { readonly frame: TerminalFrame }) {
 
 export const TerminalPanel = memo(function TerminalPanel({
   active,
+  kind = "terminal",
+  label = "Terminal",
   projectPath,
 }: TerminalPanelProps) {
-  const terminalWorkspace = useTerminalWorkspace(projectPath);
+  const terminalWorkspace = useTerminalWorkspace(projectPath, kind);
 
   if (!projectPath || !isTauriRuntime()) {
     const unavailableMessage = !projectPath
       ? "Open a folder first."
       : "Terminal is available in Tauri.";
     return (
-      <section className="terminal-panel" aria-label="Terminal">
+      <section className="terminal-panel" aria-label={label}>
         <div className="terminal-empty">{unavailableMessage}</div>
       </section>
     );
   }
 
   return (
-    <section className="terminal-panel" aria-label="Terminal">
+    <section className="terminal-panel" aria-label={label}>
       <TerminalTabStrip
         activeTabId={terminalWorkspace.activePanelTab?.id ?? ""}
+        label={label}
         projectPath={projectPath}
         tabs={terminalWorkspace.panelTabs}
         onAddTab={terminalWorkspace.addTab}
@@ -791,6 +802,7 @@ export const TerminalPanel = memo(function TerminalPanel({
               projectPath={projectPath}
               session={terminalWorkspace.activePanelTab.session}
               terminalOptions={terminalWorkspace.terminalOptions}
+              env={terminalWorkspace.activePanelTab.env}
               pendingCommand={terminalWorkspace.activePanelTab.pendingCommand}
               onTitleChange={(title) =>
                 terminalWorkspace.updateTabTitle(
