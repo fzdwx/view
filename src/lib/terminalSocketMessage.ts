@@ -3,6 +3,7 @@ import type {
   TerminalBell,
   TerminalClose,
   TerminalFrame,
+  TerminalGrapheme,
   TerminalLine,
   TerminalModes,
   TerminalRun,
@@ -42,6 +43,8 @@ export function createTerminalErrorFrame(error: unknown): TerminalFrame {
     rows: 1,
     cols: 80,
     displayOffset: 0,
+    lineOffset: 0,
+    historySize: 0,
     cursorRow: 0,
     cursorCol: 0,
     cursorVisible: false,
@@ -98,6 +101,10 @@ function parseFrame(value: Readonly<Record<string, unknown>>): TerminalFrame | n
     rows: value.rows,
     cols: value.cols,
     displayOffset: value.displayOffset,
+    lineOffset:
+      typeof value.lineOffset === "number" ? value.lineOffset : -value.displayOffset,
+    historySize:
+      typeof value.historySize === "number" ? value.historySize : value.displayOffset,
     cursorRow: value.cursorRow,
     cursorCol: value.cursorCol,
     cursorVisible: value.cursorVisible,
@@ -148,6 +155,11 @@ function parseRuns(values: readonly unknown[]): readonly TerminalRun[] | null {
     }
     runs.push({
       text: value.text,
+      columns: typeof value.columns === "number" ? value.columns : undefined,
+      simpleAscii: typeof value.simpleAscii === "boolean" ? value.simpleAscii : undefined,
+      graphemes: Array.isArray(value.graphemes)
+        ? parseGraphemes(value.graphemes)
+        : undefined,
       fg: typeof value.fg === "string" ? value.fg : null,
       bg: typeof value.bg === "string" ? value.bg : null,
       href: typeof value.href === "string" ? value.href : null,
@@ -159,6 +171,24 @@ function parseRuns(values: readonly unknown[]): readonly TerminalRun[] | null {
     });
   }
   return runs;
+}
+
+function parseGraphemes(values: readonly unknown[]): readonly TerminalGrapheme[] | undefined {
+  const graphemes: TerminalGrapheme[] = [];
+  for (const value of values) {
+    if (
+      !isRecord(value) ||
+      typeof value.text !== "string" ||
+      typeof value.columns !== "number"
+    ) {
+      return undefined;
+    }
+    graphemes.push({
+      text: value.text,
+      columns: Math.max(1, Math.trunc(value.columns)),
+    });
+  }
+  return graphemes.length > 0 ? graphemes : undefined;
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {

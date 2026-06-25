@@ -155,7 +155,50 @@ export function selectedTextWithin(element: HTMLElement): string {
     return "";
   }
 
-  return selection.toString();
+  return terminalSelectedTextWithin(element, range) ?? selection.toString();
+}
+
+export function normalizeTerminalSelectedLineText(text: string): string {
+  return text.replace(/\r\n|\r|\n/g, "");
+}
+
+function terminalSelectedTextWithin(
+  element: HTMLElement,
+  range: Range,
+): string | null {
+  const lines = Array.from(
+    element.querySelectorAll<HTMLElement>(".terminal-line"),
+  ).filter((line) => rangeIntersectsNode(range, line));
+  if (lines.length === 0) {
+    return null;
+  }
+
+  return lines
+    .map((line) => normalizeTerminalSelectedLineText(textForSelectedLine(line, range)))
+    .join("\n");
+}
+
+function textForSelectedLine(line: HTMLElement, selectionRange: Range): string {
+  const lineRange = document.createRange();
+  lineRange.selectNodeContents(line);
+  if (line.contains(selectionRange.startContainer)) {
+    lineRange.setStart(selectionRange.startContainer, selectionRange.startOffset);
+  }
+  if (line.contains(selectionRange.endContainer)) {
+    lineRange.setEnd(selectionRange.endContainer, selectionRange.endOffset);
+  }
+
+  const text = lineRange.toString();
+  lineRange.detach();
+  return text;
+}
+
+function rangeIntersectsNode(range: Range, node: Node): boolean {
+  try {
+    return range.intersectsNode(node);
+  } catch {
+    return false;
+  }
 }
 
 export function terminalInputByteLength(input: TerminalInput): number {

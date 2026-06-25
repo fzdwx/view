@@ -66,6 +66,8 @@ export function connectTerminalSocket(
     const message = timeSync(
       "terminal:socket-parse",
       () => parseTerminalSocketMessage(event.data),
+      undefined,
+      { logFast: false },
     );
     if (!message) {
       return;
@@ -75,6 +77,7 @@ export function connectTerminalSocket(
         "terminal:socket-frame",
         0,
         () => terminalFramePerfFields(message),
+        { logFast: false },
       );
       const nextTitle = message.title ?? null;
       if (options.socketTitleRef.current !== nextTitle) {

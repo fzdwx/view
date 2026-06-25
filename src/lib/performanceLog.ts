@@ -2,6 +2,7 @@ export type PerfLogFields = Record<string, boolean | number | string | null | un
 type PerfLogFieldSource = PerfLogFields | (() => PerfLogFields);
 
 export interface PerfLogOptions {
+  readonly logFast?: boolean;
   readonly slowThresholdMs?: number;
 }
 
@@ -91,6 +92,9 @@ export function logPerf(
   }
 
   const thresholdMs = options?.slowThresholdMs ?? slowThresholdMs;
+  if (durationMs < thresholdMs && options?.logFast === false) {
+    return;
+  }
   if (isPanelResizeInProgress()) {
     deferResizePerfLog({ label, durationMs, fields, thresholdMs });
     return;

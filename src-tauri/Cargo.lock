@@ -4980,6 +4980,8 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tungstenite",
+ "unicode-segmentation",
+ "unicode-width",
 ]
 
 [[package]]

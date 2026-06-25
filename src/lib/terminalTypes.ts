@@ -2,8 +2,16 @@ import type { TerminalCursorStyle } from "./api";
 
 export type { TerminalCursorStyle };
 
+export interface TerminalGrapheme {
+  readonly text: string;
+  readonly columns: number;
+}
+
 export interface TerminalRun {
   readonly text: string;
+  readonly columns?: number;
+  readonly simpleAscii?: boolean;
+  readonly graphemes?: readonly TerminalGrapheme[];
   readonly fg?: string | null;
   readonly bg?: string | null;
   readonly href?: string | null;
@@ -43,6 +51,8 @@ export interface TerminalFrame {
   readonly rows: number;
   readonly cols: number;
   readonly displayOffset: number;
+  readonly lineOffset: number;
+  readonly historySize: number;
   readonly cursorRow: number;
   readonly cursorCol: number;
   readonly cursorVisible: boolean;

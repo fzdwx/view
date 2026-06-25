@@ -9,7 +9,16 @@ import {
   terminalMousePosition,
   terminalMouseSequence,
 } from "./terminalInput";
-import { MIN_TERMINAL_ROWS, type TerminalCellMetrics, type TerminalFrame, type TerminalInput, type TerminalModes } from "./terminalTypes";
+import {
+  terminalScrollDeltaForKey,
+} from "./terminalFrameWindow";
+import {
+  MIN_TERMINAL_ROWS,
+  type TerminalCellMetrics,
+  type TerminalFrame,
+  type TerminalInput,
+  type TerminalModes,
+} from "./terminalTypes";
 
 type RefBox<T> = {
   current: T;
@@ -25,6 +34,7 @@ export interface TerminalScreenHandlerContext {
   readonly screenElement: HTMLElement;
   readonly scrollTerminal: (delta: number, direction: TerminalScrollDirection) => void;
   readonly sendInput: (data: TerminalInput | null) => void;
+  readonly sendUserInput: (data: TerminalInput | null) => void;
   readonly wheelScrollAccumulatorRef: RefBox<number>;
 }
 
@@ -39,14 +49,45 @@ export function attachTerminalScreenHandlers(
     screenElement,
     scrollTerminal,
     sendInput,
+    sendUserInput,
     wheelScrollAccumulatorRef,
   } = context;
+  let pendingWheelScrollDelta = 0;
+  let wheelScrollFrame: number | null = null;
+  const flushWheelScroll = () => {
+    wheelScrollFrame = null;
+    const delta = pendingWheelScrollDelta;
+    pendingWheelScrollDelta = 0;
+    if (delta === 0) {
+      return;
+    }
+    scrollTerminal(delta, delta > 0 ? "up" : "down");
+  };
+  const queueWheelScroll = (delta: number) => {
+    if (delta === 0) {
+      return;
+    }
+    if (
+      pendingWheelScrollDelta !== 0 &&
+      Math.sign(pendingWheelScrollDelta) !== Math.sign(delta)
+    ) {
+      if (wheelScrollFrame != null) {
+        window.cancelAnimationFrame(wheelScrollFrame);
+        wheelScrollFrame = null;
+      }
+      flushWheelScroll();
+    }
+    pendingWheelScrollDelta += delta;
+    if (wheelScrollFrame == null) {
+      wheelScrollFrame = window.requestAnimationFrame(flushWheelScroll);
+    }
+  };
   const pasteText = (text: string) => {
     if (!text) {
       return;
     }
     const normalizedText = text.replace(/\r?\n/g, "\r");
-    sendInput(
+    sendUserInput(
       modesRef.current.bracketedPaste
         ? `\x1b[200~${normalizedText}\x1b[201~`
         : normalizedText,
@@ -81,12 +122,23 @@ export function attachTerminalScreenHandlers(
       }
       return;
     }
+    const scrollDelta = terminalScrollDeltaForKey(frameRef.current, event);
+    if (scrollDelta != null) {
+      event.preventDefault();
+      if (scrollDelta !== 0) {
+        scrollTerminal(
+          scrollDelta,
+          event.key === "End" ? "bottom" : scrollDelta > 0 ? "up" : "down",
+        );
+      }
+      return;
+    }
     const input = keyToTerminalInput(event, modesRef.current);
     if (input == null) {
       return;
     }
     event.preventDefault();
-    sendInput(input);
+    sendUserInput(input);
   };
   const handleCopy = (event: ClipboardEvent) => {
     if (!copySelectedText(event.clipboardData)) {
@@ -168,7 +220,7 @@ export function attachTerminalScreenHandlers(
       return;
     }
     wheelScrollAccumulatorRef.current -= delta;
-    scrollTerminal(delta, delta > 0 ? "up" : "down");
+    queueWheelScroll(delta);
   };
   const handleContextMenu = (event: MouseEvent) => {
     if (terminalMouseEnabled(modesRef.current)) {
@@ -197,6 +249,11 @@ export function attachTerminalScreenHandlers(
     screenElement.removeEventListener("mousemove", handleMouseMove);
     screenElement.removeEventListener("wheel", handleWheel);
     screenElement.removeEventListener("contextmenu", handleContextMenu);
+    if (wheelScrollFrame != null) {
+      window.cancelAnimationFrame(wheelScrollFrame);
+      wheelScrollFrame = null;
+    }
+    pendingWheelScrollDelta = 0;
   };
 }
 

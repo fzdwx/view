@@ -70,6 +70,7 @@ export interface TerminalSessionLifecycleOptions {
   readonly screenRef: RefObject<HTMLDivElement | null>;
   readonly scrollTerminal: (delta: number, direction: TerminalScrollDirection) => void;
   readonly sendInput: (data: TerminalInput | null) => void;
+  readonly sendUserInput: (data: TerminalInput | null) => void;
   readonly sessionIdRef: MutableRef<string | null>;
   readonly sessionRef: MutableRef<TerminalSessionInfo | null>;
   readonly setClosedState: (closed: TerminalClose | null) => void;
@@ -193,6 +194,7 @@ export function useTerminalSessionLifecycle(options: TerminalSessionLifecycleOpt
       screenElement: terminalElement,
       scrollTerminal: options.scrollTerminal,
       sendInput: options.sendInput,
+      sendUserInput: options.sendUserInput,
       wheelScrollAccumulatorRef: options.wheelScrollAccumulatorRef,
     });
     const resizeObserver = new ResizeObserver(scheduleResize);
@@ -296,6 +298,7 @@ export function useTerminalSessionLifecycle(options: TerminalSessionLifecycleOpt
     options.screenRef,
     options.scrollTerminal,
     options.sendInput,
+    options.sendUserInput,
     options.sessionIdRef,
     options.sessionRef,
     options.setClosedState,

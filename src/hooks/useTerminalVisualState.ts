@@ -14,6 +14,10 @@ import {
   type TerminalInput,
   type TerminalModes,
 } from "../lib/terminalTypes";
+import {
+  alignTerminalFrameDisplayOffset,
+  previewTerminalScrollFrame,
+} from "../lib/terminalFrameWindow";
 
 type ScrollIntent = "up" | "down" | "bottom";
 const TERMINAL_FLUSH_WARN_MS = 50;
@@ -28,6 +32,7 @@ export interface TerminalVisualState {
   readonly clearScrollbackHint: () => void;
   readonly flushPendingFrame: () => void;
   readonly markPendingScrollIntent: (direction: ScrollIntent) => void;
+  readonly previewScrollFrame: (delta: number) => boolean;
   readonly queueFrame: (
     frame: TerminalFrame,
     screenElement: HTMLElement,
@@ -66,6 +71,7 @@ export function useTerminalVisualState(): TerminalVisualState {
     }
     logPerf("terminal:frame-committed", 0, () =>
       terminalFramePerfFields(frame),
+      { logFast: false },
     );
   }, [frame]);
 
@@ -149,7 +155,7 @@ export function useTerminalVisualState(): TerminalVisualState {
       "terminal:flush-frame",
       flushWaitMs,
       () => terminalFramePerfFields(pendingFrame, flushFields),
-      { slowThresholdMs: TERMINAL_FLUSH_WARN_MS },
+      { logFast: false, slowThresholdMs: TERMINAL_FLUSH_WARN_MS },
     );
     coalescedFrameCountRef.current = 0;
     setFrameState(pendingFrame);
@@ -166,6 +172,38 @@ export function useTerminalVisualState(): TerminalVisualState {
     }
     commitPendingFrame("manual");
   }, [commitPendingFrame]);
+
+  const cancelScheduledFrameFlush = useCallback(() => {
+    if (frameFlushRef.current != null) {
+      window.cancelAnimationFrame(frameFlushRef.current);
+      frameFlushRef.current = null;
+    }
+    if (frameFlushTimeoutRef.current != null) {
+      window.clearTimeout(frameFlushTimeoutRef.current);
+      frameFlushTimeoutRef.current = null;
+    }
+  }, []);
+
+  const previewScrollFrame = useCallback(
+    (delta: number): boolean => {
+      const baseFrame = pendingFrameRef.current ?? frameRef.current;
+      if (!baseFrame) {
+        return false;
+      }
+      const nextFrame = previewTerminalScrollFrame(baseFrame, delta);
+      if (!nextFrame) {
+        return false;
+      }
+
+      cancelScheduledFrameFlush();
+      pendingFrameRef.current = null;
+      pendingFrameQueuedAtRef.current = null;
+      coalescedFrameCountRef.current = 0;
+      setFrameState(nextFrame);
+      return true;
+    },
+    [cancelScheduledFrameFlush, setFrameState],
+  );
 
   useEffect(() => {
     let pendingFlushFrame: number | null = null;
@@ -197,14 +235,18 @@ export function useTerminalVisualState(): TerminalVisualState {
       const nextModes = nextFrame.modes ?? DEFAULT_TERMINAL_MODES;
       modesRef.current = nextModes;
       const previousDisplayOffset = frameRef.current?.displayOffset ?? 0;
-      const nextDisplayOffset = Math.max(0, nextFrame.displayOffset ?? 0);
       const pendingScrollIntent = consumePendingScrollIntent();
+      const backendDisplayOffset = Math.max(0, nextFrame.displayOffset ?? 0);
+      const staleScrollFrame =
+        (pendingScrollIntent === "up" && backendDisplayOffset < previousDisplayOffset) ||
+        ((pendingScrollIntent === "down" || pendingScrollIntent === "bottom") &&
+          backendDisplayOffset > previousDisplayOffset);
+      const visualFrame = staleScrollFrame
+        ? alignTerminalFrameDisplayOffset(nextFrame, previousDisplayOffset) ?? nextFrame
+        : nextFrame;
+      const nextDisplayOffset = Math.max(0, visualFrame.displayOffset ?? 0);
       if (previousDisplayOffset > 0 && nextDisplayOffset === 0) {
-        if (pendingScrollIntent === "down" || pendingScrollIntent === "bottom") {
-          clearScrollbackHint();
-        } else {
-          showScrollbackHint(previousDisplayOffset);
-        }
+        clearScrollbackHint();
       } else if (nextDisplayOffset > 0) {
         clearScrollbackHint();
       }
@@ -219,7 +261,7 @@ export function useTerminalVisualState(): TerminalVisualState {
         coalescedFrameCountRef.current += 1;
       }
       pendingFrameSequenceRef.current += 1;
-      pendingFrameRef.current = { ...nextFrame, displayOffset: nextDisplayOffset };
+      pendingFrameRef.current = { ...visualFrame, displayOffset: nextDisplayOffset };
       pendingFrameQueuedAtRef.current = performance.now();
       const panelResizing = isPanelResizeInProgress();
       if (!panelResizing) {
@@ -227,11 +269,13 @@ export function useTerminalVisualState(): TerminalVisualState {
           coalesced: coalescedFrameCountRef.current > 0,
           sequence: pendingFrameSequenceRef.current,
           panelResizing,
+          staleScrollFrame,
         };
         logPerf(
           "terminal:queue-frame",
           0,
-          () => terminalFramePerfFields(nextFrame, queueFields),
+          () => terminalFramePerfFields(visualFrame, queueFields),
+          { logFast: false },
         );
       }
       if (frameFlushRef.current == null && frameFlushTimeoutRef.current == null) {
@@ -250,7 +294,7 @@ export function useTerminalVisualState(): TerminalVisualState {
         }
       }
     },
-    [clearScrollbackHint, commitPendingFrame, consumePendingScrollIntent, showScrollbackHint],
+    [clearScrollbackHint, commitPendingFrame, consumePendingScrollIntent],
   );
 
   const resetVisualState = useCallback(() => {
@@ -286,6 +330,7 @@ export function useTerminalVisualState(): TerminalVisualState {
     clearScrollbackHint,
     flushPendingFrame,
     markPendingScrollIntent,
+    previewScrollFrame,
     queueFrame,
     resetVisualState,
     setClosedState: setClosed,

@@ -24,9 +24,14 @@ import {
   DEFAULT_TERMINAL_CELL_METRICS,
   type TerminalCursorStyle,
   type TerminalFrame,
+  type TerminalGrapheme,
   type TerminalLine,
   type TerminalRun,
 } from "../lib/terminalTypes";
+import {
+  terminalVisibleLineAt,
+  terminalVisibleLogicalRow,
+} from "../lib/terminalFrameWindow";
 import { logPerf } from "../lib/performanceLog";
 import { terminalFramePerfFields } from "../lib/terminalPerf";
 import type { TerminalSessionInfo } from "../lib/terminalSessions";
@@ -157,9 +162,9 @@ function terminalGraphemeColumns(grapheme: string): number {
     : 1;
 }
 
-function terminalTextColumns(graphemes: readonly string[]): number {
+function terminalTextColumns(graphemes: readonly TerminalGrapheme[]): number {
   return graphemes.reduce(
-    (totalColumns, grapheme) => totalColumns + terminalGraphemeColumns(grapheme),
+    (totalColumns, grapheme) => totalColumns + grapheme.columns,
     0,
   );
 }
@@ -171,12 +176,52 @@ function simpleTerminalTextColumns(text: string): number | null {
   return SIMPLE_TERMINAL_TEXT_PATTERN.test(text) ? text.length : null;
 }
 
-function terminalRunGraphemes(text: string, simpleColumns: number | null): string[] {
-  if (simpleColumns != null) {
-    return Array.from(text || " ");
+function validTerminalColumns(columns: number | undefined): number | null {
+  if (columns == null || !Number.isFinite(columns) || columns <= 0) {
+    return null;
+  }
+  return Math.max(1, Math.trunc(columns));
+}
+
+function terminalRunFallbackGraphemes(text: string): readonly TerminalGrapheme[] {
+  return splitTerminalGraphemes(text).map((grapheme) => ({
+    text: grapheme,
+    columns: terminalGraphemeColumns(grapheme),
+  }));
+}
+
+function terminalRunGraphemes(
+  run: TerminalRun,
+  text: string,
+): readonly TerminalGrapheme[] {
+  if (run.graphemes && run.graphemes.length > 0) {
+    return run.graphemes.map((grapheme) => ({
+      text: grapheme.text || " ",
+      columns: validTerminalColumns(grapheme.columns) ?? 1,
+    }));
   }
 
-  return splitTerminalGraphemes(text);
+  return terminalRunFallbackGraphemes(text);
+}
+
+function terminalRunColumns(run: TerminalRun, text: string): number {
+  return (
+    validTerminalColumns(run.columns) ??
+    simpleTerminalTextColumns(text) ??
+    terminalTextColumns(terminalRunFallbackGraphemes(text))
+  );
+}
+
+function terminalSimpleRunColumns(
+  run: TerminalRun,
+  text: string,
+  columns: number,
+): number | null {
+  if (run.simpleAscii === true && (text || " ").length === columns) {
+    return columns;
+  }
+  const fallbackColumns = simpleTerminalTextColumns(text);
+  return fallbackColumns === columns ? fallbackColumns : null;
 }
 
 function terminalCellStyle(columns: number): CSSProperties | undefined {
@@ -188,13 +233,13 @@ function terminalCellStyle(columns: number): CSSProperties | undefined {
 }
 
 function terminalCursorGraphemeIndex(
-  graphemes: readonly string[],
+  graphemes: readonly TerminalGrapheme[],
   columnOffset: number,
 ): number {
   let consumedColumns = 0;
 
   for (let index = 0; index < graphemes.length; index += 1) {
-    const graphemeColumns = terminalGraphemeColumns(graphemes[index]);
+    const graphemeColumns = graphemes[index].columns;
     if (columnOffset < consumedColumns + graphemeColumns) {
       return index;
     }
@@ -255,10 +300,17 @@ function TerminalBlockGlyph({ grapheme, rects }: TerminalBlockGlyphProps) {
 }
 
 interface TerminalCellsProps {
-  readonly graphemes: readonly string[];
+  readonly graphemes: readonly TerminalGrapheme[];
   readonly keyPrefix: string;
   readonly cursorIndex: number | null;
   readonly cursorShape: TerminalCursorStyle;
+}
+
+interface TerminalSimpleCellsProps {
+  readonly cursorIndex: number | null;
+  readonly cursorShape: TerminalCursorStyle;
+  readonly keyPrefix: string;
+  readonly text: string;
 }
 
 type TerminalCursorFrame = Pick<
@@ -275,12 +327,13 @@ function TerminalCells({
   let column = 0;
 
   return graphemes.map((grapheme) => {
-    const columns = terminalGraphemeColumns(grapheme);
+    const columns = grapheme.columns;
+    const text = grapheme.text;
     const key = `${keyPrefix}-${column}`;
-    const boxSegments = terminalBoxSegments(grapheme);
-    const blockRects = terminalBlockRects(grapheme);
+    const boxSegments = terminalBoxSegments(text);
+    const blockRects = terminalBlockRects(text);
     const classNames = ["terminal-cell"];
-    if (EMOJI_GRAPHEME_PATTERN.test(grapheme)) {
+    if (EMOJI_GRAPHEME_PATTERN.test(text)) {
       classNames.push("terminal-emoji-run");
     }
     if (boxSegments || blockRects) {
@@ -294,12 +347,34 @@ function TerminalCells({
     return (
       <span key={key} className={classNames.join(" ")} style={terminalCellStyle(columns)}>
         {blockRects ? (
-          <TerminalBlockGlyph grapheme={grapheme} rects={blockRects} />
+          <TerminalBlockGlyph grapheme={text} rects={blockRects} />
         ) : boxSegments ? (
-          <TerminalBoxGlyph grapheme={grapheme} segments={boxSegments} />
+          <TerminalBoxGlyph grapheme={text} segments={boxSegments} />
         ) : (
-          grapheme
+          text
         )}
+      </span>
+    );
+  });
+}
+
+function TerminalSimpleCells({
+  cursorIndex,
+  cursorShape,
+  keyPrefix,
+  text,
+}: TerminalSimpleCellsProps) {
+  const cursorClassName =
+    cursorIndex == null ? "" : terminalCursorClassName(cursorShape);
+
+  return Array.from(text || " ").map((grapheme, index) => {
+    const className =
+      cursorIndex === index
+        ? `terminal-cell ${cursorClassName}`
+        : "terminal-cell";
+    return (
+      <span key={`${keyPrefix}-${index}`} className={className}>
+        {grapheme}
       </span>
     );
   });
@@ -312,9 +387,9 @@ function renderRunWithCursor(
   frame: TerminalCursorFrame,
 ) {
   const text = run.text || " ";
-  const simpleColumns = simpleTerminalTextColumns(text);
-  const graphemes = terminalRunGraphemes(text, simpleColumns);
-  const textColumns = simpleColumns ?? terminalTextColumns(graphemes);
+  const textColumns = terminalRunColumns(run, text);
+  const simpleColumns = terminalSimpleRunColumns(run, text, textColumns);
+  const graphemes = simpleColumns == null ? terminalRunGraphemes(run, text) : [];
   const cursorInRun =
     frame.cursorVisible &&
     frame.cursorRow === row &&
@@ -322,6 +397,21 @@ function renderRunWithCursor(
     frame.cursorCol < startCol + textColumns;
   const style = terminalRunStyle(run);
   const key = `${startCol}-${text.length}`;
+
+  if (simpleColumns != null) {
+    return renderTerminalRunContainer(
+      run,
+      key,
+      style,
+      textColumns,
+      <TerminalSimpleCells
+        cursorIndex={cursorInRun ? frame.cursorCol - startCol : null}
+        cursorShape={frame.cursorShape}
+        keyPrefix={`${startCol}`}
+        text={text}
+      />,
+    );
+  }
 
   if (!cursorInRun) {
     return renderTerminalRunContainer(
@@ -366,7 +456,10 @@ function TrailingCursor({ row, frame, renderedColumns }: TrailingCursorProps) {
   }
 
   const missingColumns = Math.max(1, frame.cursorCol - renderedColumns + 1);
-  const paddingCells = Array.from({ length: missingColumns }, () => " ");
+  const paddingCells = Array.from({ length: missingColumns }, () => ({
+    text: " ",
+    columns: 1,
+  }));
   const style: CSSProperties = {
     width: `calc(${missingColumns} * var(--terminal-cell-width, ${DEFAULT_TERMINAL_CELL_METRICS.width}px))`,
   };
@@ -414,9 +507,7 @@ const TerminalLineView = memo(
         {line.cells.map((run) => {
           const text = run.text || " ";
           const startColumn = column;
-          column +=
-            simpleTerminalTextColumns(text) ??
-            terminalTextColumns(splitTerminalGraphemes(text));
+          column += terminalRunColumns(run, text);
           return renderRunWithCursor(
             run,
             row,
@@ -434,17 +525,20 @@ const TerminalLineView = memo(
 const TerminalRows = memo(function TerminalRows({ frame }: { frame: TerminalFrame }) {
   return (
     <>
-      {frame.lines.map((line, row) => (
-        <TerminalLineView
-          key={row}
-          cursorCol={frame.cursorCol}
-          cursorRow={frame.cursorRow}
-          cursorShape={frame.cursorShape}
-          cursorVisible={frame.cursorVisible}
-          line={line}
-          row={row}
-        />
-      ))}
+      {Array.from({ length: frame.rows }, (_, row) => {
+        const logicalRow = terminalVisibleLogicalRow(frame, row);
+        return (
+          <TerminalLineView
+            key={logicalRow}
+            cursorCol={frame.cursorCol}
+            cursorRow={frame.cursorRow}
+            cursorShape={frame.cursorShape}
+            cursorVisible={frame.cursorVisible}
+            line={terminalVisibleLineAt(frame, row)}
+            row={row}
+          />
+        );
+      })}
     </>
   );
 });
@@ -457,21 +551,22 @@ const onTerminalRender: ProfilerOnRenderCallback = (
   actualDuration,
   baseDuration,
 ) => {
-  logPerf("terminal:react-render", actualDuration, {
-    id,
-    phase,
-    baseMs: Math.round(baseDuration * 10) / 10,
-  });
+  logPerf(
+    "terminal:react-render",
+    actualDuration,
+    {
+      id,
+      phase,
+      baseMs: Math.round(baseDuration * 10) / 10,
+    },
+    { logFast: false },
+  );
 };
 
 function areTerminalLinePropsEqual(
   previous: Readonly<TerminalLineViewProps>,
   next: Readonly<TerminalLineViewProps>,
 ): boolean {
-  if (previous.row !== next.row) {
-    return false;
-  }
-
   const previousCursorOnLine =
     previous.cursorVisible && previous.cursorRow === previous.row;
   const nextCursorOnLine = next.cursorVisible && next.cursorRow === next.row;
@@ -513,12 +608,37 @@ function terminalRunsEqual(previous: TerminalRun, next: TerminalRun): boolean {
     previous.fg === next.fg &&
     previous.bg === next.bg &&
     previous.href === next.href &&
+    previous.columns === next.columns &&
+    previous.simpleAscii === next.simpleAscii &&
+    terminalGraphemesEqual(previous.graphemes, next.graphemes) &&
     previous.bold === next.bold &&
     previous.dim === next.dim &&
     previous.italic === next.italic &&
     previous.underline === next.underline &&
     previous.inverse === next.inverse
   );
+}
+
+function terminalGraphemesEqual(
+  previous: readonly TerminalGrapheme[] | undefined,
+  next: readonly TerminalGrapheme[] | undefined,
+): boolean {
+  if (previous === next) {
+    return true;
+  }
+  if (!previous || !next || previous.length !== next.length) {
+    return false;
+  }
+
+  for (let index = 0; index < previous.length; index += 1) {
+    if (
+      previous[index].text !== next[index].text ||
+      previous[index].columns !== next[index].columns
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 export interface TerminalSessionViewProps {
@@ -626,7 +746,9 @@ export function TerminalSessionView({
 
 function TerminalRenderStats({ frame }: { readonly frame: TerminalFrame }) {
   useEffect(() => {
-    logPerf("terminal:render-input", 0, () => terminalFramePerfFields(frame));
+    logPerf("terminal:render-input", 0, () => terminalFramePerfFields(frame), {
+      logFast: false,
+    });
   }, [frame]);
 
   return null;

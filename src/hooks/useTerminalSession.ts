@@ -72,6 +72,7 @@ export function useTerminalSession(options: TerminalSessionOptions) {
     jumpedScrollbackOffset,
     markPendingScrollIntent,
     modesRef,
+    previewScrollFrame,
     queueFrame,
     resetVisualState,
     setClosedState,
@@ -116,13 +117,28 @@ export function useTerminalSession(options: TerminalSessionOptions) {
         return;
       }
       markPendingScrollIntent(direction);
+      previewScrollFrame(delta);
       wheelScrollAccumulatorRef.current = 0;
       if (direction !== "up") {
         clearScrollbackHint();
       }
       void terminalScroll(sessionId, delta).catch(() => undefined);
     },
-    [clearScrollbackHint, markPendingScrollIntent],
+    [clearScrollbackHint, markPendingScrollIntent, previewScrollFrame],
+  );
+
+  const sendUserInput = useCallback(
+    (data: Parameters<typeof sendInput>[0]) => {
+      if (!data) {
+        return;
+      }
+      const displayOffset = frameRef.current?.displayOffset ?? 0;
+      if (displayOffset > 0) {
+        scrollTerminal(-displayOffset, "bottom");
+      }
+      sendInput(data);
+    },
+    [frameRef, scrollTerminal, sendInput],
   );
 
   const handleScrollToBottom = useCallback(() => {
@@ -163,6 +179,7 @@ export function useTerminalSession(options: TerminalSessionOptions) {
     screenRef,
     scrollTerminal,
     sendInput,
+    sendUserInput,
     sessionIdRef,
     sessionRef,
     setClosedState,

@@ -35,6 +35,8 @@ use std::thread;
 use std::time::Duration;
 use tauri::State;
 use tungstenite::{accept, Error as WsError, Message, WebSocket};
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 mod clipboard_paste;
 mod git_commit_push;
@@ -633,8 +635,19 @@ struct TerminalRunStyle {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct TerminalFrameGrapheme {
+    text: String,
+    columns: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct TerminalFrameRun {
     text: String,
+    columns: usize,
+    simple_ascii: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    graphemes: Option<Vec<TerminalFrameGrapheme>>,
     #[serde(flatten)]
     style: TerminalRunStyle,
 }
@@ -671,6 +684,8 @@ struct TerminalFrame {
     rows: usize,
     cols: usize,
     display_offset: usize,
+    line_offset: i32,
+    history_size: usize,
     cursor_row: usize,
     cursor_col: usize,
     cursor_visible: bool,
@@ -684,6 +699,8 @@ struct TerminalState {
     sessions: Arc<Mutex<HashMap<String, TerminalSession>>>,
     next_id: AtomicU64,
 }
+
+const TERMINAL_SCROLLBACK_CONTEXT_LINES: usize = 96;
 
 #[tauri::command]
 async fn default_start_path() -> Result<String, String> {
@@ -3008,6 +3025,62 @@ fn terminal_frame_modes(mode: TermMode) -> TerminalFrameModes {
     }
 }
 
+fn terminal_text_is_simple_ascii(text: &str, columns: usize) -> bool {
+    if text.is_empty() {
+        return columns == 1;
+    }
+
+    text.len() == columns && text.bytes().all(|byte| (0x20..=0x7e).contains(&byte))
+}
+
+fn terminal_grapheme_columns(text: &str, columns: usize) -> Vec<TerminalFrameGrapheme> {
+    let mut graphemes = UnicodeSegmentation::graphemes(text, true).collect::<Vec<_>>();
+    if graphemes.is_empty() {
+        graphemes.push(" ");
+    }
+
+    let safe_columns = columns.max(1);
+    let mut remaining_columns = safe_columns;
+    let grapheme_count = graphemes.len();
+    let mut frame_graphemes = Vec::with_capacity(grapheme_count);
+
+    for (index, grapheme) in graphemes.into_iter().enumerate() {
+        let remaining_graphemes = grapheme_count.saturating_sub(index + 1);
+        let estimated_columns = UnicodeWidthStr::width(grapheme).max(1);
+        let max_columns = remaining_columns.saturating_sub(remaining_graphemes).max(1);
+        let grapheme_columns = if remaining_graphemes == 0 {
+            remaining_columns.max(1)
+        } else {
+            estimated_columns.min(max_columns).max(1)
+        };
+        remaining_columns = remaining_columns.saturating_sub(grapheme_columns);
+        frame_graphemes.push(TerminalFrameGrapheme {
+            text: grapheme.to_string(),
+            columns: grapheme_columns,
+        });
+    }
+
+    frame_graphemes
+}
+
+fn terminal_frame_run(text: String, style: TerminalRunStyle, columns: usize) -> TerminalFrameRun {
+    let columns = columns.max(1);
+    let simple_ascii = terminal_text_is_simple_ascii(&text, columns);
+    let graphemes = if simple_ascii {
+        None
+    } else {
+        Some(terminal_grapheme_columns(&text, columns))
+    };
+
+    TerminalFrameRun {
+        text,
+        columns,
+        simple_ascii,
+        graphemes,
+        style,
+    }
+}
+
 fn terminal_cursor_shape_str(shape: CursorShape) -> &'static str {
     match shape {
         CursorShape::Block => "block",
@@ -3028,12 +3101,22 @@ fn terminal_frame_with_cwd(
     title: Option<&str>,
     cwd: Option<&str>,
 ) -> Result<String, String> {
+    terminal_frame_with_context(term, title, cwd, false)
+}
+
+fn terminal_frame_with_context(
+    term: &Term<TerminalEventProxy>,
+    title: Option<&str>,
+    cwd: Option<&str>,
+    include_scrollback_context: bool,
+) -> Result<String, String> {
     let cursor_shape = term.cursor_style().shape;
     let grid = term.grid();
     let cols = grid.columns();
     let rows = grid.screen_lines();
     let mode = term.mode();
     let display_offset = grid.display_offset() as i32;
+    let history_size = grid.history_size();
     let cursor = grid.cursor.point;
     let cursor_row = (cursor.line.0 + display_offset).max(0) as usize;
     let cursor_col = cursor.column.0.min(cols.saturating_sub(1));
@@ -3049,13 +3132,25 @@ fn terminal_frame_with_cwd(
         underline: false,
         inverse: false,
     };
-    let mut lines = Vec::with_capacity(rows);
+    let context_lines = if include_scrollback_context && !mode.contains(TermMode::ALT_SCREEN) {
+        TERMINAL_SCROLLBACK_CONTEXT_LINES as i32
+    } else {
+        0
+    };
+    let visible_start = -display_offset;
+    let visible_end = rows as i32 - display_offset - 1;
+    let topmost_line = -(history_size as i32);
+    let bottommost_line = rows as i32 - 1;
+    let line_offset = (visible_start - context_lines).max(topmost_line);
+    let line_end = (visible_end + context_lines).min(bottommost_line);
+    let mut lines = Vec::with_capacity((line_end - line_offset + 1).max(0) as usize);
 
-    for row in 0..rows {
-        let line_index = Line(row as i32 - display_offset);
+    for line_number in line_offset..=line_end {
+        let line_index = Line(line_number);
         let mut styled_cells = Vec::new();
         let mut current_text = String::new();
         let mut current_style = default_style.clone();
+        let mut current_start_col = 0;
 
         for col in 0..cols {
             let cell = &grid[line_index][Column(col)];
@@ -3063,11 +3158,13 @@ fn terminal_frame_with_cwd(
             if col == 0 {
                 current_style = style.clone();
             } else if style != current_style {
-                styled_cells.push(TerminalFrameRun {
-                    text: std::mem::take(&mut current_text),
-                    style: current_style,
-                });
+                styled_cells.push(terminal_frame_run(
+                    std::mem::take(&mut current_text),
+                    current_style,
+                    col.saturating_sub(current_start_col),
+                ));
                 current_style = style.clone();
+                current_start_col = col;
             }
 
             if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
@@ -3084,10 +3181,11 @@ fn terminal_frame_with_cwd(
             }
         }
 
-        styled_cells.push(TerminalFrameRun {
-            text: current_text,
-            style: current_style,
-        });
+        styled_cells.push(terminal_frame_run(
+            current_text,
+            current_style,
+            cols.saturating_sub(current_start_col),
+        ));
         lines.push(TerminalFrameLine {
             cells: styled_cells,
         });
@@ -3100,6 +3198,8 @@ fn terminal_frame_with_cwd(
         rows,
         cols,
         display_offset: display_offset.max(0) as usize,
+        line_offset,
+        history_size,
         cursor_row,
         cursor_col,
         cursor_visible,
@@ -3490,42 +3590,37 @@ fn spawn_terminal_session_with_options(
             let _ = reader_output_tx.send(TerminalWsEvent::Frame(frame));
         }
 
-        let apply_event =
-            |event: TerminalParserEvent,
-             term: &mut Term<TerminalEventProxy>,
-             processor: &mut TerminalProcessor<TerminalSyncHandler>| {
-                match event {
-                    TerminalParserEvent::Output(bytes) => {
-                        let previous_display_offset = term.grid().display_offset() as i32;
-                        let preserve_scrollback = previous_display_offset > 0
-                            && !term.mode().contains(TermMode::ALT_SCREEN);
-                        processor.advance(term, &bytes);
-                        // Alacritty resets display_offset when fresh output arrives. Keep the
-                        // user anchored to the same scrollback position until they explicitly
-                        // scroll back down.
-                        if preserve_scrollback && !term.mode().contains(TermMode::ALT_SCREEN) {
-                            term.scroll_display(Scroll::Delta(previous_display_offset));
-                        }
-                    }
-                    TerminalParserEvent::Resize(cols, rows) => {
-                        term.resize(TermSize::new(cols.max(1) as usize, rows.max(1) as usize));
-                    }
-                    // Redraw only needs the current frame re-emitted below.
-                    TerminalParserEvent::Redraw => {}
-                    TerminalParserEvent::Scroll(delta) => {
-                        term.scroll_display(Scroll::Delta(delta));
-                    }
+        let apply_event = |event: TerminalParserEvent,
+                           term: &mut Term<TerminalEventProxy>,
+                           processor: &mut TerminalProcessor<TerminalSyncHandler>|
+         -> bool {
+            match event {
+                TerminalParserEvent::Output(bytes) => {
+                    processor.advance(term, &bytes);
+                    false
                 }
-            };
+                TerminalParserEvent::Resize(cols, rows) => {
+                    term.resize(TermSize::new(cols.max(1) as usize, rows.max(1) as usize));
+                    false
+                }
+                // Redraw only needs the current frame re-emitted below.
+                TerminalParserEvent::Redraw => false,
+                TerminalParserEvent::Scroll(delta) => {
+                    term.scroll_display(Scroll::Delta(delta));
+                    true
+                }
+            }
+        };
 
         loop {
             let mut terminal_changed = false;
+            let mut include_scrollback_context = false;
             match parser_rx.recv_timeout(TERMINAL_SESSION_METADATA_POLL_INTERVAL) {
                 Ok(event) => {
                     terminal_changed = true;
-                    apply_event(event, &mut term, &mut processor);
+                    include_scrollback_context |= apply_event(event, &mut term, &mut processor);
                     while let Ok(event) = parser_rx.try_recv() {
-                        apply_event(event, &mut term, &mut processor);
+                        include_scrollback_context |= apply_event(event, &mut term, &mut processor);
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -3543,8 +3638,13 @@ fn spawn_terminal_session_with_options(
             }
 
             let display_title = terminal_display_title(&title_root, title.as_deref(), &metadata);
-            match terminal_frame_with_cwd(&term, display_title.as_deref(), metadata.cwd.as_deref())
-            {
+            include_scrollback_context |= term.grid().display_offset() > 0;
+            match terminal_frame_with_context(
+                &term,
+                display_title.as_deref(),
+                metadata.cwd.as_deref(),
+                include_scrollback_context,
+            ) {
                 Ok(frame) => {
                     if reader_output_tx
                         .send(TerminalWsEvent::Frame(frame))
@@ -4279,6 +4379,42 @@ mod tests {
     }
 
     #[test]
+    fn terminal_frame_can_include_scrollback_context_for_local_scroll_preview() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        let mut term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(20, 4),
+            test_terminal_event_proxy(input_tx),
+        );
+        let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
+
+        for n in 1..=12 {
+            processor.advance(&mut term, format!("CTX{n}\r\n").as_bytes());
+        }
+
+        term.scroll_display(Scroll::Delta(3));
+        let frame: serde_json::Value = serde_json::from_str(
+            &terminal_frame_with_context(&term, None, None, true).expect("terminal frame"),
+        )
+        .expect("scrolled context frame json");
+
+        assert_eq!(frame["rows"], 4);
+        assert_eq!(frame["displayOffset"], 3);
+        assert!(
+            frame["historySize"].as_u64().expect("history size") >= 3,
+            "history size should expose the local scroll clamp"
+        );
+        assert!(
+            frame["lineOffset"].as_i64().expect("line offset") < -3,
+            "line offset should start before the visible scrolled viewport"
+        );
+        assert!(
+            frame["lines"].as_array().expect("lines").len() > 4,
+            "scrollback context should include cached rows outside the visible viewport"
+        );
+    }
+
+    #[test]
     fn terminal_frame_preserves_full_row_width_for_tui_backgrounds() {
         let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
         let mut term = Term::new(
@@ -4334,6 +4470,58 @@ mod tests {
             first_line_text.starts_with("A C"),
             "hidden characters should occupy blank terminal columns: {first_line_text:?}"
         );
+    }
+
+    #[test]
+    fn terminal_frame_serializes_run_width_metadata() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        let mut term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(6, 2),
+            test_terminal_event_proxy(input_tx),
+        );
+        let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
+
+        processor.advance(&mut term, "A界e\u{301}".as_bytes());
+
+        let frame: serde_json::Value =
+            serde_json::from_str(&terminal_frame(&term, None).expect("terminal frame"))
+                .expect("frame json");
+        let first_run = &frame["lines"][0]["cells"][0];
+        let graphemes = first_run["graphemes"]
+            .as_array()
+            .expect("non-ascii run should expose grapheme metadata");
+
+        assert_eq!(first_run["columns"], 6);
+        assert_eq!(first_run["simpleAscii"], false);
+        assert!(
+            graphemes
+                .iter()
+                .any(|grapheme| grapheme["text"] == "界" && grapheme["columns"] == 2),
+            "wide grapheme metadata should be serialized: {graphemes:?}"
+        );
+    }
+
+    #[test]
+    fn terminal_frame_skips_grapheme_metadata_for_simple_ascii_runs() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        let mut term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(6, 2),
+            test_terminal_event_proxy(input_tx),
+        );
+        let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
+
+        processor.advance(&mut term, b"Hi");
+
+        let frame: serde_json::Value =
+            serde_json::from_str(&terminal_frame(&term, None).expect("terminal frame"))
+                .expect("frame json");
+        let first_run = &frame["lines"][0]["cells"][0];
+
+        assert_eq!(first_run["columns"], 6);
+        assert_eq!(first_run["simpleAscii"], true);
+        assert_eq!(first_run.get("graphemes"), None);
     }
 
     #[test]
