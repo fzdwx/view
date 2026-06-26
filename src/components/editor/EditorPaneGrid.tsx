@@ -1,4 +1,4 @@
-import type { FileRunTarget, TreeFile } from "../../lib/api";
+import type { FileRunTarget, FileSearchResult, TreeFile } from "../../lib/api";
 import type { EditorDraft, EditorGitMarker } from "../../lib/editorTypes";
 import type {
   PreviewPane,
@@ -41,6 +41,7 @@ export interface EditorPaneGridProps {
     filePath: string,
     marker: EditorGitMarker,
   ) => Promise<boolean>;
+  readonly onOpenReference: (result: FileSearchResult) => void;
   readonly onReorderTabs: (
     paneId: PreviewPaneId,
     fromId: string,

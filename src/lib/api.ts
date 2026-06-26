@@ -16,6 +16,8 @@ function apiSlowThreshold(command: string): number {
   switch (command) {
     case "get_file_run_targets":
       return 40;
+    case "search_symbol_references":
+      return 120;
     case "get_project_state_fingerprint":
       return 100;
     default:
@@ -359,6 +361,18 @@ export async function getFileContent(
   return apiInvoke<FileContent>("get_file_content", { path, filePath });
 }
 
+export async function resolveImportPath(
+  path: string,
+  currentFilePath: string,
+  importPath: string,
+): Promise<string | null> {
+  return apiInvoke<string | null>("resolve_import_path", {
+    path,
+    currentFilePath,
+    importPath,
+  });
+}
+
 export async function getFileBlame(
   path: string,
   filePath: string,
@@ -481,6 +495,20 @@ export async function searchFileContents(
     path,
     query,
     limit: limit ?? null,
+  });
+}
+
+export async function searchSymbolReferences(
+  path: string,
+  query: string,
+  limit?: number,
+  currentFilePath?: string | null,
+): Promise<FileSearchResult[]> {
+  return apiInvoke<FileSearchResult[]>("search_symbol_references", {
+    path,
+    query,
+    limit: limit ?? null,
+    currentFilePath: currentFilePath ?? null,
   });
 }
 

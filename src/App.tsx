@@ -680,6 +680,7 @@ export function App() {
     onOpenCommandPanel: () => openCommandPanel("files"),
     onOpenFindFiles: () => openCommandPanel("files"),
     onOpenFindInFiles: () => openCommandPanel("content"),
+    onOpenFindReferences: () => openCommandPanel("references"),
     onOpenPullChoice: openPullChoice,
     onSaveActiveFile: saveActivePreviewFile,
     onSelectToolPanelView: (view: ToolPanelId) => {
@@ -1219,6 +1220,7 @@ export function App() {
                 onCloseTab={closePreviewTab}
                 onDiscardConflict={discardConflictToDisk}
                 onDiscardGitChange={discardChange}
+                onOpenReference={openFileSearchResult}
                 onReorderTabs={reorderPreviewTabs}
                 onOpenTerminalTab={openTerminalTabInEditor}
                 onRunCommand={runProjectCommand}

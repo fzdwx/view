@@ -10,20 +10,20 @@ import {
   memo,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
 } from "react";
 import type { TreeFile } from "../lib/api";
 import { clipboardFilesFromEvent } from "../lib/clipboardFiles";
 import { parentPathFromPath } from "../lib/pathLabels";
 import { timeSync } from "../lib/performanceLog";
-import { treeFilesSignature } from "../lib/treeFileIdentity";
+import { LoadingRows } from "./LoadingRows";
 import type { TreeGitFileActions } from "./TreeContextMenu";
 import { hasTreeContextMenuActions } from "./TreeContextMenu";
 import { TreeEmptyState, TreePanelHeader } from "./TreePanelChrome";
 import { TreePanelContextMenuHost } from "./TreePanelContextMenuHost";
 import { treeGitStageDecoration } from "./treePanelGitDecorations";
-import { buildTreePanelData, directoryPathsFor } from "./treePanelData";
+import { directoryPathsFor } from "./treePanelData";
+import { resetTreeModelWithPreparedInput } from "./treePanelModelReset";
 import {
   isDirectoryHandle,
   syncTreePanelSelectedPath,
@@ -36,6 +36,7 @@ import {
 import { useTreePanelInputHandlers } from "./useTreePanelInputHandlers";
 import { usePanelResizeActive } from "../hooks/usePanelResizeActive";
 import { usePanelResizeDeferredValue } from "../hooks/usePanelResizeDeferredValue";
+import { useTreePanelData } from "./useTreePanelData";
 
 const treePanelOverscan = 6;
 
@@ -78,24 +79,15 @@ export const TreePanel = memo(function TreePanel({
 }: TreePanelProps) {
   const deferredFiles = usePanelResizeDeferredValue(files);
   const panelResizeActive = usePanelResizeActive();
-  const treeDataCacheRef = useRef<{
-    readonly data: ReturnType<typeof buildTreePanelData>;
-    readonly signature: string;
-  } | null>(null);
-  const treeData = useMemo(() => {
-    const signature = treeFilesSignature(deferredFiles);
-    const cached = treeDataCacheRef.current;
-    if (cached?.signature === signature) {
-      return cached.data;
-    }
-
-    const nextData = buildTreePanelData(deferredFiles);
-    treeDataCacheRef.current = {
-      data: nextData,
-      signature,
-    };
-    return nextData;
-  }, [deferredFiles]);
+  const {
+    data: treeData,
+    loading: treeDataLoading,
+    signature: treeDataSignature,
+  } = useTreePanelData(deferredFiles);
+  const treeModelResetKey = `${treeDataSignature}\u0000${initialExpansion}`;
+  const appliedTreeModelResetKeyRef = useRef<string | null>(
+    treeDataLoading ? null : treeModelResetKey,
+  );
 
   const { paths, preparedInput, selectablePaths, fileByPath, gitStatus } =
     treeData;
@@ -226,14 +218,21 @@ export const TreePanel = memo(function TreePanel({
   );
 
   useEffect(() => {
+    if (treeDataLoading) {
+      return;
+    }
+    if (appliedTreeModelResetKeyRef.current === treeModelResetKey) {
+      return;
+    }
+
     timeSync(
       "tree:model-reset",
       () => {
-        model.resetPaths(paths, {
+        resetTreeModelWithPreparedInput(
+          model,
           preparedInput,
-          initialExpandedPaths:
-            initialExpansion === "open" ? directoryPathsFor(paths) : [],
-        });
+          initialExpansion === "open" ? directoryPathsFor(paths) : [],
+        );
         model.setGitStatus(gitStatus);
         model.setIcons(fileTreeIcons);
         model.setSearch(null);
@@ -244,7 +243,16 @@ export const TreePanel = memo(function TreePanel({
         initialExpansion,
       },
     );
-  }, [initialExpansion, model, paths, preparedInput, gitStatus]);
+    appliedTreeModelResetKeyRef.current = treeModelResetKey;
+  }, [
+    gitStatus,
+    initialExpansion,
+    model,
+    paths,
+    preparedInput,
+    treeDataLoading,
+    treeModelResetKey,
+  ]);
 
   useEffect(() => {
     syncSelectedPath();
@@ -263,6 +271,14 @@ export const TreePanel = memo(function TreePanel({
         emptyTitle={emptyTitle}
         onCreateRootFile={createRootFile}
       />
+    );
+  }
+
+  if (treeDataLoading) {
+    return (
+      <div className="tree-loading" aria-live="polite">
+        <LoadingRows />
+      </div>
     );
   }
 

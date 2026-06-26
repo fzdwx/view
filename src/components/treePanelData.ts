@@ -11,6 +11,51 @@ export interface TreePanelData {
   readonly selectablePaths: ReadonlySet<string>;
 }
 
+const treePanelDataCacheLimit = 6;
+const treePanelDataCache = new Map<string, TreePanelData>();
+
+export const emptyTreePanelData: TreePanelData = {
+  fileByPath: new Map<string, TreeFile>(),
+  gitStatus: [],
+  paths: [],
+  preparedInput: prepareFileTreeInput([]),
+  selectablePaths: new Set<string>(),
+};
+
+export function cachedTreePanelData(signature: string): TreePanelData | null {
+  const cached = treePanelDataCache.get(signature);
+  if (!cached) {
+    return null;
+  }
+
+  treePanelDataCache.delete(signature);
+  treePanelDataCache.set(signature, cached);
+  return cached;
+}
+
+export function storeTreePanelData(
+  signature: string,
+  data: TreePanelData,
+): void {
+  if (signature.length === 0) {
+    return;
+  }
+
+  treePanelDataCache.delete(signature);
+  treePanelDataCache.set(signature, data);
+  while (treePanelDataCache.size > treePanelDataCacheLimit) {
+    const oldestKey = treePanelDataCache.keys().next().value;
+    if (typeof oldestKey !== "string") {
+      break;
+    }
+    treePanelDataCache.delete(oldestKey);
+  }
+}
+
+export function clearTreePanelDataCacheForTests(): void {
+  treePanelDataCache.clear();
+}
+
 export function buildTreePanelData(files: readonly TreeFile[]): TreePanelData {
   return timeSync(
     "tree:build-data",

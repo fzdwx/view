@@ -18,6 +18,7 @@ interface UseAppKeyboardShortcutsOptions {
   readonly onOpenCommandPanel: () => void;
   readonly onOpenFindFiles: () => void;
   readonly onOpenFindInFiles: () => void;
+  readonly onOpenFindReferences: () => void;
   readonly onOpenPullChoice: () => void;
   readonly onSaveActiveFile: () => void;
   readonly onSelectToolPanelView: (view: ToolPanelId) => void;
@@ -39,6 +40,7 @@ export function useAppKeyboardShortcuts({
   onOpenCommandPanel,
   onOpenFindFiles,
   onOpenFindInFiles,
+  onOpenFindReferences,
   onOpenPullChoice,
   onSaveActiveFile,
   onSelectToolPanelView,
@@ -70,6 +72,14 @@ export function useAppKeyboardShortcuts({
         event.preventDefault();
         if (canUseProjectCommands) {
           onOpenFindInFiles();
+        }
+        return;
+      }
+
+      if (matchesShortcut(event, shortcuts.findReferences)) {
+        event.preventDefault();
+        if (canUseProjectCommands) {
+          onOpenFindReferences();
         }
         return;
       }
@@ -192,6 +202,7 @@ export function useAppKeyboardShortcuts({
     onOpenCommandPanel,
     onOpenFindFiles,
     onOpenFindInFiles,
+    onOpenFindReferences,
     onOpenPullChoice,
     onSaveActiveFile,
     onSelectToolPanelView,

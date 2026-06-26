@@ -31,7 +31,7 @@ export function CommandPanel({
   activeIndex: number;
   error: string | null;
   loading: boolean;
-  mode: "files" | "content";
+  mode: "files" | "content" | "references";
   open: boolean;
   projectName?: string;
   query: string;
@@ -46,6 +46,9 @@ export function CommandPanel({
   const resultsScrollRef = useRef<HTMLDivElement | null>(null);
   const hasQuery = query.trim().length > 0;
   const lowerQuery = useMemo(() => query.trim().toLowerCase(), [query]);
+  const lineResultMode = mode !== "files";
+  const title = commandPanelTitle(mode);
+  const placeholder = commandPanelPlaceholder(mode);
 
   useEffect(() => {
     if (!open) {
@@ -130,19 +133,15 @@ export function CommandPanel({
           <input
             ref={inputRef}
             value={query}
-            aria-label={mode === "content" ? "Search file contents" : "Search files by name or path"}
+            aria-label={placeholder}
             onChange={(event) => onChangeQuery(event.target.value)}
-            placeholder={
-              mode === "content"
-                ? "Search file contents…"
-                : "Search files by name or path…"
-            }
+            placeholder={placeholder}
           />
           {loading ? <Loader2 className="spin" size={16} /> : null}
         </div>
         <div className="command-context">
           <span>
-            {mode === "content" ? "Find in files" : "Find files"}
+            {title}
             {hasQuery && results.length > 0 ? ` · ${results.length} results` : ""}
             {" · "}
             {projectName ?? "No project"}
@@ -159,12 +158,10 @@ export function CommandPanel({
           ) : !hasQuery ? (
             <div className="command-empty">
               <div className="empty-title">
-                {mode === "content" ? "Type to search file contents" : "Type a file name or path"}
+                {commandPanelEmptyTitle(mode)}
               </div>
               <div className="empty-copy">
-                {mode === "content"
-                  ? "Search scans file contents for matching text in the active worktree."
-                  : "Fuzzy search scans tracked and untracked files in the active worktree."}
+                {commandPanelEmptyCopy(mode)}
               </div>
             </div>
           ) : loading && results.length === 0 ? (
@@ -175,7 +172,9 @@ export function CommandPanel({
             <div className="command-empty">
               <div className="empty-title">No results found</div>
               <div className="empty-copy">
-                {mode === "content" ? "Try another search term." : "Try another filename or path segment."}
+                {lineResultMode
+                  ? "Try another search term."
+                  : "Try another filename or path segment."}
               </div>
             </div>
           ) : (
@@ -208,21 +207,23 @@ function CommandResultList({
   results: FileSearchResult[];
   activeIndex: number;
   lowerQuery: string;
-  mode: "files" | "content";
+  mode: "files" | "content" | "references";
   scrollRef: React.RefObject<HTMLDivElement | null>;
   onOpenResult(result: FileSearchResult): void;
   onSelectIndex(index: number): void;
 }) {
-  const estimateSize = mode === "content" ? CONTENT_RESULT_ESTIMATE : FILE_RESULT_ESTIMATE;
+  const estimateSize =
+    mode !== "files" ? CONTENT_RESULT_ESTIMATE : FILE_RESULT_ESTIMATE;
   const resultsVirtualizer = useVirtualizer<HTMLDivElement, HTMLButtonElement>({
     count: results.length,
     getScrollElement: () => scrollRef.current,
     directDomUpdates: true,
     directDomUpdatesMode: "transform",
     estimateSize: () => estimateSize,
-    getItemKey: (index) => `${results[index]?.path ?? index}:${results[index]?.lineNumber ?? "file"}`,
+    getItemKey: (index) =>
+      `${results[index]?.path ?? index}:${results[index]?.lineNumber ?? "file"}`,
     measureElement,
-    overscan: mode === "content" ? 10 : 14,
+    overscan: mode !== "files" ? 10 : 14,
     useAnimationFrameWithResizeObserver: true,
   });
 
@@ -272,7 +273,7 @@ function CommandResultRow({
 }: {
   active: boolean;
   lowerQuery: string;
-  mode: "files" | "content";
+  mode: "files" | "content" | "references";
   result: FileSearchResult;
   resultIndex: number;
   refCallback(node: HTMLButtonElement | null): void;
@@ -282,6 +283,7 @@ function CommandResultRow({
   const fileName = fileNameFromPath(result.path);
   const parentPath = parentPathFromPath(result.path) || "./";
   const hasLineMatch = Boolean(result.lineNumber && result.lineText);
+  const lineResultMode = mode !== "files";
 
   return (
     <button
@@ -292,7 +294,7 @@ function CommandResultRow({
         "command-result",
         "command-result-virtual-row",
         active ? "active" : "",
-        mode === "content" ? "command-result-content" : "command-result-file",
+        lineResultMode ? "command-result-content" : "command-result-file",
       ]
         .filter(Boolean)
         .join(" ")}
@@ -303,7 +305,7 @@ function CommandResultRow({
         <ResultFileIcon path={result.path} />
       </span>
       <span className="command-result-main">
-        {mode === "content" && hasLineMatch ? (
+        {lineResultMode && hasLineMatch ? (
           <>
             <span className="command-result-path">
               {highlightMatch(fileName, lowerQuery)}{" "}
@@ -357,6 +359,50 @@ function CommandResultRow({
       </span>
     </button>
   );
+}
+
+function commandPanelTitle(mode: "files" | "content" | "references"): string {
+  switch (mode) {
+    case "content":
+      return "Find in files";
+    case "references":
+      return "Find references";
+    case "files":
+      return "Find files";
+  }
+}
+
+function commandPanelPlaceholder(mode: "files" | "content" | "references"): string {
+  switch (mode) {
+    case "content":
+      return "Search file contents...";
+    case "references":
+      return "Search symbol references...";
+    case "files":
+      return "Search files by name or path...";
+  }
+}
+
+function commandPanelEmptyTitle(mode: "files" | "content" | "references"): string {
+  switch (mode) {
+    case "content":
+      return "Type to search file contents";
+    case "references":
+      return "Type a function or method name";
+    case "files":
+      return "Type a file name or path";
+  }
+}
+
+function commandPanelEmptyCopy(mode: "files" | "content" | "references"): string {
+  switch (mode) {
+    case "content":
+      return "Search scans file contents for matching text in the active worktree.";
+    case "references":
+      return "AST search scans supported code files for call sites.";
+    case "files":
+      return "Fuzzy search scans tracked and untracked files in the active worktree.";
+  }
 }
 
 function ResultFileIcon({ path }: { path: string }) {

@@ -39,6 +39,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 mod clipboard_paste;
+mod code_search;
 mod git_commit_push;
 #[cfg(test)]
 #[path = "git_log_tracking_tests.rs"]
@@ -1017,6 +1018,19 @@ async fn get_file_content(path: String, file_path: String) -> Result<FileContent
 }
 
 #[tauri::command]
+async fn resolve_import_path(
+    path: String,
+    current_file_path: String,
+    import_path: String,
+) -> Result<Option<String>, String> {
+    blocking_command("resolve_import_path", move || {
+        let root = workspace_root(&path)?;
+        resolve_import_path_in_root(&root, &current_file_path, &import_path)
+    })
+    .await
+}
+
+#[tauri::command]
 async fn get_file_blame(path: String, file_path: String) -> Result<Vec<FileBlameLine>, String> {
     blocking_command("get_file_blame", move || {
         let root = repository_root(&path)?;
@@ -1213,6 +1227,28 @@ async fn search_file_contents(
             }
         }
         Ok(results)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn search_symbol_references(
+    path: String,
+    query: String,
+    limit: Option<usize>,
+    current_file_path: Option<String>,
+) -> Result<Vec<FileSearchResult>, String> {
+    blocking_command("search_symbol_references", move || {
+        let root = workspace_root(&path)?;
+        let limit = limit
+            .unwrap_or(DEFAULT_FILE_SEARCH_LIMIT)
+            .clamp(1, MAX_FILE_SEARCH_LIMIT);
+        code_search::search_symbol_references_in_root(
+            &root,
+            &query,
+            limit,
+            current_file_path.as_deref(),
+        )
     })
     .await
 }
@@ -2369,6 +2405,252 @@ fn resolve_existing_repo_file(root: &Path, file_path: &str) -> Result<(String, P
     }
 
     Ok((normalized, canonical))
+}
+
+fn resolve_import_path_in_root(
+    root: &Path,
+    current_file_path: &str,
+    import_path: &str,
+) -> Result<Option<String>, String> {
+    let current_file_path = normalize_user_repo_path(current_file_path)?;
+    let import_path = strip_import_suffix(import_path.trim());
+    if import_path.is_empty() || import_path.contains('\0') {
+        return Ok(None);
+    }
+
+    for base in import_base_candidates(root, &current_file_path, import_path)? {
+        for candidate in module_file_candidates(&base) {
+            if let Some(path) = existing_module_file(root, &candidate)? {
+                return Ok(Some(path));
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+fn strip_import_suffix(import_path: &str) -> &str {
+    import_path
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(import_path)
+        .trim()
+}
+
+fn import_base_candidates(
+    root: &Path,
+    current_file_path: &str,
+    import_path: &str,
+) -> Result<Vec<String>, String> {
+    let mut candidates = Vec::new();
+
+    if import_path.starts_with("./") || import_path.starts_with("../") {
+        let current_parent = Path::new(current_file_path)
+            .parent()
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        push_normalized_candidate(&mut candidates, &format!("{current_parent}/{import_path}"))?;
+        return Ok(candidates);
+    }
+
+    candidates.extend(tsconfig_path_candidates(root, import_path)?);
+
+    if let Some(rest) = import_path.strip_prefix("@/") {
+        push_normalized_candidate(&mut candidates, &format!("src/{rest}"))?;
+    }
+    if let Some(rest) = import_path.strip_prefix("~/") {
+        push_normalized_candidate(&mut candidates, rest)?;
+    }
+    if import_path.starts_with('/') {
+        push_normalized_candidate(&mut candidates, import_path.trim_start_matches('/'))?;
+    }
+
+    Ok(candidates)
+}
+
+fn tsconfig_path_candidates(root: &Path, import_path: &str) -> Result<Vec<String>, String> {
+    let mut candidates = Vec::new();
+    for config_name in ["tsconfig.json", "jsconfig.json", "tsconfig.base.json"] {
+        let config_path = root.join(config_name);
+        let Ok(content) = fs::read_to_string(config_path) else {
+            continue;
+        };
+        let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) else {
+            continue;
+        };
+        let compiler_options = config
+            .get("compilerOptions")
+            .and_then(serde_json::Value::as_object);
+        let Some(compiler_options) = compiler_options else {
+            continue;
+        };
+        let base_url = compiler_options
+            .get("baseUrl")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(".");
+        let Some(paths) = compiler_options
+            .get("paths")
+            .and_then(serde_json::Value::as_object)
+        else {
+            continue;
+        };
+
+        for (pattern, targets) in paths {
+            let Some(capture) = match_tsconfig_path_pattern(pattern, import_path) else {
+                continue;
+            };
+            let Some(targets) = targets.as_array() else {
+                continue;
+            };
+            for target in targets.iter().filter_map(serde_json::Value::as_str) {
+                let expanded = expand_tsconfig_target(target, capture);
+                push_normalized_candidate(&mut candidates, &format!("{base_url}/{expanded}"))?;
+            }
+        }
+    }
+    Ok(candidates)
+}
+
+fn match_tsconfig_path_pattern<'a>(pattern: &str, import_path: &'a str) -> Option<&'a str> {
+    let Some(star_index) = pattern.find('*') else {
+        return (pattern == import_path).then_some("");
+    };
+    let prefix = &pattern[..star_index];
+    let suffix = &pattern[star_index + 1..];
+    let rest = import_path.strip_prefix(prefix)?;
+    rest.strip_suffix(suffix)
+}
+
+fn expand_tsconfig_target(target: &str, capture: &str) -> String {
+    if target.contains('*') {
+        target.replace('*', capture)
+    } else {
+        target.to_string()
+    }
+}
+
+fn push_normalized_candidate(candidates: &mut Vec<String>, raw: &str) -> Result<(), String> {
+    let Some(candidate) = normalize_module_candidate(raw)? else {
+        return Ok(());
+    };
+    if !candidates.iter().any(|existing| existing == &candidate) {
+        candidates.push(candidate);
+    }
+    Ok(())
+}
+
+fn normalize_module_candidate(raw: &str) -> Result<Option<String>, String> {
+    let raw = raw.trim().replace('\\', "/");
+    if raw.is_empty()
+        || Path::new(&raw).is_absolute()
+        || raw
+            .split('/')
+            .next()
+            .is_some_and(|part| part.len() == 2 && part.ends_with(':'))
+    {
+        return Ok(None);
+    }
+
+    let mut parts: Vec<&str> = Vec::new();
+    for part in raw.split('/') {
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        if part == ".." {
+            if parts.pop().is_none() {
+                return Ok(None);
+            }
+            continue;
+        }
+        validate_cross_platform_path_part(part)?;
+        parts.push(part);
+    }
+
+    if parts.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(parts.join("/")))
+}
+
+fn module_file_candidates(base: &str) -> Vec<String> {
+    let (stem, extension) = split_module_extension(base);
+    let mut candidates = Vec::new();
+
+    match extension {
+        Some("js") => {
+            push_candidate(&mut candidates, &format!("{stem}.ts"));
+            push_candidate(&mut candidates, &format!("{stem}.tsx"));
+            push_candidate(&mut candidates, &format!("{stem}.js"));
+            push_candidate(&mut candidates, &format!("{stem}.jsx"));
+        }
+        Some("jsx") => {
+            push_candidate(&mut candidates, &format!("{stem}.tsx"));
+            push_candidate(&mut candidates, &format!("{stem}.jsx"));
+        }
+        Some("mjs") => {
+            push_candidate(&mut candidates, &format!("{stem}.mts"));
+            push_candidate(&mut candidates, &format!("{stem}.mjs"));
+        }
+        Some("cjs") => {
+            push_candidate(&mut candidates, &format!("{stem}.cts"));
+            push_candidate(&mut candidates, &format!("{stem}.cjs"));
+        }
+        Some(_) => {
+            push_candidate(&mut candidates, base);
+        }
+        None => {
+            push_candidate(&mut candidates, base);
+            for extension in [
+                "ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs", "json", "css", "scss", "md",
+                "mdx",
+            ] {
+                push_candidate(&mut candidates, &format!("{base}.{extension}"));
+            }
+            for extension in ["ts", "tsx", "js", "jsx", "json"] {
+                push_candidate(&mut candidates, &format!("{base}/index.{extension}"));
+            }
+        }
+    }
+
+    candidates
+}
+
+fn split_module_extension(path: &str) -> (&str, Option<&str>) {
+    let file_name = path.rsplit('/').next().unwrap_or(path);
+    let Some(dot_index) = file_name.rfind('.') else {
+        return (path, None);
+    };
+    if dot_index == 0 {
+        return (path, None);
+    }
+    let stem_end = path.len() - file_name.len() + dot_index;
+    (&path[..stem_end], Some(&file_name[dot_index + 1..]))
+}
+
+fn push_candidate(candidates: &mut Vec<String>, candidate: &str) {
+    if !candidates.iter().any(|existing| existing == candidate) {
+        candidates.push(candidate.to_string());
+    }
+}
+
+fn existing_module_file(root: &Path, candidate: &str) -> Result<Option<String>, String> {
+    let Some(candidate) = normalize_module_candidate(candidate)? else {
+        return Ok(None);
+    };
+    let full_path = root.join(&candidate);
+    if !full_path.is_file() {
+        return Ok(None);
+    }
+    let root = root
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve project root: {error}"))?;
+    let canonical = full_path
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve import path: {error}"))?;
+    if !canonical.starts_with(&root) || !canonical.is_file() {
+        return Ok(None);
+    }
+    Ok(Some(candidate))
 }
 
 pub(crate) fn resolve_repo_child_path(root: &Path, normalized: &str) -> Result<PathBuf, String> {
@@ -5451,6 +5733,42 @@ mod tests {
     }
 
     #[test]
+    fn resolve_import_path_maps_js_alias_to_ts_source() {
+        let repo = create_plain_workspace();
+        write_repo_file(
+            &repo,
+            "tsconfig.json",
+            r#"{"compilerOptions":{"baseUrl":".","paths":{"@/*":["src/*"]}}}"#,
+        );
+        write_repo_file(&repo, "src/App.tsx", "");
+        write_repo_file(
+            &repo,
+            "src/lib/model-visibility.ts",
+            "export const ok = true;\n",
+        );
+
+        let resolved =
+            resolve_import_path_in_root(&repo, "src/App.tsx", "@/lib/model-visibility.js")
+                .expect("resolve import");
+
+        assert_eq!(resolved.as_deref(), Some("src/lib/model-visibility.ts"));
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn resolve_import_path_resolves_relative_index_file() {
+        let repo = create_plain_workspace();
+        write_repo_file(&repo, "src/features/app.ts", "");
+        write_repo_file(&repo, "src/features/session/index.ts", "export {}\n");
+
+        let resolved = resolve_import_path_in_root(&repo, "src/features/app.ts", "./session")
+            .expect("resolve import");
+
+        assert_eq!(resolved.as_deref(), Some("src/features/session/index.ts"));
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
     fn rename_repo_file_moves_files_when_destination_parent_exists() {
         let repo = create_basic_repo();
         fs::create_dir_all(repo.join("src")).expect("create src");
@@ -6097,6 +6415,7 @@ pub fn run() {
             get_changed_files,
             get_file_blob,
             get_file_content,
+            resolve_import_path,
             get_file_blame,
             save_file_content,
             create_project_file,
@@ -6107,6 +6426,7 @@ pub fn run() {
             delete_project_file,
             search_file_names,
             search_file_contents,
+            search_symbol_references,
             detect_project_scripts,
             get_file_run_targets,
             search_editor_text,

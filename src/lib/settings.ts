@@ -12,6 +12,7 @@ export type ShortcutAction =
   | "jumpToDiffFile"
   | "findFiles"
   | "findInFiles"
+  | "findReferences"
   | "openFileTree";
 
 export interface AppSettings {
@@ -106,6 +107,7 @@ export const defaultAppSettings: AppSettings = {
     jumpToDiffFile: "F4",
     findFiles: "Mod+Shift+O",
     findInFiles: "Mod+Shift+F",
+    findReferences: "Alt+Shift+F7",
     openFileTree: "Alt+1",
   },
 };
@@ -175,6 +177,11 @@ export const shortcutRows: readonly ShortcutRow[] = [
     action: "findInFiles",
     label: "Find in files",
     description: "Search file contents",
+  },
+  {
+    action: "findReferences",
+    label: "Find references",
+    description: "Search AST call sites for a symbol",
   },
   {
     action: "openFileTree",

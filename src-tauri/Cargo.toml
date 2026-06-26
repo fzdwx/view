@@ -6,7 +6,7 @@ authors = ["like"]
 license = ""
 repository = ""
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.85"
 
 [lib]
 name = "view_lib"
@@ -33,3 +33,7 @@ unicode-segmentation = "1.12"
 unicode-width = "0.2"
 tree-sitter = "0.26.9"
 tree-sitter-go = "0.25.0"
+ast-grep-core = "0.44.0"
+ast-grep-config = "0.44.0"
+ast-grep-language = { version = "0.44.0", default-features = false, features = ["tree-sitter-go", "tree-sitter-html", "tree-sitter-javascript", "tree-sitter-rust", "tree-sitter-typescript"] }
+ignore = "0.4.26"

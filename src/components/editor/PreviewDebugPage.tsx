@@ -348,6 +348,7 @@ export function PreviewDebugPage({
           <header>CodeMirror preview</header>
           <div className="preview-debug-pane-body">
             <CodeMirrorFilePreview
+              activeProjectPath={null}
               blameError={blameError}
               blameLines={blameLines}
               blameLoading={blameLoading}
@@ -366,6 +367,7 @@ export function PreviewDebugPage({
               onChangeDraft={setDraftContent}
               onDiscardConflict={() => applyScenario("text")}
               onDiscardGitChange={() => Promise.resolve(false)}
+              onOpenReference={() => undefined}
               onRunCommand={() => undefined}
               onSave={handleSave}
               onStageGitChange={() => Promise.resolve(false)}

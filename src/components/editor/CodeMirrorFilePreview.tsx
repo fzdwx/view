@@ -12,6 +12,7 @@ import {
 } from "react";
 import { SearchQuery, search, setSearchQuery } from "@codemirror/search";
 import {
+  Decoration,
   EditorView as CodeMirrorEditorView,
   GutterMarker,
   gutter,
@@ -25,10 +26,12 @@ import {
 import { Loader2, Search, X } from "lucide-react";
 import {
   type EditorTextMatch,
+  type FileSearchResult,
   type FileBlameLine,
   type FileContent,
   type FileRunTarget,
   replaceEditorText,
+  resolveImportPath,
   searchEditorText,
 } from "../../lib/api";
 import { formatDate } from "../../lib/dateFormat";
@@ -46,6 +49,7 @@ import type {
   EditorGitMarker,
   FileViewMode,
 } from "../../lib/editorTypes";
+import { moduleSpecifierAtLine } from "../../lib/editorModuleSpecifier";
 import { nextMatchIndexAfter } from "../../lib/editorSearch";
 import { clamp, wrapIndex } from "../../lib/numeric";
 import {
@@ -61,13 +65,19 @@ import {
   GitConflictEditor,
 } from "./MergeConflictEditor";
 import { CodeMirrorView } from "./CodeMirrorView";
+import { SymbolReferencePopover } from "./SymbolReferencePopover";
+import { useSymbolReferenceHover } from "./useSymbolReferenceHover";
 
 const EDITOR_METRICS_AFTER_RESIZE_DELAY_MS = 80;
+const activeEditorSearchMatchMark = Decoration.mark({
+  class: "cm-searchMatch cm-searchMatch-selected cm-editor-search-active-match",
+});
 
 // CodeMirrorFilePreview bundles an editor + find/replace + git markers;
 // splitting it is a separate, behavior-sensitive refactor tracked elsewhere.
 /* oxlint-disable react-doctor/no-giant-component, react-doctor/prefer-useReducer */
 export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
+  activeProjectPath,
   blameError,
   blameLines,
   blameLoading,
@@ -87,12 +97,14 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
   onChangeDraft,
   onDiscardConflict,
   onDiscardGitChange,
+  onOpenReference,
   onSave,
   onRunCommand,
   onStageGitChange,
   onSetConflictDraftContent,
   onUnstageGitChange,
 }: {
+  activeProjectPath: string | null;
   blameError: string | null;
   blameLines: FileBlameLine[];
   blameLoading: boolean;
@@ -112,6 +124,7 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
   onChangeDraft(content: string): void;
   onDiscardConflict(): void;
   onDiscardGitChange(filePath: string, marker: EditorGitMarker): Promise<boolean>;
+  onOpenReference(result: FileSearchResult): void;
   onRunCommand(target: FileRunTarget): void;
   onSave(): void;
   onStageGitChange(filePath: string, marker: EditorGitMarker): Promise<boolean>;
@@ -153,6 +166,14 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
   const [editorViewportHeight, setEditorViewportHeight] = useState(0);
   const [editorViewportWidth, setEditorViewportWidth] = useState(0);
   const [gitPopoverLeftOffset, setGitPopoverLeftOffset] = useState(0);
+  const symbolReferenceHover = useSymbolReferenceHover({
+    activeProjectPath,
+    editorView,
+    editorViewportHeight,
+    editorViewportWidth,
+    filePath: file?.path ?? null,
+    stageRef,
+  });
   // Derived file values; the `??` coalescing here is flagged as a pseudo
   // event-handler by a false positive, so suppress the rule for this block.
   /* oxlint-disable react-doctor/no-event-handler */
@@ -443,6 +464,8 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
       effects: setSearchQuery.of(
         new SearchQuery({
           search: editorFindOpen ? editorFindQuery.trim() : "",
+          caseSensitive: false,
+          literal: true,
           replace: editorReplaceText,
         }),
       ),
@@ -829,6 +852,19 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
 
     return [
       search({ top: true, caseSensitive: false }),
+      CodeMirrorEditorView.decorations.of((view) => {
+        if (!editorFindOpen || !activeEditorMatch) {
+          return Decoration.none;
+        }
+
+        const from = clamp(activeEditorMatch.start, 0, view.state.doc.length);
+        const to = clamp(activeEditorMatch.end, 0, view.state.doc.length);
+        if (to <= from) {
+          return Decoration.none;
+        }
+
+        return Decoration.set([activeEditorSearchMatchMark.range(from, to)]);
+      }),
       keymap.of([
         {
           key: "Mod-f",
@@ -855,6 +891,48 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
           key: "Shift-F3",
           run: () => {
             selectEditorMatch(activeEditorMatchIndex - 1, true);
+            return true;
+          },
+        },
+        {
+          key: "Ctrl-b",
+          run: (view) => {
+            const projectPath = activeProjectPath;
+            const currentFilePath = file?.path;
+            if (!projectPath || !currentFilePath) {
+              return false;
+            }
+
+            const position = view.state.selection.main.head;
+            const line = view.state.doc.lineAt(position);
+            const specifier = moduleSpecifierAtLine(
+              line.text,
+              line.from,
+              position,
+            );
+            if (!specifier) {
+              return symbolReferenceHover.openAtPosition(position);
+            }
+
+            symbolReferenceHover.closePopover();
+            void resolveImportPath(
+              projectPath,
+              currentFilePath,
+              specifier.specifier,
+            ).then((resolvedPath) => {
+              if (!resolvedPath) {
+                return;
+              }
+              onOpenReference({
+                path: resolvedPath,
+                score: 0,
+                lineNumber: 1,
+                lineText: null,
+                contextBefore: [],
+                contextAfter: [],
+                matchRanges: [[0, 0]],
+              });
+            });
             return true;
           },
         },
@@ -983,12 +1061,17 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
     ];
   }, [
     activeEditorMatchIndex,
+    activeProjectPath,
+    activeEditorMatch,
     blameError,
     blameLineByLine,
     blameLineNumbers,
     blameLines.length,
     blameLoading,
+    editorFindOpen,
     gitMarkerSegmentsByLine,
+    file?.path,
+    onOpenReference,
     onRunCommand,
     openEditorFind,
     runTargetByLine,
@@ -996,6 +1079,8 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
     showGitGutter,
     showRunTargetGutter,
     selectEditorMatch,
+    symbolReferenceHover.closePopover,
+    symbolReferenceHover.openAtPosition,
     toggleGitMarker,
   ]);
 
@@ -1294,6 +1379,16 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
             }}
             onUnstage={() => {
               void runGitMarkerAction(activeGitMarker, onUnstageGitChange);
+            }}
+          />
+        ) : null}
+        {symbolReferenceHover.popover ? (
+          <SymbolReferencePopover
+            popover={symbolReferenceHover.popover}
+            onClose={symbolReferenceHover.closePopover}
+            onOpenReference={(result) => {
+              symbolReferenceHover.closePopover();
+              onOpenReference(result);
             }}
           />
         ) : null}

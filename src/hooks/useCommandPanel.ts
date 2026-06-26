@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export type CommandPanelMode = "files" | "content";
+export type CommandPanelMode = "files" | "content" | "references";
 
 export interface UseCommandPanelOptions {
   readonly activeProjectPath: string | null;

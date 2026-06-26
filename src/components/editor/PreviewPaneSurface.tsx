@@ -3,7 +3,7 @@ import { PreviewTabBar } from "../PreviewTabBar";
 import { CodeMirrorFilePreview } from "./CodeMirrorFilePreview";
 import { editorDraftKey } from "../../lib/editorDrafts";
 import type { EditorDraft, EditorGitMarker } from "../../lib/editorTypes";
-import type { FileRunTarget, TreeFile } from "../../lib/api";
+import type { FileRunTarget, FileSearchResult, TreeFile } from "../../lib/api";
 import type { GitAvailability } from "../workbench/GitPanels";
 import {
   type PreviewPane,
@@ -52,6 +52,7 @@ interface PreviewPaneSurfaceProps {
     filePath: string,
     marker: EditorGitMarker,
   ) => Promise<boolean>;
+  readonly onOpenReference: (result: FileSearchResult) => void;
   readonly onReorderTabs: (
     paneId: PreviewPaneId,
     fromId: string,
@@ -104,6 +105,7 @@ export function PreviewPaneSurface({
   onCloseTab,
   onDiscardConflict,
   onDiscardGitChange,
+  onOpenReference,
   onOpenTerminalTab,
   onReorderTabs,
   onRunCommand,
@@ -251,6 +253,7 @@ export function PreviewPaneSurface({
           <TerminalEditorPane active={isActive} tab={activeTab} />
         ) : pane.mode === "file" ? (
           <CodeMirrorFilePreview
+            activeProjectPath={activeProjectPath}
             blameError={
               data.fileBlameQuery.isError
                 ? String(data.fileBlameQuery.error.message)
@@ -284,6 +287,7 @@ export function PreviewPaneSurface({
             onChangeDraft={handleChangeDraft}
             onDiscardConflict={onDiscardConflict}
             onDiscardGitChange={onDiscardGitChange}
+            onOpenReference={onOpenReference}
             onRunCommand={onRunCommand}
             onSave={onSave}
             onStageGitChange={onStageGitChange}

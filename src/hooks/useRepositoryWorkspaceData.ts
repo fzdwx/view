@@ -21,6 +21,7 @@ import {
   loadRepository,
   searchFileContents,
   searchFileNames,
+  searchSymbolReferences,
 } from "../lib/api";
 import type { CommandPanelMode } from "./useCommandPanel";
 import {
@@ -259,7 +260,12 @@ export function useRepositoryProjectData({
   });
   const projectFiles = useStableTreeFiles(projectFilesQuery.data);
 
-  const searchFn = commandMode === "content" ? searchFileContents : searchFileNames;
+  const searchFn =
+    commandMode === "references"
+      ? searchSymbolReferences
+      : commandMode === "content"
+        ? searchFileContents
+        : searchFileNames;
   // The whole query object is returned to consumers (App.tsx) that read many
   // fields (data/isFetching/isError/refetch/isPlaceholderData), so it must be
   // held as one value per the rule's own false-positive guidance.
