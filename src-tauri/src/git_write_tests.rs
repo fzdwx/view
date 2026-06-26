@@ -1,5 +1,6 @@
 use super::{
-    apply_file_change as async_apply_file_change, stage_files as async_stage_files,
+    apply_file_change as async_apply_file_change,
+    mark_conflicts_resolved as async_mark_conflicts_resolved, stage_files as async_stage_files,
     unstage_files as async_unstage_files, GitChangeOperation, GitChangeSource,
     GitFileChangeRequest, GitPathsRequest, GitWriteResponse,
 };
@@ -22,6 +23,10 @@ fn unstage_files(request: GitPathsRequest) -> Result<GitWriteResponse, String> {
 
 fn apply_file_change(request: GitFileChangeRequest) -> Result<GitWriteResponse, String> {
     tauri::async_runtime::block_on(async_apply_file_change(request))
+}
+
+fn mark_conflicts_resolved(request: GitPathsRequest) -> Result<GitWriteResponse, String> {
+    tauri::async_runtime::block_on(async_mark_conflicts_resolved(request))
 }
 
 #[test]
@@ -128,6 +133,38 @@ fn unstage_files_unstages_staged_file() {
         .files
         .iter()
         .any(|file| file.path == "tracked.txt" && !file.staged && file.unstaged));
+    fs::remove_dir_all(repo).ok();
+}
+
+#[test]
+fn mark_conflicts_resolved_stages_resolved_conflict_file() {
+    let repo = create_conflict_repo();
+    fs::write(repo.join("tracked.txt"), "resolved\n").expect("resolve conflict");
+    let before = git_status(&repo);
+
+    let response = mark_conflicts_resolved(request(&repo, ["tracked.txt"])).expect("mark resolved");
+
+    let after = git_status(&repo);
+    write_evidence("mark conflict resolved", &before, &after);
+    assert!(after.starts_with("M  tracked.txt"));
+    assert!(response
+        .files
+        .iter()
+        .all(|file| file.path != "tracked.txt" || !file.conflict));
+    fs::remove_dir_all(repo).ok();
+}
+
+#[test]
+fn mark_conflicts_resolved_rejects_non_conflict_file() {
+    let repo = create_repo_with_tracked_file();
+    fs::write(repo.join("tracked.txt"), "modified\n").expect("modify tracked");
+
+    let error = match mark_conflicts_resolved(request(&repo, ["tracked.txt"])) {
+        Ok(_) => panic!("non-conflict path should be rejected"),
+        Err(error) => error,
+    };
+
+    assert!(error.contains("not conflicted"));
     fs::remove_dir_all(repo).ok();
 }
 

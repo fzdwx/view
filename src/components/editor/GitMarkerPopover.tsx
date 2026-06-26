@@ -1,4 +1,9 @@
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
+import {
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+  useEffect,
+  useRef,
+} from "react";
 import { Check, Minus, RotateCcw, Trash2, X } from "lucide-react";
 import { gitMarkerLabel } from "../../lib/editorGitMarkers";
 import type { EditorGitMarker } from "../../lib/editorTypes";
@@ -26,8 +31,53 @@ export function GitMarkerPopover({
   onStage(): void;
   onUnstage(): void;
 }) {
+  const popoverRef = useRef<HTMLDialogElement | null>(null);
   const previewLines = marker.diffLines.slice(0, 12);
   const hiddenLineCount = Math.max(0, marker.diffLines.length - previewLines.length);
+  const changeScope = marker.lineCount === 1 ? "line" : "change";
+
+  useEffect(() => {
+    const popover = popoverRef.current;
+    if (!popover) {
+      return;
+    }
+    popover.focus({ preventScroll: true });
+    popover.addEventListener("keydown", handleKeyDown);
+    return () => popover.removeEventListener("keydown", handleKeyDown);
+  });
+
+  function handleKeyDown(event: KeyboardEvent) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+
+    if (!canRunGitChangeAction) {
+      return;
+    }
+
+    const key = event.key.toLowerCase();
+    if (marker.source === "worktree" && key === "s") {
+      event.preventDefault();
+      onStage();
+      return;
+    }
+    if (marker.source === "worktree" && key === "d") {
+      event.preventDefault();
+      onDiscard();
+      return;
+    }
+    if (marker.source === "worktree" && key === "r") {
+      event.preventDefault();
+      onRevert();
+      return;
+    }
+    if (marker.source === "staged" && key === "u") {
+      event.preventDefault();
+      onUnstage();
+    }
+  }
 
   function startHorizontalDrag(event: ReactPointerEvent<HTMLDivElement>) {
     event.preventDefault();
@@ -51,10 +101,13 @@ export function GitMarkerPopover({
   }
 
   return (
-    <section
+    <dialog
+      open
+      ref={popoverRef}
       className={`editor-git-popover ${marker.kind}`}
       style={{ left, top } as CSSProperties}
       aria-label="Change details"
+      tabIndex={-1}
     >
       <div className="editor-git-popover-head" onPointerDown={startHorizontalDrag}>
         <div>
@@ -103,7 +156,8 @@ export function GitMarkerPopover({
               onClick={onStage}
             >
               <Check size={13} />
-              Stage change
+              Stage {changeScope}
+              <kbd>S</kbd>
             </button>
             <button
               type="button"
@@ -112,7 +166,8 @@ export function GitMarkerPopover({
               onClick={onDiscard}
             >
               <Trash2 size={13} />
-              Discard change
+              Discard {changeScope}
+              <kbd>D</kbd>
             </button>
           </>
         ) : (
@@ -123,16 +178,18 @@ export function GitMarkerPopover({
             onClick={onUnstage}
           >
             <Minus size={13} />
-            Unstage change
+            Unstage {changeScope}
+            <kbd>U</kbd>
           </button>
         )}
         {marker.source === "worktree" ? (
           <button type="button" className="ghost-button editor-git-revert" onClick={onRevert}>
             <RotateCcw size={13} />
             Draft rollback
+            <kbd>R</kbd>
           </button>
         ) : null}
       </div>
-    </section>
+    </dialog>
   );
 }

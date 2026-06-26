@@ -18,6 +18,8 @@ function apiSlowThreshold(command: string): number {
       return 40;
     case "search_symbol_references":
       return 120;
+    case "cancel_symbol_reference_search":
+      return 40;
     case "get_project_state_fingerprint":
       return 100;
     default:
@@ -512,6 +514,10 @@ export async function searchSymbolReferences(
   });
 }
 
+export async function cancelSymbolReferenceSearch(path: string): Promise<void> {
+  return apiInvoke<void>("cancel_symbol_reference_search", { path });
+}
+
 export async function searchEditorText(
   content: string,
   query: string,
@@ -608,6 +614,12 @@ export async function unstageFiles(
   request: GitPathsRequest,
 ): Promise<GitWriteResponse> {
   return apiInvoke<GitWriteResponse>("unstage_files", { request });
+}
+
+export async function markConflictsResolved(
+  request: GitPathsRequest,
+): Promise<GitWriteResponse> {
+  return apiInvoke<GitWriteResponse>("mark_conflicts_resolved", { request });
 }
 
 export async function restoreFiles(

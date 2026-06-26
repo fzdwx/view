@@ -367,6 +367,8 @@ export function PreviewDebugPage({
               onChangeDraft={setDraftContent}
               onDiscardConflict={() => applyScenario("text")}
               onDiscardGitChange={() => Promise.resolve(false)}
+              onFindUsages={() => undefined}
+              onMarkConflictResolved={() => undefined}
               onOpenReference={() => undefined}
               onRunCommand={() => undefined}
               onSave={handleSave}

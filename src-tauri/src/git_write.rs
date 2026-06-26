@@ -85,6 +85,23 @@ pub(crate) async fn unstage_files(request: GitPathsRequest) -> Result<GitWriteRe
 }
 
 #[tauri::command]
+pub(crate) async fn mark_conflicts_resolved(
+    request: GitPathsRequest,
+) -> Result<GitWriteResponse, String> {
+    blocking_command("mark_conflicts_resolved", move || {
+        let root = repository_root(&request.path)?;
+        let pathspecs = validate_write_pathspecs(&root, &request.paths)?;
+        let changed_files = worktree_changed_files(&root)?;
+        validate_conflict_pathspecs(&changed_files, &pathspecs)?;
+
+        let args = git_args_with_pathspecs(&["add"], &pathspecs);
+        git_owned(&root, &args)?;
+        git_write_response(&root)
+    })
+    .await
+}
+
+#[tauri::command]
 pub(crate) async fn get_file_status_diff(
     path: String,
     file_path: String,
@@ -257,6 +274,18 @@ fn validate_unstageable_pathspecs(files: &[TreeFile], pathspecs: &[String]) -> R
         }
         if !file.staged {
             return Err(format!("No staged changes to unstage for {pathspec}"));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_conflict_pathspecs(files: &[TreeFile], pathspecs: &[String]) -> Result<(), String> {
+    for pathspec in pathspecs {
+        let file = changed_file_for_pathspec(files, pathspec)
+            .ok_or_else(|| format!("No conflicted file found for {pathspec}"))?;
+        if !file.conflict {
+            return Err(format!("File is not conflicted: {pathspec}"));
         }
     }
 

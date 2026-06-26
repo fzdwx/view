@@ -88,6 +88,15 @@ pub(crate) fn search_symbol_references_in_root(
     Ok(results)
 }
 
+pub(crate) fn cancel_symbol_reference_search_in_root(root: &Path) -> Result<(), String> {
+    let root = root
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve project root: {error}"))?;
+    let (search_generation, _) = next_search_generation(&root);
+    search_generation.fetch_add(1, Ordering::AcqRel);
+    Ok(())
+}
+
 fn next_search_generation(root: &Path) -> (Arc<AtomicU64>, u64) {
     let key = root.to_string_lossy().into_owned();
     let counter = {

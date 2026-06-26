@@ -100,6 +100,49 @@ export function hasGitConflictMarkers(content: string): boolean {
   return false;
 }
 
+export type GitConflictResolutionStrategy = "ours" | "theirs" | "both";
+
+export function resolveGitConflictMarkers(
+  content: string,
+  strategy: GitConflictResolutionStrategy,
+): string {
+  const newline = content.includes("\r\n") ? "\r\n" : "\n";
+  const hadTrailingNewline = content.endsWith("\n");
+  const lines = content.split(/\r?\n/);
+  if (hadTrailingNewline) {
+    lines.pop();
+  }
+
+  const resolved: string[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    if (!isConflictStartLine(lines[index])) {
+      resolved.push(lines[index]);
+      index += 1;
+      continue;
+    }
+
+    const parsed = parseConflictBlock(lines, index);
+    if (!parsed) {
+      resolved.push(lines[index]);
+      index += 1;
+      continue;
+    }
+
+    if (strategy === "ours" || strategy === "both") {
+      resolved.push(...parsed.ours);
+    }
+    if (strategy === "theirs" || strategy === "both") {
+      resolved.push(...parsed.theirs);
+    }
+    index = parsed.nextIndex;
+  }
+
+  const value = resolved.join(newline);
+  return hadTrailingNewline ? `${value}${newline}` : value;
+}
+
 function ensureTrailingNewline(value: string): string {
   return value.endsWith("\n") ? value : `${value}\n`;
 }
@@ -114,4 +157,50 @@ function isConflictSeparatorLine(line: string): boolean {
 
 function isConflictEndLine(line: string): boolean {
   return line.startsWith(">>>>>>> ") && !line.slice(8).includes(">>>>>>>");
+}
+
+function isConflictBaseLine(line: string): boolean {
+  return line.startsWith("||||||| ") && !line.slice(8).includes("|||||||");
+}
+
+function parseConflictBlock(
+  lines: readonly string[],
+  startIndex: number,
+): { readonly ours: readonly string[]; readonly theirs: readonly string[]; readonly nextIndex: number } | null {
+  const ours: string[] = [];
+  const theirs: string[] = [];
+  let index = startIndex + 1;
+  let readingBase = false;
+
+  while (index < lines.length) {
+    const line = lines[index];
+    if (isConflictBaseLine(line)) {
+      readingBase = true;
+      index += 1;
+      continue;
+    }
+    if (isConflictSeparatorLine(line)) {
+      index += 1;
+      break;
+    }
+    if (!readingBase) {
+      ours.push(line);
+    }
+    index += 1;
+  }
+
+  if (index >= lines.length) {
+    return null;
+  }
+
+  while (index < lines.length && !isConflictEndLine(lines[index])) {
+    theirs.push(lines[index]);
+    index += 1;
+  }
+
+  if (index >= lines.length || !isConflictEndLine(lines[index])) {
+    return null;
+  }
+
+  return { ours, theirs, nextIndex: index + 1 };
 }

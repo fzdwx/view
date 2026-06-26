@@ -1254,6 +1254,15 @@ async fn search_symbol_references(
 }
 
 #[tauri::command]
+async fn cancel_symbol_reference_search(path: String) -> Result<(), String> {
+    blocking_command("cancel_symbol_reference_search", move || {
+        let root = workspace_root(&path)?;
+        code_search::cancel_symbol_reference_search_in_root(&root)
+    })
+    .await
+}
+
+#[tauri::command]
 async fn search_editor_text(
     content: String,
     query: String,
@@ -6427,6 +6436,7 @@ pub fn run() {
             search_file_names,
             search_file_contents,
             search_symbol_references,
+            cancel_symbol_reference_search,
             detect_project_scripts,
             get_file_run_targets,
             search_editor_text,
@@ -6444,6 +6454,7 @@ pub fn run() {
             git_write::apply_file_change,
             git_write::stage_files,
             git_write::unstage_files,
+            git_write::mark_conflicts_resolved,
             git_restore::restore_files,
             terminal_spawn,
             terminal_resize,

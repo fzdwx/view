@@ -38,7 +38,7 @@ export interface EditorDraftsController {
     fromPath: string,
     toPath: string,
   ) => void;
-  readonly saveActiveFile: () => Promise<void>;
+  readonly saveActiveFile: () => Promise<boolean>;
   readonly setConflictDraftContent: (content: string) => void;
   readonly updateEditorDraftForFile: (
     projectPath: string,
@@ -236,12 +236,12 @@ export function useEditorDrafts({
       !editorKey ||
       savePendingKeys.has(editorKey)
     ) {
-      return;
+      return false;
     }
 
     const draft = editorDrafts[editorKey];
     if (!draft) {
-      return;
+      return true;
     }
 
     setSavePendingKeys((current) => new Set(current).add(editorKey));
@@ -280,7 +280,7 @@ export function useEditorDrafts({
             },
           };
         });
-        return;
+        return false;
       }
 
       if (response.file) {
@@ -301,9 +301,12 @@ export function useEditorDrafts({
           };
         });
         await onFileSaved(activeProjectPath, selectedProjectPath);
+        return true;
       }
+      return false;
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : String(error));
+      return false;
     } finally {
       setSavePendingKeys((current) => {
         if (!current.has(editorKey)) {

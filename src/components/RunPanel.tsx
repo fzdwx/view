@@ -1,12 +1,14 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useReducer } from "react";
 import { Play, Plus, Settings2, Trash2, X } from "lucide-react";
 import { isTauriRuntime } from "../lib/api";
 import {
   formatRunEnvText,
   loadRunConfigurations,
   parseRunEnvText,
+  recordRunConfigurationLaunch,
   runConfigurationCommand,
   runConfigurationEnvRecord,
+  runConfigurationTabIdentity,
   runConfigurationsChangedEvent,
   saveRunConfigurations,
   updateRunConfiguration,
@@ -29,6 +31,7 @@ interface RunConfigurationDraft {
   readonly args: string;
   readonly cwd: string;
   readonly envText: string;
+  readonly singleInstance: boolean;
 }
 
 const emptyDraft: RunConfigurationDraft = {
@@ -37,43 +40,112 @@ const emptyDraft: RunConfigurationDraft = {
   args: "",
   cwd: "",
   envText: "",
+  singleInstance: true,
 };
+
+interface RunPanelState {
+  readonly configurations: readonly RunConfiguration[];
+  readonly selectedConfigurationId: string | null;
+  readonly draft: RunConfigurationDraft;
+  readonly settingsOpen: boolean;
+}
+
+type RunPanelAction =
+  | {
+      readonly type: "load";
+      readonly configurations: readonly RunConfiguration[];
+      readonly preferredId?: string | null;
+      readonly settingsOpen?: boolean;
+    }
+  | { readonly type: "select"; readonly id: string }
+  | { readonly type: "patchDraft"; readonly patch: Partial<RunConfigurationDraft> }
+  | { readonly type: "setSettingsOpen"; readonly open: boolean };
+
+function initialRunPanelState(projectPath: string | null): RunPanelState {
+  return runPanelStateFromConfigurations(
+    projectPath ? loadRunConfigurations(projectPath) : [],
+    null,
+    false,
+  );
+}
+
+function runPanelReducer(
+  state: RunPanelState,
+  action: RunPanelAction,
+): RunPanelState {
+  switch (action.type) {
+    case "load":
+      return runPanelStateFromConfigurations(
+        action.configurations,
+        action.preferredId ?? state.selectedConfigurationId,
+        action.settingsOpen ?? state.settingsOpen,
+      );
+    case "select":
+      return runPanelStateFromConfigurations(
+        state.configurations,
+        action.id,
+        state.settingsOpen,
+      );
+    case "patchDraft":
+      return {
+        ...state,
+        draft: { ...state.draft, ...action.patch },
+      };
+    case "setSettingsOpen":
+      return { ...state, settingsOpen: action.open };
+  }
+}
+
+function runPanelStateFromConfigurations(
+  configurations: readonly RunConfiguration[],
+  preferredId: string | null,
+  settingsOpen: boolean,
+): RunPanelState {
+  const selectedConfiguration =
+    configurations.find((configuration) => configuration.id === preferredId) ??
+    configurations[0] ??
+    null;
+
+  return {
+    configurations,
+    selectedConfigurationId: selectedConfiguration?.id ?? null,
+    draft: selectedConfiguration
+      ? draftFromConfiguration(selectedConfiguration)
+      : emptyDraft,
+    settingsOpen: selectedConfiguration ? settingsOpen : false,
+  };
+}
 
 export const RunPanel = memo(function RunPanel({
   active,
   projectPath,
 }: RunPanelProps) {
   const runWorkspace = useTerminalWorkspace(projectPath, "run");
-  const [configurations, setConfigurations] = useState<readonly RunConfiguration[]>(
-    () => (projectPath ? loadRunConfigurations(projectPath) : []),
+  const [runPanelState, dispatchRunPanel] = useReducer(
+    runPanelReducer,
+    projectPath,
+    initialRunPanelState,
   );
-  const [selectedConfigurationId, setSelectedConfigurationId] = useState<string | null>(
-    () => configurations[0]?.id ?? null,
-  );
+  const {
+    configurations,
+    draft,
+    selectedConfigurationId,
+    settingsOpen,
+  } = runPanelState;
   const selectedConfiguration =
     configurations.find((configuration) => configuration.id === selectedConfigurationId) ??
     configurations[0] ??
     null;
-  const [draft, setDraft] = useState<RunConfigurationDraft>(() =>
-    selectedConfiguration ? draftFromConfiguration(selectedConfiguration) : emptyDraft,
-  );
-  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     if (!projectPath) {
-      setConfigurations([]);
-      setSelectedConfigurationId(null);
+      dispatchRunPanel({ type: "load", configurations: [] });
       return;
     }
 
     const load = () => {
       const next = loadRunConfigurations(projectPath);
-      setConfigurations(next);
-      setSelectedConfigurationId((current) =>
-        current && next.some((configuration) => configuration.id === current)
-          ? current
-          : (next[0]?.id ?? null),
-      );
+      dispatchRunPanel({ type: "load", configurations: next });
     };
 
     load();
@@ -87,14 +159,6 @@ export const RunPanel = memo(function RunPanel({
     return () =>
       window.removeEventListener(runConfigurationsChangedEvent, handleChanged);
   }, [projectPath]);
-
-  useEffect(() => {
-    setDraft(
-      selectedConfiguration
-        ? draftFromConfiguration(selectedConfiguration)
-        : emptyDraft,
-    );
-  }, [selectedConfiguration]);
 
   const canRun = Boolean(projectPath && draft.command.trim());
   const canEdit = Boolean(projectPath && selectedConfiguration);
@@ -117,6 +181,7 @@ export const RunPanel = memo(function RunPanel({
       args: draft.args.trim(),
       cwd: draft.cwd.trim() || null,
       env: parseRunEnvText(draft.envText),
+      singleInstance: draft.singleInstance,
       updatedAt: Date.now(),
     };
     const nextConfigurations = updateRunConfiguration(
@@ -124,8 +189,11 @@ export const RunPanel = memo(function RunPanel({
       nextConfiguration,
     );
     saveRunConfigurations(projectPath, nextConfigurations);
-    setConfigurations(nextConfigurations);
-    setSelectedConfigurationId(nextConfiguration.id);
+    dispatchRunPanel({
+      type: "load",
+      configurations: nextConfigurations,
+      preferredId: nextConfiguration.id,
+    });
     return nextConfiguration;
   }, [configurations, draft, projectPath, selectedConfiguration]);
 
@@ -143,16 +211,26 @@ export const RunPanel = memo(function RunPanel({
       configuration.label,
       configuration.cwd,
       runConfigurationEnvRecord(configuration),
+      runConfigurationTabIdentity(configuration),
+    );
+    const launchedConfigurations = recordRunConfigurationLaunch(
+      nextConfigurationsAfterPersist(configurations, configuration),
       configuration.id,
     );
-    setSettingsOpen(false);
-  }, [canRun, persistConfiguration, projectPath]);
+    saveRunConfigurations(projectPath, launchedConfigurations);
+    dispatchRunPanel({
+      type: "load",
+      configurations: launchedConfigurations,
+      preferredId: configuration.id,
+      settingsOpen: false,
+    });
+  }, [canRun, configurations, persistConfiguration, projectPath]);
 
   const handleSave = useCallback(() => {
     if (!persistConfiguration()) {
       return;
     }
-    setSettingsOpen(false);
+    dispatchRunPanel({ type: "setSettingsOpen", open: false });
   }, [persistConfiguration]);
 
   const handleCreateConfiguration = useCallback(() => {
@@ -165,11 +243,14 @@ export const RunPanel = memo(function RunPanel({
         sourceId: `custom:${Date.now()}`,
         label: "Custom",
         command: "",
-      });
+    });
     saveRunConfigurations(projectPath, nextConfigurations);
-    setConfigurations(nextConfigurations);
-    setSelectedConfigurationId(configuration.id);
-    setSettingsOpen(true);
+    dispatchRunPanel({
+      type: "load",
+      configurations: nextConfigurations,
+      preferredId: configuration.id,
+      settingsOpen: true,
+    });
   }, [configurations, projectPath]);
 
   const handleDeleteConfiguration = useCallback(() => {
@@ -180,9 +261,12 @@ export const RunPanel = memo(function RunPanel({
       (configuration) => configuration.id !== selectedConfiguration.id,
     );
     saveRunConfigurations(projectPath, nextConfigurations);
-    setConfigurations(nextConfigurations);
-    setSelectedConfigurationId(nextConfigurations[0]?.id ?? null);
-    setSettingsOpen(false);
+    dispatchRunPanel({
+      type: "load",
+      configurations: nextConfigurations,
+      preferredId: nextConfigurations[0]?.id ?? null,
+      settingsOpen: false,
+    });
   }, [configurations, projectPath, selectedConfiguration]);
 
   if (!projectPath || !isTauriRuntime()) {
@@ -225,7 +309,9 @@ export const RunPanel = memo(function RunPanel({
             aria-label="Edit selected run configuration"
             title="Edit selected run configuration"
             disabled={!canEdit}
-            onClick={() => setSettingsOpen(true)}
+            onClick={() =>
+              dispatchRunPanel({ type: "setSettingsOpen", open: true })
+            }
           >
             <Settings2 size={14} />
           </button>
@@ -252,11 +338,16 @@ export const RunPanel = memo(function RunPanel({
                     : "run-config-item"
                 }
                 title={configuration.command}
-                onClick={() => setSelectedConfigurationId(configuration.id)}
-                onDoubleClick={() => setSettingsOpen(true)}
+                onClick={() =>
+                  dispatchRunPanel({ type: "select", id: configuration.id })
+                }
+                onDoubleClick={() =>
+                  dispatchRunPanel({ type: "setSettingsOpen", open: true })
+                }
               >
                 <span>{configuration.label}</span>
                 <code>{configuration.command}</code>
+                <small>{runConfigurationMeta(configuration)}</small>
               </button>
             ))
           ) : (
@@ -265,7 +356,7 @@ export const RunPanel = memo(function RunPanel({
         </div>
       </aside>
       {settingsOpen && selectedConfiguration ? (
-        <div className="run-config-popover" role="dialog" aria-label="Run settings">
+        <dialog className="run-config-popover" aria-label="Run settings" open>
           <div className="run-config-popover-header">
             <span>Run settings</span>
             <button
@@ -273,7 +364,9 @@ export const RunPanel = memo(function RunPanel({
               className="run-config-icon-button"
               aria-label="Close run settings"
               title="Close run settings"
-              onClick={() => setSettingsOpen(false)}
+              onClick={() =>
+                dispatchRunPanel({ type: "setSettingsOpen", open: false })
+              }
             >
               <X size={14} />
             </button>
@@ -284,7 +377,10 @@ export const RunPanel = memo(function RunPanel({
               <input
                 value={draft.label}
                 onChange={(event) =>
-                  setDraft((current) => ({ ...current, label: event.target.value }))
+                  dispatchRunPanel({
+                    type: "patchDraft",
+                    patch: { label: event.target.value },
+                  })
                 }
               />
             </label>
@@ -293,7 +389,10 @@ export const RunPanel = memo(function RunPanel({
               <input
                 value={draft.command}
                 onChange={(event) =>
-                  setDraft((current) => ({ ...current, command: event.target.value }))
+                  dispatchRunPanel({
+                    type: "patchDraft",
+                    patch: { command: event.target.value },
+                  })
                 }
               />
             </label>
@@ -302,7 +401,10 @@ export const RunPanel = memo(function RunPanel({
               <input
                 value={draft.args}
                 onChange={(event) =>
-                  setDraft((current) => ({ ...current, args: event.target.value }))
+                  dispatchRunPanel({
+                    type: "patchDraft",
+                    patch: { args: event.target.value },
+                  })
                 }
               />
             </label>
@@ -311,7 +413,10 @@ export const RunPanel = memo(function RunPanel({
               <input
                 value={draft.cwd}
                 onChange={(event) =>
-                  setDraft((current) => ({ ...current, cwd: event.target.value }))
+                  dispatchRunPanel({
+                    type: "patchDraft",
+                    patch: { cwd: event.target.value },
+                  })
                 }
               />
             </label>
@@ -321,9 +426,25 @@ export const RunPanel = memo(function RunPanel({
                 value={draft.envText}
                 spellCheck={false}
                 onChange={(event) =>
-                  setDraft((current) => ({ ...current, envText: event.target.value }))
+                  dispatchRunPanel({
+                    type: "patchDraft",
+                    patch: { envText: event.target.value },
+                  })
                 }
               />
+            </label>
+            <label className="run-config-checkbox-field">
+              <input
+                type="checkbox"
+                checked={draft.singleInstance}
+                onChange={(event) =>
+                  dispatchRunPanel({
+                    type: "patchDraft",
+                    patch: { singleInstance: event.target.checked },
+                  })
+                }
+              />
+              <span>Reuse one running tab for this configuration</span>
             </label>
           </div>
           <div className="run-config-popover-footer">
@@ -344,7 +465,7 @@ export const RunPanel = memo(function RunPanel({
               <span>Run</span>
             </button>
           </div>
-        </div>
+        </dialog>
       ) : null}
       <div className="run-output-panel">
         <TerminalTabStrip
@@ -420,5 +541,25 @@ function draftFromConfiguration(
     args: configuration.args,
     cwd: configuration.cwd ?? "",
     envText: formatRunEnvText(configuration.env),
+    singleInstance: configuration.singleInstance,
   };
+}
+
+function nextConfigurationsAfterPersist(
+  configurations: readonly RunConfiguration[],
+  configuration: RunConfiguration,
+): readonly RunConfiguration[] {
+  return [
+    configuration,
+    ...configurations.filter((entry) => entry.id !== configuration.id),
+  ];
+}
+
+function runConfigurationMeta(configuration: RunConfiguration): string {
+  const runCount = configuration.runCount;
+  if (!configuration.lastRunAt) {
+    return runCount > 0 ? `${runCount} runs` : "Not run yet";
+  }
+  const date = new Date(configuration.lastRunAt);
+  return `${runCount} run${runCount === 1 ? "" : "s"} · ${date.toLocaleString()}`;
 }

@@ -35,7 +35,11 @@ import {
   searchEditorText,
 } from "../../lib/api";
 import { formatDate } from "../../lib/dateFormat";
-import { hasGitConflictMarkers } from "../../lib/editorDrafts";
+import {
+  hasGitConflictMarkers,
+  resolveGitConflictMarkers,
+  type GitConflictResolutionStrategy,
+} from "../../lib/editorDrafts";
 import {
   filterVisibleEditorGitMarkers,
   gitMarkerLabel,
@@ -50,6 +54,7 @@ import type {
   FileViewMode,
 } from "../../lib/editorTypes";
 import { moduleSpecifierAtLine } from "../../lib/editorModuleSpecifier";
+import { symbolTokenAtLine } from "../../lib/editorSymbolToken";
 import { nextMatchIndexAfter } from "../../lib/editorSearch";
 import { clamp, wrapIndex } from "../../lib/numeric";
 import {
@@ -97,6 +102,8 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
   onChangeDraft,
   onDiscardConflict,
   onDiscardGitChange,
+  onFindUsages,
+  onMarkConflictResolved,
   onOpenReference,
   onSave,
   onRunCommand,
@@ -124,6 +131,8 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
   onChangeDraft(content: string): void;
   onDiscardConflict(): void;
   onDiscardGitChange(filePath: string, marker: EditorGitMarker): Promise<boolean>;
+  onFindUsages(symbol: string, currentFilePath: string): void;
+  onMarkConflictResolved(filePath: string): void;
   onOpenReference(result: FileSearchResult): void;
   onRunCommand(target: FileRunTarget): void;
   onSave(): void;
@@ -349,6 +358,13 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
       revealGitMarker(marker);
     },
     [revealGitMarker],
+  );
+
+  const acceptGitConflictResolution = useCallback(
+    (strategy: GitConflictResolutionStrategy) => {
+      onChangeDraft(resolveGitConflictMarkers(content, strategy));
+    },
+    [content, onChangeDraft],
   );
 
   // Restores the per-file find/replace state when the editor session changes;
@@ -911,7 +927,14 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
               position,
             );
             if (!specifier) {
-              return symbolReferenceHover.openAtPosition(position);
+              const token = symbolTokenAtLine(line.text, line.from, position);
+              if (!token) {
+                symbolReferenceHover.closePopover();
+                return false;
+              }
+              symbolReferenceHover.closePopover();
+              onFindUsages(token.symbol, currentFilePath);
+              return true;
             }
 
             symbolReferenceHover.closePopover();
@@ -1072,6 +1095,7 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
     gitMarkerSegmentsByLine,
     file?.path,
     onOpenReference,
+    onFindUsages,
     onRunCommand,
     openEditorFind,
     runTargetByLine,
@@ -1080,7 +1104,6 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
     showRunTargetGutter,
     selectEditorMatch,
     symbolReferenceHover.closePopover,
-    symbolReferenceHover.openAtPosition,
     toggleGitMarker,
   ]);
 
@@ -1182,7 +1205,10 @@ export const CodeMirrorFilePreview = memo(function CodeMirrorFilePreview({
         file={file}
         saveError={saveError}
         saving={saving}
+        canMarkResolved={canRunGitChangeAction}
+        onAcceptResolution={acceptGitConflictResolution}
         onChangeDraft={onChangeDraft}
+        onMarkResolved={() => onMarkConflictResolved(file.path)}
         onSave={onSave}
       />
     );

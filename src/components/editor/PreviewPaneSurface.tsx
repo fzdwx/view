@@ -52,6 +52,8 @@ interface PreviewPaneSurfaceProps {
     filePath: string,
     marker: EditorGitMarker,
   ) => Promise<boolean>;
+  readonly onFindUsages: (symbol: string, currentFilePath: string) => void;
+  readonly onMarkConflictResolved: (filePath: string) => void;
   readonly onOpenReference: (result: FileSearchResult) => void;
   readonly onReorderTabs: (
     paneId: PreviewPaneId,
@@ -105,6 +107,8 @@ export function PreviewPaneSurface({
   onCloseTab,
   onDiscardConflict,
   onDiscardGitChange,
+  onFindUsages,
+  onMarkConflictResolved,
   onOpenReference,
   onOpenTerminalTab,
   onReorderTabs,
@@ -287,6 +291,8 @@ export function PreviewPaneSurface({
             onChangeDraft={handleChangeDraft}
             onDiscardConflict={onDiscardConflict}
             onDiscardGitChange={onDiscardGitChange}
+            onFindUsages={onFindUsages}
+            onMarkConflictResolved={onMarkConflictResolved}
             onOpenReference={onOpenReference}
             onRunCommand={onRunCommand}
             onSave={onSave}

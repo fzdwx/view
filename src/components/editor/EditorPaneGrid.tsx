@@ -41,6 +41,8 @@ export interface EditorPaneGridProps {
     filePath: string,
     marker: EditorGitMarker,
   ) => Promise<boolean>;
+  readonly onFindUsages: (symbol: string, currentFilePath: string) => void;
+  readonly onMarkConflictResolved: (filePath: string) => void;
   readonly onOpenReference: (result: FileSearchResult) => void;
   readonly onReorderTabs: (
     paneId: PreviewPaneId,

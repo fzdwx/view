@@ -50,7 +50,18 @@ import { useRepositoryRemotePolling } from "./hooks/useRepositoryRemotePolling";
 import { useRepositoryProjectData } from "./hooks/useRepositoryWorkspaceData";
 import { useSelectedPathGuard } from "./hooks/useSelectedPathGuard";
 import { useWorkbenchDock } from "./hooks/useWorkbenchDock";
-import { type FileSearchResult, type FileRunTarget, type ProjectScript, detectProjectScripts, terminalKill, type ReflogEntry } from "./lib/api";
+import { FindUsagesPanel } from "./features/find-usages/FindUsagesPanel";
+import { useFindUsagesPanel } from "./features/find-usages/useFindUsagesPanel";
+import {
+  type FileSearchResult,
+  type FileRunTarget,
+  type ProjectScript,
+  type ReflogEntry,
+  detectProjectScripts,
+  markConflictsResolved,
+  terminalKill,
+} from "./lib/api";
+import { showNativeMessage } from "./lib/nativeDialogs";
 import { pasteDestinationFromSelectedPath } from "./lib/clipboardFiles";
 import { commitPanelFiles } from "./lib/commitPanelFiles";
 import {
@@ -69,8 +80,10 @@ import {
 import { closeTerminalTab, runInRunTab } from "./lib/terminalSessions";
 import {
   loadRunConfigurations,
+  recordRunConfigurationLaunch,
   runConfigurationCommand,
   runConfigurationEnvRecord,
+  runConfigurationTabIdentity,
   saveRunConfigurations,
   upsertRunConfiguration,
 } from "./lib/runConfigurations";
@@ -116,6 +129,8 @@ export function App() {
   const [reflogFilter, setReflogFilter] = useState("");
   const [historyMode, setHistoryMode] = useState<"commits" | "reflog">("commits");
   const [projectSwitcherOpen, setProjectSwitcherOpen] = useState(false);
+  const findUsagesPanel = useFindUsagesPanel();
+  const closeFindUsagesPanel = findUsagesPanel.close;
   const {
     draggedGitPanel,
     gitPanelOrder,
@@ -163,6 +178,9 @@ export function App() {
   useEffect(() => {
     saveProjects(projects);
   }, [projects]);
+  useEffect(() => {
+    closeFindUsagesPanel();
+  }, [activeProjectPath, closeFindUsagesPanel]);
 
   const {
     changedFiles,
@@ -605,7 +623,11 @@ export function App() {
         configuration.label,
         configuration.cwd,
         runConfigurationEnvRecord(configuration),
-        configuration.id,
+        runConfigurationTabIdentity(configuration),
+      );
+      saveRunConfigurations(
+        activeProjectPath,
+        recordRunConfigurationLaunch(configurations, configuration.id),
       );
       selectRailPanel("run");
     },
@@ -633,6 +655,19 @@ export function App() {
     },
     [runProjectConfiguration],
   );
+  const openFindUsagesPanel = useCallback(
+    (symbol: string, currentFilePath: string) => {
+      if (!activeProjectPath) {
+        return;
+      }
+      findUsagesPanel.open({
+        projectPath: activeProjectPath,
+        symbol,
+        currentFilePath,
+      });
+    },
+    [activeProjectPath, findUsagesPanel],
+  );
   const clearSelectedProjectPath = useCallback(() => {
     setSelectedProjectPath(null);
   }, []);
@@ -657,6 +692,37 @@ export function App() {
   const saveActivePreviewFile = useCallback(() => {
     void saveActiveFile();
   }, [saveActiveFile]);
+  const markConflictResolved = useCallback(
+    async (filePath: string) => {
+      if (!activeProjectPath) {
+        return;
+      }
+
+      try {
+        const saved = await saveActiveFile();
+        if (!saved) {
+          return;
+        }
+        await markConflictsResolved({
+          path: activeProjectPath,
+          paths: [filePath],
+        });
+        discardDraftForPath(activeProjectPath, filePath);
+        await refreshProjectFileState(activeProjectPath);
+      } catch (error) {
+        await showNativeMessage(
+          error instanceof Error ? error.message : String(error),
+          { kind: "error" },
+        );
+      }
+    },
+    [
+      activeProjectPath,
+      discardDraftForPath,
+      refreshProjectFileState,
+      saveActiveFile,
+    ],
+  );
 
   useSelectedPathGuard({
     items: projectFiles,
@@ -1198,7 +1264,13 @@ export function App() {
               </>
             ) : null}
 
-            <section className="diff-panel rail-editor-panel">
+            <section
+              className={
+                findUsagesPanel.state.open
+                  ? "diff-panel rail-editor-panel find-usages-open"
+                  : "diff-panel rail-editor-panel"
+              }
+            >
               <EditorPaneGrid
                 activeCommit={activeCommit}
                 activePaneId={activePaneId}
@@ -1220,6 +1292,10 @@ export function App() {
                 onCloseTab={closePreviewTab}
                 onDiscardConflict={discardConflictToDisk}
                 onDiscardGitChange={discardChange}
+                onFindUsages={openFindUsagesPanel}
+                onMarkConflictResolved={(filePath) => {
+                  void markConflictResolved(filePath);
+                }}
                 onOpenReference={openFileSearchResult}
                 onReorderTabs={reorderPreviewTabs}
                 onOpenTerminalTab={openTerminalTabInEditor}
@@ -1231,6 +1307,15 @@ export function App() {
                 onSetConflictDraftContent={setConflictDraftContent}
                 onSplitTab={splitTab}
                 onUnstageGitChange={unstageChange}
+              />
+              <FindUsagesPanel
+                state={findUsagesPanel.state}
+                onCancel={findUsagesPanel.cancel}
+                onClose={findUsagesPanel.close}
+                onOpenResult={openFileSearchResult}
+                onSelectIndex={findUsagesPanel.selectIndex}
+                onSelectNext={findUsagesPanel.selectNext}
+                onSelectPrevious={findUsagesPanel.selectPrevious}
               />
             </section>
             {hasRightTopPanel ? (

@@ -74,6 +74,7 @@ export function useGitChangeActions({
           discardDraftForPath,
           editorDrafts,
           filePath,
+          marker,
           operation,
           projectPath,
           refreshProjectFileState,
@@ -154,6 +155,7 @@ async function prepareChangeAction({
   discardDraftForPath,
   editorDrafts,
   filePath,
+  marker,
   operation,
   projectPath,
   refreshProjectFileState,
@@ -162,6 +164,7 @@ async function prepareChangeAction({
   readonly discardDraftForPath: (projectPath: string, filePath: string) => void;
   readonly editorDrafts: Record<string, EditorDraft>;
   readonly filePath: string;
+  readonly marker: EditorGitMarker;
   readonly operation: GitChangeOperation;
   readonly projectPath: string;
   readonly refreshProjectFileState: (projectPath: string) => Promise<void>;
@@ -188,7 +191,7 @@ async function prepareChangeAction({
     }
 
     return confirmNativeDialog(
-      `Discard selected change in ${filePath}? This cannot be undone.`,
+      `Discard ${gitMarkerScopeLabel(marker)} in ${filePath}? This cannot be undone.`,
       {
         cancelLabel: "Cancel",
         kind: "warning",
@@ -198,6 +201,14 @@ async function prepareChangeAction({
   }
 
   return source === "staged";
+}
+
+function gitMarkerScopeLabel(marker: EditorGitMarker): string {
+  if (marker.lineCount === 1) {
+    return `line ${marker.line}`;
+  }
+  const endLine = marker.line + marker.lineCount - 1;
+  return `lines ${marker.line}-${endLine}`;
 }
 
 function errorMessage(error: unknown): string {

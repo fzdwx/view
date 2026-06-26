@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
   formatRunEnvText,
   parseRunEnvText,
+  recordRunConfigurationLaunch,
   runConfigurationCommand,
   runConfigurationEnvRecord,
+  runConfigurationTabIdentity,
   upsertRunConfiguration,
 } from "./runConfigurations";
 
@@ -34,6 +36,10 @@ describe("runConfigurations", () => {
     expect(runConfigurationEnvRecord(second.configuration)).toEqual({
       VIEW_ENV: "test",
     });
+    expect(second.configuration.singleInstance).toBe(true);
+    expect(runConfigurationTabIdentity(second.configuration)).toBe(
+      second.configuration.id,
+    );
   });
 
   test("parses and formats environment variables", () => {
@@ -44,5 +50,25 @@ describe("runConfigurations", () => {
       { key: "EMPTY", value: "" },
     ]);
     expect(formatRunEnvText(env)).toBe("FOO=bar\nEMPTY=");
+  });
+
+  test("records launch history and supports multi-instance configs", () => {
+    const { configuration, configurations } = upsertRunConfiguration([], {
+      projectPath: "/repo",
+      sourceId: "custom:dev",
+      label: "Dev",
+      command: "bun run dev",
+      singleInstance: false,
+    }, 1);
+
+    const launched = recordRunConfigurationLaunch(
+      configurations,
+      configuration.id,
+      42,
+    );
+
+    expect(runConfigurationTabIdentity(configuration)).toBeUndefined();
+    expect(launched[0].lastRunAt).toBe(42);
+    expect(launched[0].runCount).toBe(1);
   });
 });

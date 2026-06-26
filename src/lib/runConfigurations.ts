@@ -12,6 +12,9 @@ export interface RunConfiguration {
   readonly args: string;
   readonly cwd: string | null;
   readonly env: readonly RunEnvironmentVariable[];
+  readonly singleInstance: boolean;
+  readonly lastRunAt: number | null;
+  readonly runCount: number;
   readonly updatedAt: number;
 }
 
@@ -23,6 +26,7 @@ export interface RunConfigurationInput {
   readonly args?: string;
   readonly cwd?: string | null;
   readonly env?: readonly RunEnvironmentVariable[];
+  readonly singleInstance?: boolean;
 }
 
 const runConfigurationsStorageKey = "view.run-configurations.v1";
@@ -103,6 +107,9 @@ export function upsertRunConfiguration(
     args: input.args?.trim() ?? existing?.args ?? "",
     cwd: input.cwd?.trim() || null,
     env: normalizeRunEnv(input.env ?? existing?.env ?? []),
+    singleInstance: input.singleInstance ?? existing?.singleInstance ?? true,
+    lastRunAt: existing?.lastRunAt ?? null,
+    runCount: existing?.runCount ?? 0,
     updatedAt: now,
   };
   const nextConfigurations = [
@@ -117,9 +124,31 @@ export function updateRunConfiguration(
   patch: RunConfiguration,
 ): readonly RunConfiguration[] {
   return [
-    { ...patch, env: normalizeRunEnv(patch.env), updatedAt: Date.now() },
+    {
+      ...patch,
+      env: normalizeRunEnv(patch.env),
+      runCount: Math.max(0, Math.trunc(patch.runCount)),
+      updatedAt: Date.now(),
+    },
     ...configurations.filter((configuration) => configuration.id !== patch.id),
   ];
+}
+
+export function recordRunConfigurationLaunch(
+  configurations: readonly RunConfiguration[],
+  configurationId: string,
+  now = Date.now(),
+): readonly RunConfiguration[] {
+  return configurations.map((configuration) =>
+    configuration.id === configurationId
+      ? {
+          ...configuration,
+          lastRunAt: now,
+          runCount: configuration.runCount + 1,
+          updatedAt: now,
+        }
+      : configuration,
+  );
 }
 
 export function runConfigurationCommand(configuration: RunConfiguration): string {
@@ -134,6 +163,12 @@ export function runConfigurationEnvRecord(
   return Object.fromEntries(
     normalizeRunEnv(configuration.env).map((entry) => [entry.key, entry.value]),
   );
+}
+
+export function runConfigurationTabIdentity(
+  configuration: RunConfiguration,
+): string | undefined {
+  return configuration.singleInstance ? configuration.id : undefined;
 }
 
 export function parseRunEnvText(text: string): readonly RunEnvironmentVariable[] {
@@ -198,6 +233,16 @@ function normalizeRunConfigurations(
         args: typeof entry.args === "string" ? entry.args : "",
         cwd: typeof entry.cwd === "string" && entry.cwd.trim() ? entry.cwd : null,
         env: normalizeRunEnv(Array.isArray(entry.env) ? entry.env : []),
+        singleInstance:
+          typeof entry.singleInstance === "boolean" ? entry.singleInstance : true,
+        lastRunAt:
+          typeof entry.lastRunAt === "number" && Number.isFinite(entry.lastRunAt)
+            ? entry.lastRunAt
+            : null,
+        runCount:
+          typeof entry.runCount === "number" && Number.isFinite(entry.runCount)
+            ? Math.max(0, Math.trunc(entry.runCount))
+            : 0,
         updatedAt:
           typeof entry.updatedAt === "number" && Number.isFinite(entry.updatedAt)
             ? entry.updatedAt

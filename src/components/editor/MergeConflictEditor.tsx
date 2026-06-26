@@ -3,7 +3,9 @@ import { UnresolvedFile } from "@pierre/diffs/react";
 import type { FileContent } from "../../lib/api";
 import {
   conflictToMarkerFile,
+  hasGitConflictMarkers,
   gitConflictToMarkerFile,
+  type GitConflictResolutionStrategy,
 } from "../../lib/editorDrafts";
 import type { EditorDraft } from "../../lib/editorTypes";
 import { CodeMirrorView } from "./CodeMirrorView";
@@ -23,12 +25,19 @@ export function GitConflictEditor({
   file,
   saveError,
   saving,
+  canMarkResolved,
   onChangeDraft,
+  onAcceptResolution,
+  onMarkResolved,
   onSave,
 }: {
   content: string;
   file: FileContent;
+  canMarkResolved: boolean;
+  onAcceptResolution(strategy: GitConflictResolutionStrategy): void;
+  onMarkResolved(): void;
 } & EditorDraftHandlers & SaveState) {
+  const hasMarkers = hasGitConflictMarkers(content);
   return (
     <section className="merge-page" aria-label={`Resolve ${file.path}`}>
       <div className="editor-toolbar conflict-toolbar">
@@ -38,9 +47,38 @@ export function GitConflictEditor({
           <small>{file.path}</small>
         </div>
         <div className="editor-actions">
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={() => onAcceptResolution("ours")}
+          >
+            Accept ours
+          </button>
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={() => onAcceptResolution("theirs")}
+          >
+            Accept theirs
+          </button>
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={() => onAcceptResolution("both")}
+          >
+            Accept both
+          </button>
           <button type="button" className="primary-action editor-save" disabled={saving} onClick={onSave}>
            {saving ? <Loader2 className="spin" size={14} /> : <Save size={14} />}
            Save resolved
+          </button>
+          <button
+            type="button"
+            className="ghost-button"
+            disabled={saving || hasMarkers || !canMarkResolved}
+            onClick={onMarkResolved}
+          >
+            Mark resolved
           </button>
         </div>
       </div>

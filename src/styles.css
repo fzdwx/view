@@ -2069,6 +2069,205 @@ kbd {
   overflow: hidden;
 }
 
+.diff-panel.find-usages-open {
+  grid-template-rows: minmax(0, 1fr) minmax(168px, 30vh);
+}
+
+.find-usages-panel {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: 34px minmax(0, 1fr);
+  border-top: 1px solid var(--line);
+  background: var(--surface-0);
+  color: var(--ink);
+  outline: none;
+  overflow: hidden;
+}
+
+.find-usages-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in oklch, var(--surface-1) 72%, var(--surface-0));
+  padding: 0 7px 0 10px;
+}
+
+.find-usages-title,
+.find-usages-actions {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.find-usages-title {
+  flex: 1;
+}
+
+.find-usages-title span {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.find-usages-title small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.find-usages-body {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  text-rendering: auto;
+}
+
+.find-usages-empty {
+  display: flex;
+  height: 100%;
+  min-height: 112px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.find-usages-empty.error {
+  color: var(--danger);
+}
+
+.find-usages-file-group {
+  border-bottom: 1px solid color-mix(in oklch, var(--line) 72%, transparent);
+}
+
+.find-usages-file-heading {
+  display: flex;
+  min-width: 0;
+  height: 28px;
+  align-items: center;
+  gap: 7px;
+  background: color-mix(in oklch, var(--surface-1) 54%, var(--surface-0));
+  color: var(--ink);
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.find-usages-file-heading span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.find-usages-file-heading small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.find-usages-file-icon {
+  display: block;
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+
+.find-usages-file-results {
+  display: grid;
+}
+
+.find-usages-result {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 52px minmax(0, 1fr);
+  border: 0;
+  border-top: 1px solid color-mix(in oklch, var(--line) 44%, transparent);
+  background: transparent;
+  color: var(--ink);
+  cursor: default;
+  padding: 0;
+  text-align: left;
+}
+
+.find-usages-result:hover,
+.find-usages-result.active {
+  background: color-mix(in oklch, var(--accent) 15%, var(--surface-1));
+}
+
+.find-usages-result.active {
+  box-shadow: inset 2px 0 0 var(--accent-strong);
+}
+
+.find-usages-result-line {
+  align-self: start;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 7px 8px 0 10px;
+  text-align: right;
+}
+
+.find-usages-result-preview {
+  display: grid;
+  min-width: 0;
+  padding: 4px 0;
+}
+
+.find-usages-preview-line {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 42px minmax(0, 1fr);
+  min-height: 20px;
+  align-items: baseline;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 20px;
+}
+
+.find-usages-preview-line.context {
+  color: var(--muted);
+}
+
+.find-usages-preview-line.match {
+  color: var(--ink);
+}
+
+.find-usages-preview-line-number {
+  color: var(--faint);
+  padding-right: 8px;
+  text-align: right;
+}
+
+.find-usages-preview-text {
+  min-width: 0;
+  overflow: hidden;
+  padding-right: 12px;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+.find-usages-preview-text .match {
+  border: 1px solid color-mix(in oklch, var(--accent-strong) 58%, transparent);
+  border-radius: 3px;
+  background: color-mix(in oklch, var(--accent) 28%, transparent);
+  color: var(--ink);
+}
+
 .commit-detail-panel {
   grid-area: details;
   display: grid;
@@ -4951,8 +5150,11 @@ body.is-resizing-y .rail-bottom-panels {
   border: 1px solid var(--line-strong);
   border-radius: 6px;
   background: var(--surface-2);
+  color: var(--ink);
   box-shadow: 0 18px 38px rgb(0 0 0 / 0.46);
+  margin: 0;
   overflow: hidden;
+  padding: 0;
 }
 
 .editor-git-popover::before {
@@ -5058,6 +5260,13 @@ body.is-resizing-y .rail-bottom-panels {
   gap: 6px;
   padding: 0 8px;
   font-size: 11px;
+}
+
+.editor-git-popover-actions kbd {
+  height: 16px;
+  min-width: 16px;
+  padding: 0 4px;
+  font-size: 9px;
 }
 
 .editor-git-action.danger {
@@ -5431,7 +5640,8 @@ body.is-resizing-y .rail-bottom-panels {
 }
 
 .run-config-item span,
-.run-config-item code {
+.run-config-item code,
+.run-config-item small {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5446,6 +5656,11 @@ body.is-resizing-y .rail-bottom-panels {
 .run-config-item code {
   color: var(--muted);
   font-family: var(--mono);
+  font-size: 10px;
+}
+
+.run-config-item small {
+  color: var(--faint);
   font-size: 10px;
 }
 
@@ -5471,8 +5686,11 @@ body.is-resizing-y .rail-bottom-panels {
   border: 1px solid var(--line-strong);
   border-radius: 6px;
   background: var(--surface-0);
+  color: var(--ink);
   box-shadow: 0 18px 44px rgb(0 0 0 / 0.42);
+  margin: 0;
   overflow: hidden;
+  padding: 0;
 }
 
 .rail-slot-panel-top .run-config-popover {
@@ -5542,6 +5760,23 @@ body.is-resizing-y .rail-bottom-panels {
 .run-config-form textarea {
   min-height: 74px;
   resize: vertical;
+}
+
+.run-config-checkbox-field {
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+}
+
+.run-config-checkbox-field input {
+  width: 14px;
+  height: 14px;
+  min-height: 14px;
+  margin: 0;
+  accent-color: var(--accent-strong);
+}
+
+.run-config-checkbox-field span {
+  color: var(--muted);
 }
 
 .run-config-run-button {
