@@ -37,6 +37,7 @@ export interface TerminalVisualState {
     frame: TerminalFrame,
     screenElement: HTMLElement,
     sendInput: (data: TerminalInput | null) => void,
+    live: boolean,
   ) => void;
   readonly resetVisualState: () => void;
   readonly setClosedState: (closed: TerminalClose | null) => void;
@@ -230,6 +231,7 @@ export function useTerminalVisualState(): TerminalVisualState {
       nextFrame: TerminalFrame,
       screenElement: HTMLElement,
       sendInput: (data: TerminalInput | null) => void,
+      live: boolean,
     ) => {
       const previousModes = modesRef.current;
       const nextModes = nextFrame.modes ?? DEFAULT_TERMINAL_MODES;
@@ -263,6 +265,9 @@ export function useTerminalVisualState(): TerminalVisualState {
       pendingFrameSequenceRef.current += 1;
       pendingFrameRef.current = { ...visualFrame, displayOffset: nextDisplayOffset };
       pendingFrameQueuedAtRef.current = performance.now();
+      if (!live) {
+        return;
+      }
       const panelResizing = isPanelResizeInProgress();
       if (!panelResizing) {
         const queueFields = {

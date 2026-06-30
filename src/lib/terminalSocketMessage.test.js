@@ -56,6 +56,74 @@ describe("terminalSocketMessage", () => {
     });
   });
 
+  test("parses terminal OSC progress metadata", () => {
+    const message = parseTerminalSocketMessage(JSON.stringify({
+      type: "frame",
+      title: "shell",
+      cwd: "/repo",
+      commandStatus: {
+        phase: "running",
+        exitCode: null,
+        progressKind: "running",
+        percent: 42,
+      },
+      rows: 1,
+      cols: 20,
+      displayOffset: 0,
+      lineOffset: 0,
+      historySize: 0,
+      cursorRow: 0,
+      cursorCol: 0,
+      cursorVisible: true,
+      cursorShape: "block",
+      modes: {},
+      lines: [{ cells: [] }],
+    }));
+
+    expect(message).toMatchObject({
+      type: "frame",
+      commandStatus: {
+        phase: "running",
+        exitCode: null,
+        progressKind: "running",
+        percent: 42,
+      },
+    });
+  });
+
+  test("parses terminal OSC progress clear metadata", () => {
+    const message = parseTerminalSocketMessage(JSON.stringify({
+      type: "frame",
+      title: "shell",
+      cwd: "/repo",
+      commandStatus: {
+        phase: "running",
+        exitCode: null,
+        progressKind: "none",
+        percent: null,
+      },
+      rows: 1,
+      cols: 20,
+      displayOffset: 0,
+      lineOffset: 0,
+      historySize: 0,
+      cursorRow: 0,
+      cursorCol: 0,
+      cursorVisible: true,
+      cursorShape: "block",
+      modes: {},
+      lines: [{ cells: [] }],
+    }));
+
+    expect(message).toMatchObject({
+      type: "frame",
+      commandStatus: {
+        progressKind: "none",
+        percent: null,
+      },
+    });
+  });
+
   test("defaults scrollback window fields for older terminal frames", () => {
     const message = parseTerminalSocketMessage(JSON.stringify({
       type: "frame",

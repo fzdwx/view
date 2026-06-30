@@ -23,6 +23,7 @@ export interface TerminalSocketConnectionOptions {
     frame: TerminalFrame,
     element: HTMLElement,
     sendInput: (data: TerminalInput | null) => void,
+    live: boolean,
   ) => void;
   readonly sendInput: (data: TerminalInput | null) => void;
   readonly setClosedState: (closed: TerminalClose | null) => void;
@@ -89,7 +90,7 @@ export function connectTerminalSocket(
         options.socketCwdRef.current = nextCwd;
         options.workingDirectoryChangeRef.current(nextCwd);
       }
-      options.queueFrame(message, element, options.sendInput);
+      options.queueFrame(message, element, options.sendInput, options.activeRef.current);
     } else if (message.type === "bell") {
       options.triggerVisualBell();
     } else {

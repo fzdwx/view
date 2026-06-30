@@ -40,10 +40,18 @@ export interface TerminalModes {
 }
 
 export type TerminalCommandPhase = "finished" | "input" | "prompt" | "running";
+export type TerminalProgressKind =
+  | "error"
+  | "finished"
+  | "indeterminate"
+  | "none"
+  | "running";
 
 export interface TerminalCommandStatus {
   readonly phase: TerminalCommandPhase;
   readonly exitCode: number | null;
+  readonly progressKind?: TerminalProgressKind;
+  readonly percent?: number | null;
 }
 
 export interface TerminalCellMetrics {

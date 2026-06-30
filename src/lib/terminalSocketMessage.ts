@@ -126,9 +126,15 @@ function parseCommandStatus(value: unknown): TerminalCommandStatus | null {
   if (value.exitCode != null && typeof value.exitCode !== "number") {
     return null;
   }
+  const progressKind = parseTerminalProgressKind(value.progressKind);
+  const percent =
+    typeof value.percent === "number"
+      ? Math.min(100, Math.max(0, Math.trunc(value.percent)))
+      : null;
   return {
     phase: value.phase,
     exitCode: value.exitCode ?? null,
+    ...(progressKind ? { progressKind, percent } : {}),
   };
 }
 
@@ -234,5 +240,20 @@ function isTerminalCommandPhase(value: unknown): value is TerminalCommandStatus[
       return true;
     default:
       return false;
+  }
+}
+
+function parseTerminalProgressKind(
+  value: unknown,
+): TerminalCommandStatus["progressKind"] | null {
+  switch (value) {
+    case "error":
+    case "finished":
+    case "indeterminate":
+    case "none":
+    case "running":
+      return value;
+    default:
+      return null;
   }
 }

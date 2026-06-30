@@ -697,6 +697,11 @@ impl TerminalSemanticState {
             return;
         }
 
+        if let Some(rest) = payload.strip_prefix("9;4;") {
+            self.apply_osc_9_4(rest);
+            return;
+        }
+
         if let Some(url) = payload.strip_prefix("7;") {
             if let Some(path) = parse_osc7_file_url(url) {
                 self.osc_cwd = Some(path);
@@ -708,25 +713,50 @@ impl TerminalSemanticState {
         let mut parts = payload.split(';');
         let marker = parts.next().unwrap_or_default();
         let status = match marker {
-            "A" => TerminalCommandStatus {
-                phase: TerminalCommandPhase::Prompt,
-                exit_code: None,
-            },
-            "B" => TerminalCommandStatus {
-                phase: TerminalCommandPhase::Input,
-                exit_code: None,
-            },
-            "C" => TerminalCommandStatus {
-                phase: TerminalCommandPhase::Running,
-                exit_code: None,
-            },
-            "D" => TerminalCommandStatus {
-                phase: TerminalCommandPhase::Finished,
-                exit_code: parts.next().and_then(|value| value.parse::<i32>().ok()),
-            },
+            "A" => TerminalCommandStatus::new(TerminalCommandPhase::Prompt, None),
+            "B" => TerminalCommandStatus::new(TerminalCommandPhase::Input, None),
+            "C" => TerminalCommandStatus::new(TerminalCommandPhase::Running, None),
+            "D" => TerminalCommandStatus::new(
+                TerminalCommandPhase::Finished,
+                parts.next().and_then(|value| value.parse::<i32>().ok()),
+            ),
             _ => return,
         };
         self.command_status = Some(status);
+    }
+
+    fn apply_osc_9_4(&mut self, payload: &str) {
+        let mut parts = payload.split(';');
+        let Some(kind) = parts.next().and_then(parse_terminal_progress_kind) else {
+            return;
+        };
+        let percent = match kind {
+            TerminalProgressKind::Running | TerminalProgressKind::Error | TerminalProgressKind::Finished => {
+                parts
+                    .next()
+                    .and_then(|value| value.parse::<u8>().ok())
+                    .map(|value| value.min(100))
+            }
+            TerminalProgressKind::None | TerminalProgressKind::Indeterminate => None,
+        };
+        let mut status = self
+            .command_status
+            .clone()
+            .unwrap_or_else(|| TerminalCommandStatus::new(TerminalCommandPhase::Running, None));
+        status.progress_kind = kind;
+        status.percent = percent;
+        self.command_status = Some(status);
+    }
+}
+
+fn parse_terminal_progress_kind(value: &str) -> Option<TerminalProgressKind> {
+    match value {
+        "0" => Some(TerminalProgressKind::None),
+        "1" => Some(TerminalProgressKind::Running),
+        "2" => Some(TerminalProgressKind::Error),
+        "3" => Some(TerminalProgressKind::Indeterminate),
+        "5" => Some(TerminalProgressKind::Finished),
+        _ => None,
     }
 }
 
@@ -849,11 +879,34 @@ enum TerminalCommandPhase {
     Finished,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum TerminalProgressKind {
+    None,
+    Running,
+    Error,
+    Indeterminate,
+    Finished,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TerminalCommandStatus {
     phase: TerminalCommandPhase,
     exit_code: Option<i32>,
+    progress_kind: TerminalProgressKind,
+    percent: Option<u8>,
+}
+
+impl TerminalCommandStatus {
+    fn new(phase: TerminalCommandPhase, exit_code: Option<i32>) -> Self {
+        Self {
+            phase,
+            exit_code,
+            progress_kind: TerminalProgressKind::None,
+            percent: None,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -5455,18 +5508,45 @@ mod tests {
         semantics.advance_output(b"\x1b]133;C\x07");
         assert_eq!(
             semantics.command_status,
-            Some(TerminalCommandStatus {
-                phase: TerminalCommandPhase::Running,
-                exit_code: None,
-            })
+            Some(TerminalCommandStatus::new(
+                TerminalCommandPhase::Running,
+                None,
+            ))
         );
 
         semantics.advance_output(b"\x1b]133;D;2\x07");
         assert_eq!(
             semantics.command_status,
+            Some(TerminalCommandStatus::new(
+                TerminalCommandPhase::Finished,
+                Some(2),
+            ))
+        );
+    }
+
+    #[test]
+    fn terminal_osc_semantics_tracks_command_progress() {
+        let mut semantics = TerminalSemanticState::default();
+
+        semantics.advance_output(b"\x1b]133;C\x07\x1b]9;4;1;42\x07");
+        assert_eq!(
+            semantics.command_status,
             Some(TerminalCommandStatus {
-                phase: TerminalCommandPhase::Finished,
-                exit_code: Some(2),
+                phase: TerminalCommandPhase::Running,
+                exit_code: None,
+                progress_kind: TerminalProgressKind::Running,
+                percent: Some(42),
+            })
+        );
+
+        semantics.advance_output(b"\x1b]9;4;0\x07");
+        assert_eq!(
+            semantics.command_status,
+            Some(TerminalCommandStatus {
+                phase: TerminalCommandPhase::Running,
+                exit_code: None,
+                progress_kind: TerminalProgressKind::None,
+                percent: None,
             })
         );
     }
@@ -5501,6 +5581,27 @@ mod tests {
         assert_eq!(frame["oscCwd"], "/tmp/view");
         assert_eq!(frame["commandStatus"]["phase"], "running");
         assert_eq!(frame["commandStatus"]["exitCode"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn terminal_frame_exposes_osc_progress_status() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        let term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(20, 6),
+            test_terminal_event_proxy(input_tx),
+        );
+        let mut semantics = TerminalSemanticState::default();
+        semantics.advance_output(b"\x1b]133;C\x07\x1b]9;4;1;42\x07");
+
+        let frame: serde_json::Value = serde_json::from_str(
+            &terminal_frame_with_semantics(&term, None, Some("/tmp/fallback"), &semantics)
+                .expect("terminal frame"),
+        )
+        .expect("frame json");
+
+        assert_eq!(frame["commandStatus"]["progressKind"], "running");
+        assert_eq!(frame["commandStatus"]["percent"], 42);
     }
 
     #[test]

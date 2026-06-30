@@ -21,6 +21,7 @@ export interface TerminalSessionOptions {
   readonly onWorkingDirectoryChange: (cwd: string | null) => void;
   readonly pendingCommand: string | null;
   readonly projectPath: string;
+  readonly readOnly: boolean;
   readonly screenRef: RefObject<HTMLDivElement | null>;
   readonly session: TerminalSessionInfo | null;
   readonly terminalOptions: TerminalSpawnOptions;
@@ -38,6 +39,7 @@ export function useTerminalSession(options: TerminalSessionOptions) {
     onWorkingDirectoryChange,
     pendingCommand,
     projectPath,
+    readOnly,
     screenRef,
     session,
     terminalOptions,
@@ -46,6 +48,7 @@ export function useTerminalSession(options: TerminalSessionOptions) {
   const sessionIdRef = useRef<string | null>(null);
   const pendingCommandSentRef = useRef(false);
   const activeRef = useRef(active);
+  const readOnlyRef = useRef(readOnly);
   const sessionRef = useRef<TerminalSessionInfo | null>(session);
   const cwdRef = useRef<string | null>(cwd);
   const socketCwdRef = useRef<string | null>(cwd);
@@ -87,6 +90,7 @@ export function useTerminalSession(options: TerminalSessionOptions) {
 
   useEffect(() => {
     activeRef.current = active;
+    readOnlyRef.current = readOnly;
     cwdRef.current = cwd;
     sessionRef.current = session;
     titleChangeRef.current = onTitleChange;
@@ -105,6 +109,7 @@ export function useTerminalSession(options: TerminalSessionOptions) {
     onTitleChange,
     onWorkingDirectoryChange,
     pendingCommand,
+    readOnly,
     session,
     env,
     terminalOptions,
@@ -112,9 +117,10 @@ export function useTerminalSession(options: TerminalSessionOptions) {
 
   useEffect(() => {
     if (active) {
+      flushPendingFrame();
       screenRef.current?.focus({ preventScroll: true });
     }
-  }, [active, screenRef]);
+  }, [active, flushPendingFrame, screenRef]);
 
   const scrollTerminal = useCallback(
     (delta: number, direction: "up" | "down" | "bottom") => {
@@ -179,6 +185,7 @@ export function useTerminalSession(options: TerminalSessionOptions) {
     pendingCommandSentRef,
     projectPath,
     queueFrame,
+    readOnlyRef,
     resetInputQueue,
     resetVisualState,
     resizeFrameRef,

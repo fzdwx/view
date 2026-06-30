@@ -32,6 +32,7 @@ export interface TerminalScreenHandlerContext {
   readonly frameRef: RefBox<TerminalFrame | null>;
   readonly modesRef: RefBox<TerminalModes>;
   readonly mouseButtonRef: RefBox<number | null>;
+  readonly readOnlyRef?: RefBox<boolean>;
   readonly screenElement: HTMLElement;
   readonly scrollTerminal: (delta: number, direction: TerminalScrollDirection) => void;
   readonly sendInput: (data: TerminalInput | null) => void;
@@ -47,6 +48,7 @@ export function attachTerminalScreenHandlers(
     frameRef,
     modesRef,
     mouseButtonRef,
+    readOnlyRef,
     screenElement,
     scrollTerminal,
     sendInput,
@@ -85,6 +87,9 @@ export function attachTerminalScreenHandlers(
   };
   const pasteText = (text: string) => {
     if (!text) {
+      return;
+    }
+    if (readOnlyRef?.current) {
       return;
     }
     if (
@@ -145,6 +150,9 @@ export function attachTerminalScreenHandlers(
       return;
     }
     event.preventDefault();
+    if (readOnlyRef?.current) {
+      return;
+    }
     sendUserInput(input);
   };
   const handleCopy = (event: ClipboardEvent) => {
@@ -159,20 +167,32 @@ export function attachTerminalScreenHandlers(
       return;
     }
     event.preventDefault();
+    if (readOnlyRef?.current) {
+      return;
+    }
     pasteText(text);
   };
   const handleFocus = () => {
+    if (readOnlyRef?.current) {
+      return;
+    }
     if (modesRef.current.focusInOut) {
       sendInput("\x1b[I");
     }
   };
   const handleBlur = () => {
     mouseButtonRef.current = null;
+    if (readOnlyRef?.current) {
+      return;
+    }
     if (modesRef.current.focusInOut) {
       sendInput("\x1b[O");
     }
   };
   const handleMouseDown = (event: MouseEvent) => {
+    if (readOnlyRef?.current) {
+      return;
+    }
     if (isTerminalHyperlinkEventTarget(event.target) || !terminalMouseEnabled(modesRef.current)) {
       return;
     }
@@ -186,6 +206,9 @@ export function attachTerminalScreenHandlers(
     sendMouseEvent(event, button, true, context);
   };
   const handleMouseUp = (event: MouseEvent) => {
+    if (readOnlyRef?.current) {
+      return;
+    }
     if (isTerminalHyperlinkEventTarget(event.target) || !terminalMouseEnabled(modesRef.current)) {
       return;
     }
@@ -198,6 +221,9 @@ export function attachTerminalScreenHandlers(
     sendMouseEvent(event, button, false, context);
   };
   const handleMouseMove = (event: MouseEvent) => {
+    if (readOnlyRef?.current) {
+      return;
+    }
     const modes = modesRef.current;
     const activeButton = mouseButtonRef.current;
     if (!terminalMouseEnabled(modes) || !(modes.mouseMotion || (modes.mouseDrag && activeButton != null))) {
@@ -207,6 +233,24 @@ export function attachTerminalScreenHandlers(
     sendMouseEvent(event, (activeButton ?? 3) + 32, true, context);
   };
   const handleWheel = (event: WheelEvent) => {
+    if (readOnlyRef?.current) {
+      event.preventDefault();
+      wheelScrollAccumulatorRef.current += -normalizeWheelLines(
+        event,
+        cellMetricsRef.current,
+        frameRef.current?.rows ?? MIN_TERMINAL_ROWS,
+      );
+      const delta =
+        wheelScrollAccumulatorRef.current > 0
+          ? Math.floor(wheelScrollAccumulatorRef.current)
+          : Math.ceil(wheelScrollAccumulatorRef.current);
+      if (delta === 0) {
+        return;
+      }
+      wheelScrollAccumulatorRef.current -= delta;
+      queueWheelScroll(delta);
+      return;
+    }
     if (terminalMouseEnabled(modesRef.current)) {
       event.preventDefault();
       const direction = event.deltaY < 0 ? 64 : 65;
@@ -230,6 +274,9 @@ export function attachTerminalScreenHandlers(
     queueWheelScroll(delta);
   };
   const handleContextMenu = (event: MouseEvent) => {
+    if (readOnlyRef?.current) {
+      return;
+    }
     if (terminalMouseEnabled(modesRef.current)) {
       event.preventDefault();
     }

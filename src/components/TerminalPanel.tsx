@@ -1,4 +1,4 @@
-import { memo, Profiler, useEffect, useRef } from "react";
+import { memo, Profiler, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -6,6 +6,15 @@ import type {
   ProfilerOnRenderCallback,
   ReactNode,
 } from "react";
+import {
+  ChevronDown,
+  ChevronUp,
+  ListTree,
+  Lock,
+  Search,
+  Unlock,
+  X,
+} from "lucide-react";
 import {
   isTauriRuntime,
   openExternalUrl,
@@ -26,6 +35,12 @@ import {
   type TerminalInternalLink,
   type TerminalNavigationContext,
 } from "../lib/terminalNavigation";
+import {
+  findTerminalFrameText,
+  terminalCommandHistoryReducer,
+  type TerminalCommandHistoryState,
+  type TerminalTextMatch,
+} from "../lib/terminalCommandHistory";
 import {
   DEFAULT_TERMINAL_CELL_METRICS,
   type TerminalCommandStatus,
@@ -778,6 +793,13 @@ export function TerminalSessionView({
   onWorkingDirectoryChange,
 }: TerminalSessionViewProps) {
   const screenRef = useRef<HTMLDivElement | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [outlineOpen, setOutlineOpen] = useState(false);
+  const [readOnly, setReadOnly] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeSearchIndex, setActiveSearchIndex] = useState(0);
+  const [commandHistory, setCommandHistory] =
+    useState<TerminalCommandHistoryState>();
   const {
     bellActive,
     closed,
@@ -793,6 +815,7 @@ export function TerminalSessionView({
     terminalOptions,
     env,
     pendingCommand,
+    readOnly,
     screenRef,
     onTitleChange,
     onSessionReady,
@@ -800,21 +823,170 @@ export function TerminalSessionView({
     onClosed,
     onWorkingDirectoryChange,
   });
+  const searchMatches = useMemo(
+    () => (frame ? findTerminalFrameText(frame, searchQuery) : []),
+    [frame, searchQuery],
+  );
+  const activeSearchMatchCount = searchMatches.length;
+
+  useEffect(() => {
+    if (!frame) {
+      return;
+    }
+    setCommandHistory((previousHistory) =>
+      terminalCommandHistoryReducer(previousHistory, frame),
+    );
+  }, [frame]);
+
+  useEffect(() => {
+    if (activeSearchIndex < activeSearchMatchCount) {
+      return;
+    }
+    setActiveSearchIndex(Math.max(0, activeSearchMatchCount - 1));
+  }, [activeSearchIndex, activeSearchMatchCount]);
+
+  useEffect(() => {
+    if (!searchOpen || activeSearchMatchCount === 0) {
+      return;
+    }
+    const target = screenRef.current?.querySelector(
+      `[data-terminal-search-index="${activeSearchIndex}"]`,
+    );
+    target?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeSearchIndex, activeSearchMatchCount, searchOpen]);
+
+  const searchResultLabel =
+    searchQuery.trim() && activeSearchMatchCount > 0
+      ? `${activeSearchIndex + 1}/${activeSearchMatchCount}`
+      : searchQuery.trim()
+        ? "0/0"
+        : "";
 
   return (
     <div
       ref={screenRef}
-      className="terminal-screen"
+      className={readOnly ? "terminal-screen terminal-screen-readonly" : "terminal-screen"}
       role="application"
       aria-label="Terminal"
+      aria-readonly={readOnly}
       // Custom PTY viewport: keyboard focus drives terminal input, mouse
       // reporting, and interactive TUI programs.
       // oxlint-disable-next-line react-doctor/no-noninteractive-tabindex
       tabIndex={0}
       onMouseDown={() => screenRef.current?.focus({ preventScroll: true })}
     >
+      <div
+        className="terminal-session-toolbar"
+        onKeyDown={(event) => event.stopPropagation()}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          className={searchOpen ? "terminal-tool-button terminal-tool-button-active" : "terminal-tool-button"}
+          aria-label="Search terminal scrollback"
+          aria-pressed={searchOpen}
+          title="Search terminal scrollback"
+          onClick={() => {
+            setSearchOpen((open) => !open);
+            setOutlineOpen(false);
+          }}
+        >
+          <Search size={13} />
+        </button>
+        <button
+          type="button"
+          className={outlineOpen ? "terminal-tool-button terminal-tool-button-active" : "terminal-tool-button"}
+          aria-label="Show terminal command outline"
+          aria-pressed={outlineOpen}
+          title="Show terminal command outline"
+          onClick={() => {
+            setOutlineOpen((open) => !open);
+            setSearchOpen(false);
+          }}
+        >
+          <ListTree size={13} />
+        </button>
+        <button
+          type="button"
+          className={readOnly ? "terminal-tool-button terminal-tool-button-active" : "terminal-tool-button"}
+          aria-label={readOnly ? "Disable read-only terminal" : "Enable read-only terminal"}
+          aria-pressed={readOnly}
+          title={readOnly ? "Disable read-only terminal" : "Enable read-only terminal"}
+          onClick={() => setReadOnly((value) => !value)}
+        >
+          {readOnly ? <Lock size={13} /> : <Unlock size={13} />}
+        </button>
+      </div>
+      {searchOpen ? (
+        <div
+          className="terminal-search-popover"
+          onKeyDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <input
+            className="terminal-search-input"
+            aria-label="Search terminal scrollback"
+            value={searchQuery}
+            placeholder="Search"
+            onChange={(event) => {
+              setSearchQuery(event.currentTarget.value);
+              setActiveSearchIndex(0);
+            }}
+          />
+          <span className="terminal-search-count">{searchResultLabel}</span>
+          <button
+            type="button"
+            className="terminal-tool-button"
+            aria-label="Previous terminal search result"
+            disabled={activeSearchMatchCount === 0}
+            onClick={() =>
+              setActiveSearchIndex((index) =>
+                activeSearchMatchCount === 0
+                  ? 0
+                  : (index + activeSearchMatchCount - 1) % activeSearchMatchCount,
+              )
+            }
+          >
+            <ChevronUp size={13} />
+          </button>
+          <button
+            type="button"
+            className="terminal-tool-button"
+            aria-label="Next terminal search result"
+            disabled={activeSearchMatchCount === 0}
+            onClick={() =>
+              setActiveSearchIndex((index) =>
+                activeSearchMatchCount === 0 ? 0 : (index + 1) % activeSearchMatchCount,
+              )
+            }
+          >
+            <ChevronDown size={13} />
+          </button>
+          <button
+            type="button"
+            className="terminal-tool-button"
+            aria-label="Close terminal search"
+            onClick={() => setSearchOpen(false)}
+          >
+            <X size={13} />
+          </button>
+        </div>
+      ) : null}
+      {outlineOpen ? (
+        <div
+          className="terminal-command-outline"
+          onKeyDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <TerminalCommandOutline history={commandHistory} />
+        </div>
+      ) : null}
       <div className={bellActive ? "terminal-output terminal-bell-flash" : "terminal-output"}>
         <TerminalCommandStatusBadge status={frame?.commandStatus ?? null} />
+        <TerminalSearchHighlights
+          activeIndex={activeSearchIndex}
+          matches={searchMatches}
+        />
         {frame ? (
           <Profiler id="TerminalRows" onRender={onTerminalRender}>
             <TerminalRows frame={frame} projectPath={projectPath} />
@@ -875,16 +1047,105 @@ function TerminalCommandStatusBadge({
 }
 
 function terminalCommandStatusLabel(status: TerminalCommandStatus): string {
+  const progressLabel = terminalCommandProgressLabel(status);
+  const appendProgress = (baseLabel: string) =>
+    progressLabel ? `${baseLabel} ${progressLabel}` : baseLabel;
   switch (status.phase) {
     case "finished":
-      return status.exitCode == null ? "Done" : `Exit ${status.exitCode}`;
+      return appendProgress(status.exitCode == null ? "Done" : `Exit ${status.exitCode}`);
     case "input":
-      return "Input";
+      return appendProgress("Input");
     case "prompt":
-      return "Ready";
+      return appendProgress("Ready");
     case "running":
-      return "Running";
+      return appendProgress("Running");
   }
+}
+
+function terminalCommandProgressLabel(status: TerminalCommandStatus): string | null {
+  const kind = status.progressKind;
+  if (!kind || kind === "none") {
+    return null;
+  }
+  if (kind === "indeterminate") {
+    return "Working";
+  }
+  const percent =
+    typeof status.percent === "number" && Number.isFinite(status.percent)
+      ? `${Math.trunc(status.percent)}%`
+      : "";
+  switch (kind) {
+    case "error":
+      return percent ? `Error ${percent}` : "Error";
+    case "finished":
+      return percent ? `Done ${percent}` : "Done";
+    case "running":
+      return percent || "Running";
+  }
+}
+
+function TerminalSearchHighlights({
+  activeIndex,
+  matches,
+}: {
+  readonly activeIndex: number;
+  readonly matches: readonly TerminalTextMatch[];
+}) {
+  if (matches.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="terminal-search-highlights" aria-hidden="true">
+      {matches.map((match, index) => (
+        <span
+          key={`${match.logicalRow}-${match.column}-${index}`}
+          className={
+            index === activeIndex
+              ? "terminal-search-highlight terminal-search-highlight-active"
+              : "terminal-search-highlight"
+          }
+          data-terminal-search-index={index}
+          style={{
+            left: `calc(2px + ${match.column} * var(--terminal-cell-width, ${DEFAULT_TERMINAL_CELL_METRICS.width}px))`,
+            top: `calc(2px + ${match.row} * var(--terminal-cell-height, ${DEFAULT_TERMINAL_CELL_METRICS.height}px))`,
+            width: `calc(${match.length} * var(--terminal-cell-width, ${DEFAULT_TERMINAL_CELL_METRICS.width}px))`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function TerminalCommandOutline({
+  history,
+}: {
+  readonly history: TerminalCommandHistoryState | undefined;
+}) {
+  const commands = history?.commands ?? [];
+  const activeCommand = history?.activeCommand ?? null;
+  if (!activeCommand && commands.length === 0) {
+    return <div className="terminal-command-outline-empty">No command markers</div>;
+  }
+
+  return (
+    <div className="terminal-command-outline-list">
+      {activeCommand ? (
+        <div className="terminal-command-outline-item terminal-command-outline-active">
+          <span className="terminal-command-outline-status">Running</span>
+          <span className="terminal-command-outline-text">{activeCommand.text}</span>
+        </div>
+      ) : null}
+      {commands.slice().reverse().map((command) => (
+        <div key={command.id} className="terminal-command-outline-item">
+          <span className="terminal-command-outline-status">
+            {command.exitCode == null ? "Done" : `Exit ${command.exitCode}`}
+          </span>
+          <span className="terminal-command-outline-text">{command.text}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function TerminalRenderStats({ frame }: { readonly frame: TerminalFrame }) {

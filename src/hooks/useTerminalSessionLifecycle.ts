@@ -64,7 +64,9 @@ export interface TerminalSessionLifecycleOptions {
     frame: TerminalFrame,
     element: HTMLElement,
     sendInput: (data: TerminalInput | null) => void,
+    live: boolean,
   ) => void;
+  readonly readOnlyRef: MutableRef<boolean>;
   readonly resetInputQueue: () => void;
   readonly resetVisualState: () => void;
   readonly resizeFrameRef: MutableRef<number | null>;
@@ -182,6 +184,7 @@ export function useTerminalSessionLifecycle(options: TerminalSessionLifecycleOpt
       frameRef: options.frameRef,
       modesRef: options.modesRef,
       mouseButtonRef: options.mouseButtonRef,
+      readOnlyRef: options.readOnlyRef,
       screenElement: terminalElement,
       scrollTerminal: options.scrollTerminal,
       sendInput: options.sendInput,
@@ -284,6 +287,7 @@ export function useTerminalSessionLifecycle(options: TerminalSessionLifecycleOpt
     options.pendingCommandSentRef,
     options.projectPath,
     options.queueFrame,
+    options.readOnlyRef,
     options.resetInputQueue,
     options.resetVisualState,
     options.resizeFrameRef,
