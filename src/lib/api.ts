@@ -399,6 +399,33 @@ export interface DeleteRemoteBranchRequest {
   readonly branch: string;
 }
 
+export interface CreateProjectDirectoryRequest {
+  readonly path: string;
+  readonly dirPath: string;
+}
+
+export interface RenameProjectPathRequest {
+  readonly path: string;
+  readonly fromPath: string;
+  readonly toPath: string;
+}
+
+export interface DeleteProjectDirectoryRequest {
+  readonly path: string;
+  readonly dirPath: string;
+  readonly recursive: boolean;
+}
+
+export interface RevealProjectPathRequest {
+  readonly path: string;
+  readonly filePath: string | null;
+}
+
+export interface AppendGitignorePatternRequest {
+  readonly path: string;
+  readonly pattern: string;
+}
+
 export interface PushCurrentBranchOptions {
   readonly remote?: string | null;
   readonly branch?: string | null;
@@ -620,6 +647,53 @@ export async function deleteProjectFile(
   filePath: string,
 ): Promise<void> {
   return apiInvoke<void>("delete_project_file", { path, filePath });
+}
+
+export async function createProjectDirectory(
+  path: string,
+  dirPath: string,
+): Promise<string> {
+  return apiInvoke<string>("create_project_directory", {
+    request: { path, dirPath },
+  });
+}
+
+export async function renameProjectPath(
+  path: string,
+  fromPath: string,
+  toPath: string,
+): Promise<string> {
+  return apiInvoke<string>("rename_project_path", {
+    request: { path, fromPath, toPath },
+  });
+}
+
+export async function deleteProjectDirectory(
+  path: string,
+  dirPath: string,
+  recursive: boolean,
+): Promise<void> {
+  return apiInvoke<void>("delete_project_directory", {
+    request: { path, dirPath, recursive },
+  });
+}
+
+export async function revealProjectPath(
+  path: string,
+  filePath: string | null,
+): Promise<void> {
+  return apiInvoke<void>("reveal_project_path", {
+    request: { path, filePath },
+  });
+}
+
+export async function appendGitignorePattern(
+  path: string,
+  pattern: string,
+): Promise<string> {
+  return apiInvoke<string>("append_gitignore_pattern", {
+    request: { path, pattern },
+  });
 }
 
 export async function searchFileNames(

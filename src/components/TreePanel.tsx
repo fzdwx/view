@@ -50,9 +50,14 @@ interface TreePanelProps {
   emptyCopy?: string;
   onDragEnd?(): void;
   onDragStart?(event: DragEvent<HTMLDivElement>): void;
+  onCopyRelativePath?(path: string): void;
+  onCreateDirectory?(parentPath: string | null): void;
   onCreateFile?(parentPath: string | null): void;
+  onDeleteDirectory?(path: string): void;
   onDeleteFile?(path: string): void;
+  onIgnorePath?(path: string, kind: "directory" | "file"): void;
   onPasteFiles?(files: File[], destDir: string | null): void;
+  onRevealPath?(path: string): void;
   onRenameFile?(fromPath: string, toPath: string): void;
   onRunScript?(): void;
   gitFileActions?: TreeGitFileActions;
@@ -69,9 +74,14 @@ export const TreePanel = memo(function TreePanel({
   emptyCopy = "There are no files to show.",
   onDragEnd,
   onDragStart,
+  onCopyRelativePath,
+  onCreateDirectory,
   onCreateFile,
+  onDeleteDirectory,
   onDeleteFile,
+  onIgnorePath,
   onPasteFiles,
+  onRevealPath,
   onRenameFile,
   onRunScript,
   gitFileActions,
@@ -142,7 +152,7 @@ export const TreePanel = memo(function TreePanel({
     unsafeCSS: treeContentAlignmentCss,
     renaming: onRenameFile
       ? {
-          canRename: (item) => !item.isFolder,
+          canRename: () => true,
           onRename: (event) => {
             onRenameFile(event.sourcePath, event.destinationPath);
           },
@@ -307,8 +317,13 @@ export const TreePanel = memo(function TreePanel({
         hasTreeContextMenuActions({
           canStartRename: Boolean(onRenameFile),
           gitFileActions,
+          onCopyRelativePath,
+          onCreateDirectory,
           onCreateFile,
+          onDeleteDirectory,
           onDeleteFile,
+          onIgnorePath,
+          onRevealPath,
           onRunScript,
         })
           ? (item, context) => (
@@ -319,8 +334,13 @@ export const TreePanel = memo(function TreePanel({
                 gitFileActions={gitFileActions}
                 item={item}
                 model={model}
+                onCopyRelativePath={onCopyRelativePath}
+                onCreateDirectory={onCreateDirectory}
                 onCreateFile={onCreateFile}
+                onDeleteDirectory={onDeleteDirectory}
                 onDeleteFile={onDeleteFile}
+                onIgnorePath={onIgnorePath}
+                onRevealPath={onRevealPath}
                 onRunScript={onRunScript}
                 selectedPaths={treeSelectedPathsRef.current}
               />

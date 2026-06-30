@@ -6,11 +6,15 @@ import {
   type SetStateAction,
 } from "react";
 import {
+  appendGitignorePattern,
+  createProjectDirectory,
   createProjectFile,
+  deleteProjectDirectory,
   deleteProjectFile,
   pasteClipboardIntoProject,
   pasteProjectFiles,
-  renameProjectFile,
+  renameProjectPath,
+  revealProjectPath,
   writePastedFiles,
   type PastedFile,
 } from "../lib/api";
@@ -18,6 +22,11 @@ import { confirmNativeDialog, showNativeMessage } from "../lib/nativeDialogs";
 import { buildRequestedFilePath } from "../lib/pathLabels";
 import type { FilePreviewMode } from "../lib/previewTabs";
 import type { SavedProject } from "../lib/projects";
+import {
+  copyRelativePathText,
+  ignorePatternForTreePath,
+  type ProjectTreeItemKind,
+} from "../lib/projectTreeActions";
 import { useProjectFileStateRefresh } from "./useProjectFileStateRefresh";
 
 /// Cap pasted file size so a huge file does not flood the IPC channel with a
@@ -52,14 +61,22 @@ export interface UseProjectFileActionsOptions {
 
 export interface ProjectFileActions {
   readonly copyFileFromTree: (path: string | null) => Promise<void>;
+  readonly copyRelativePathFromTree: (path: string | null) => Promise<void>;
+  readonly createDirectoryFromTree: (parentPath: string | null) => Promise<void>;
   readonly createFileFromTree: (parentPath: string | null) => Promise<void>;
+  readonly deleteDirectoryFromTree: (path: string) => Promise<void>;
   readonly deleteFileFromTree: (path: string) => Promise<void>;
+  readonly ignorePathFromTree: (
+    path: string,
+    kind: ProjectTreeItemKind,
+  ) => Promise<void>;
   readonly pasteClipboardFromTree: (destDir: string | null) => Promise<void>;
   readonly pasteFilesFromTree: (
     files: File[],
     destDir: string | null,
   ) => Promise<void>;
   readonly refreshProjectFileState: (projectPath: string) => Promise<void>;
+  readonly revealPathFromTree: (path: string | null) => Promise<void>;
   readonly renameFileFromTree: (
     fromPath: string,
     toPath: string,
@@ -214,6 +231,15 @@ export function useProjectFileActions({
     [activeProject],
   );
 
+  const copyRelativePathFromTree = useCallback(async (filePath: string | null) => {
+    if (!filePath || !navigator.clipboard?.writeText) {
+      return;
+    }
+    await navigator.clipboard
+      .writeText(copyRelativePathText(filePath))
+      .catch(() => undefined);
+  }, []);
+
   const createFileFromTree = useCallback(
     async (parentPath: string | null) => {
       if (!activeProject) {
@@ -250,6 +276,38 @@ export function useProjectFileActions({
     [activeProject, openPreviewTab, refreshProjectFileState],
   );
 
+  const createDirectoryFromTree = useCallback(
+    async (parentPath: string | null) => {
+      if (!activeProject) {
+        return;
+      }
+
+      const input = window.prompt(
+        parentPath ? `New folder path in ${parentPath}` : "New folder path",
+        "untitled",
+      );
+      if (input === null) {
+        return;
+      }
+
+      const requestedPath = buildRequestedFilePath(parentPath, input);
+      if (!requestedPath) {
+        return;
+      }
+
+      try {
+        await createProjectDirectory(activeProject.activePath, requestedPath);
+        await refreshProjectFileState(activeProject.activePath);
+      } catch (error) {
+        await showNativeMessage(
+          error instanceof Error ? error.message : String(error),
+          { kind: "error" },
+        );
+      }
+    },
+    [activeProject, refreshProjectFileState],
+  );
+
   const renameFileFromTree = useCallback(
     async (fromPath: string, toPath: string) => {
       if (!activeProject || fromPath === toPath) {
@@ -272,7 +330,7 @@ export function useProjectFileActions({
       }
 
       try {
-        const renamedPath = await renameProjectFile(
+        const renamedPath = await renameProjectPath(
           activeProject.activePath,
           fromPath,
           toPath,
@@ -301,6 +359,85 @@ export function useProjectFileActions({
       selectedProjectPath,
       setSelectedProjectPath,
     ],
+  );
+
+  const deleteDirectoryFromTree = useCallback(
+    async (path: string) => {
+      if (!activeProject) {
+        return;
+      }
+
+      const confirmed = await confirmNativeDialog(
+        `Delete folder ${path} and all contents?`,
+        {
+          cancelLabel: "Cancel",
+          kind: "warning",
+          okLabel: "Delete",
+        },
+      );
+      if (!confirmed) {
+        return;
+      }
+
+      try {
+        await deleteProjectDirectory(activeProject.activePath, path, true);
+        removePreviewTabsForPath(path);
+        await refreshProjectFileState(activeProject.activePath);
+      } catch (error) {
+        await showNativeMessage(
+          error instanceof Error ? error.message : String(error),
+          { kind: "error" },
+        );
+        await refreshProjectFileState(activeProject.activePath);
+      }
+    },
+    [activeProject, refreshProjectFileState, removePreviewTabsForPath],
+  );
+
+  const revealPathFromTree = useCallback(
+    async (path: string | null) => {
+      if (!activeProject) {
+        return;
+      }
+
+      try {
+        await revealProjectPath(activeProject.activePath, path);
+      } catch (error) {
+        await showNativeMessage(
+          error instanceof Error ? error.message : String(error),
+          { kind: "error" },
+        );
+      }
+    },
+    [activeProject],
+  );
+
+  const ignorePathFromTree = useCallback(
+    async (path: string, kind: ProjectTreeItemKind) => {
+      if (!activeProject) {
+        return;
+      }
+      const pattern = ignorePatternForTreePath(path, kind);
+      const confirmed = await confirmNativeDialog(`Add ${pattern} to .gitignore?`, {
+        cancelLabel: "Cancel",
+        kind: "info",
+        okLabel: "Ignore",
+      });
+      if (!confirmed) {
+        return;
+      }
+
+      try {
+        await appendGitignorePattern(activeProject.activePath, pattern);
+        await refreshProjectFileState(activeProject.activePath);
+      } catch (error) {
+        await showNativeMessage(
+          error instanceof Error ? error.message : String(error),
+          { kind: "error" },
+        );
+      }
+    },
+    [activeProject, refreshProjectFileState],
   );
 
   const deleteFileFromTree = useCallback(
@@ -355,11 +492,16 @@ export function useProjectFileActions({
 
   return {
     copyFileFromTree,
+    copyRelativePathFromTree,
+    createDirectoryFromTree,
     createFileFromTree,
+    deleteDirectoryFromTree,
     deleteFileFromTree,
+    ignorePathFromTree,
     pasteClipboardFromTree,
     pasteFilesFromTree,
     refreshProjectFileState,
+    revealPathFromTree,
     renameFileFromTree,
   };
 }

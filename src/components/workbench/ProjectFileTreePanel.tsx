@@ -11,10 +11,15 @@ export interface ProjectFileTreePanelProps {
   readonly gitFileActions?: TreeGitFileActions;
   readonly selectedPath: string | null;
   readonly title: ReactNode;
+  readonly onCopyRelativePath: (path: string) => void;
+  readonly onCreateDirectory: (parentPath: string | null) => void;
   readonly onCreateFile: (parentPath: string | null) => void;
+  readonly onDeleteDirectory: (path: string) => void;
   readonly onDeleteFile: (path: string) => void;
   readonly onDragEnd?: () => void;
   readonly onPasteFiles?: (files: File[], destDir: string | null) => void;
+  readonly onIgnorePath: (path: string, kind: "directory" | "file") => void;
+  readonly onRevealPath: (path: string) => void;
   readonly onDragStart?: (event: DragEvent<HTMLDivElement>) => void;
   readonly onRenameFile: (fromPath: string, toPath: string) => void;
   readonly onRunScript?: () => void;
@@ -28,11 +33,16 @@ export function ProjectFileTreePanel({
   gitFileActions,
   selectedPath,
   title,
+  onCopyRelativePath,
+  onCreateDirectory,
   onCreateFile,
+  onDeleteDirectory,
   onDeleteFile,
   onDragEnd,
   onDragStart,
+  onIgnorePath,
   onPasteFiles,
+  onRevealPath,
   onRenameFile,
   onRunScript,
   onSelectPath,
@@ -50,9 +60,14 @@ export function ProjectFileTreePanel({
           gitFileActions={gitFileActions}
           onDragEnd={onDragEnd}
           onDragStart={onDragStart}
+          onCopyRelativePath={onCopyRelativePath}
+          onCreateDirectory={onCreateDirectory}
           onCreateFile={onCreateFile}
+          onDeleteDirectory={onDeleteDirectory}
           onDeleteFile={onDeleteFile}
+          onIgnorePath={onIgnorePath}
           onPasteFiles={onPasteFiles}
+          onRevealPath={onRevealPath}
           onRenameFile={onRenameFile}
           onRunScript={onRunScript}
           onSelectPath={onSelectPath}

@@ -17,8 +17,13 @@ interface TreePanelContextMenuHostProps {
   readonly gitFileActions?: TreeGitFileActions;
   readonly item: ContextMenuItem;
   readonly model: FileTree;
+  readonly onCopyRelativePath?: (path: string) => void;
+  readonly onCreateDirectory?: (parentPath: string | null) => void;
   readonly onCreateFile?: (parentPath: string | null) => void;
+  readonly onDeleteDirectory?: (path: string) => void;
   readonly onDeleteFile?: (path: string) => void;
+  readonly onIgnorePath?: (path: string, kind: "directory" | "file") => void;
+  readonly onRevealPath?: (path: string) => void;
   readonly onRunScript?: () => void;
   readonly selectedPaths: readonly string[];
 }
@@ -30,8 +35,13 @@ export function TreePanelContextMenuHost({
   gitFileActions,
   item,
   model,
+  onCopyRelativePath,
+  onCreateDirectory,
   onCreateFile,
+  onDeleteDirectory,
   onDeleteFile,
+  onIgnorePath,
+  onRevealPath,
   onRunScript,
   selectedPaths,
 }: TreePanelContextMenuHostProps) {
@@ -45,8 +55,13 @@ export function TreePanelContextMenuHost({
       })}
       gitFileActions={gitFileActions}
       item={item}
+      onCopyRelativePath={onCopyRelativePath}
+      onCreateDirectory={onCreateDirectory}
       onCreateFile={onCreateFile}
+      onDeleteDirectory={onDeleteDirectory}
       onDeleteFile={onDeleteFile}
+      onIgnorePath={onIgnorePath}
+      onRevealPath={onRevealPath}
       onRunScript={onRunScript}
       onStartRename={
         canRename

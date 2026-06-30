@@ -385,11 +385,16 @@ export function App() {
   });
   const {
     copyFileFromTree,
+    copyRelativePathFromTree,
+    createDirectoryFromTree,
     createFileFromTree,
+    deleteDirectoryFromTree,
     deleteFileFromTree,
+    ignorePathFromTree,
     pasteClipboardFromTree,
     pasteFilesFromTree,
     refreshProjectFileState,
+    revealPathFromTree,
     renameFileFromTree,
   } = useProjectFileActions({
     activeProject,
@@ -558,6 +563,12 @@ export function App() {
   const handleProjectTreeCreateFile = useCallback((parentPath: string | null) => {
     void createFileFromTree(parentPath);
   }, [createFileFromTree]);
+  const handleProjectTreeCreateDirectory = useCallback(
+    (parentPath: string | null) => {
+      void createDirectoryFromTree(parentPath);
+    },
+    [createDirectoryFromTree],
+  );
   const handleProjectTreePasteFiles = useCallback(
     (files: File[], destDir: string | null) => {
       void pasteFilesFromTree(files, destDir);
@@ -573,6 +584,30 @@ export function App() {
   const handleProjectTreeDeleteFile = useCallback((path: string) => {
     void deleteFileFromTree(path);
   }, [deleteFileFromTree]);
+  const handleProjectTreeDeleteDirectory = useCallback(
+    (path: string) => {
+      void deleteDirectoryFromTree(path);
+    },
+    [deleteDirectoryFromTree],
+  );
+  const handleProjectTreeCopyRelativePath = useCallback(
+    (path: string) => {
+      void copyRelativePathFromTree(path);
+    },
+    [copyRelativePathFromTree],
+  );
+  const handleProjectTreeRevealPath = useCallback(
+    (path: string) => {
+      void revealPathFromTree(path);
+    },
+    [revealPathFromTree],
+  );
+  const handleProjectTreeIgnorePath = useCallback(
+    (path: string, kind: "directory" | "file") => {
+      void ignorePathFromTree(path, kind);
+    },
+    [ignorePathFromTree],
+  );
   const handleProjectTreeRenameFile = useCallback(
     (fromPath: string, toPath: string) => {
       void renameFileFromTree(fromPath, toPath);
@@ -1063,9 +1098,14 @@ export function App() {
       selectedPath={selectedProjectPath}
       title={projectTreeTitle}
       gitFileActions={activeTreeGitFileActions}
+      onCopyRelativePath={handleProjectTreeCopyRelativePath}
+      onCreateDirectory={handleProjectTreeCreateDirectory}
       onCreateFile={handleProjectTreeCreateFile}
+      onDeleteDirectory={handleProjectTreeDeleteDirectory}
       onDeleteFile={handleProjectTreeDeleteFile}
+      onIgnorePath={handleProjectTreeIgnorePath}
       onPasteFiles={handleProjectTreePasteFiles}
+      onRevealPath={handleProjectTreeRevealPath}
       onRenameFile={handleProjectTreeRenameFile}
       onRunScript={handleRunScript}
       onSelectPath={handleProjectTreeSelectPath}

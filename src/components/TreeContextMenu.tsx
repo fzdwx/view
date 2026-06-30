@@ -2,11 +2,24 @@ import type {
   ContextMenuItem,
   ContextMenuOpenContext,
 } from "@pierre/trees";
-import { FilePlus2, Pencil, Play, Trash2 } from "lucide-react";
+import {
+  Copy,
+  ExternalLink,
+  EyeOff,
+  FilePlus2,
+  FolderPlus,
+  Pencil,
+  Play,
+  Trash2,
+} from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { TreeFile } from "../lib/api";
 import { clamp } from "../lib/numeric";
+import {
+  directoryPathForNewChild,
+  type ProjectTreeItemKind,
+} from "../lib/projectTreeActions";
 import {
   buildGitContextMenuActions,
   type TreeGitFileActions,
@@ -21,8 +34,13 @@ interface TreeContextMenuProps {
   readonly files: readonly TreeFile[];
   readonly gitFileActions?: TreeGitFileActions;
   readonly item: ContextMenuItem;
+  readonly onCopyRelativePath?: (path: string) => void;
+  readonly onCreateDirectory?: (parentPath: string | null) => void;
   readonly onCreateFile?: (parentPath: string | null) => void;
+  readonly onDeleteDirectory?: (path: string) => void;
   readonly onDeleteFile?: (path: string) => void;
+  readonly onIgnorePath?: (path: string, kind: ProjectTreeItemKind) => void;
+  readonly onRevealPath?: (path: string) => void;
   readonly onStartRename?: (path: string) => void;
   readonly onRunScript?: () => void;
 }
@@ -30,8 +48,13 @@ interface TreeContextMenuProps {
 interface TreeContextMenuActionOptions {
   readonly canStartRename?: boolean;
   readonly gitFileActions?: TreeGitFileActions;
+  readonly onCopyRelativePath?: (path: string) => void;
+  readonly onCreateDirectory?: (parentPath: string | null) => void;
   readonly onCreateFile?: (parentPath: string | null) => void;
+  readonly onDeleteDirectory?: (path: string) => void;
   readonly onDeleteFile?: (path: string) => void;
+  readonly onIgnorePath?: (path: string, kind: ProjectTreeItemKind) => void;
+  readonly onRevealPath?: (path: string) => void;
   readonly onRunScript?: () => void;
 }
 
@@ -50,13 +73,23 @@ const treeContextMenuEstimatedWidth = 152;
 export function hasTreeContextMenuActions({
   canStartRename = false,
   gitFileActions,
+  onCopyRelativePath,
+  onCreateDirectory,
   onCreateFile,
+  onDeleteDirectory,
   onDeleteFile,
+  onIgnorePath,
+  onRevealPath,
   onRunScript,
 }: TreeContextMenuActionOptions): boolean {
   return Boolean(
     onCreateFile ||
+      onCreateDirectory ||
       onDeleteFile ||
+      onDeleteDirectory ||
+      onCopyRelativePath ||
+      onIgnorePath ||
+      onRevealPath ||
       canStartRename ||
       onRunScript ||
       gitFileActions?.onRestoreFile ||
@@ -70,16 +103,33 @@ export function TreeContextMenu({
   files,
   gitFileActions,
   item,
+  onCopyRelativePath,
+  onCreateDirectory,
   onCreateFile,
+  onDeleteDirectory,
   onDeleteFile,
+  onIgnorePath,
+  onRevealPath,
   onStartRename,
   onRunScript,
 }: TreeContextMenuProps) {
   const { anchorRect } = context;
+  const itemKind: ProjectTreeItemKind =
+    item.kind === "directory" ? "directory" : "file";
   const parentPath =
     item.kind === "directory" ? item.path : parentPathFromTreePath(item.path);
+  const newChildParentPath = directoryPathForNewChild(itemKind, item.path);
   const gitActions = buildGitContextMenuActions(files, gitFileActions, context);
-  const hasFileActions = Boolean(onCreateFile || onStartRename || onDeleteFile);
+  const hasProjectActions = Boolean(
+    onCreateFile ||
+      onCreateDirectory ||
+      onStartRename ||
+      onDeleteFile ||
+      onDeleteDirectory ||
+      onCopyRelativePath ||
+      onIgnorePath ||
+      onRevealPath,
+  );
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [menuPosition, setMenuPosition] = useState(() =>
     initialTreeContextMenuPosition(anchorRect),
@@ -103,7 +153,7 @@ export function TreeContextMenu({
     );
   }, [anchorRect]);
 
-  if (!hasFileActions && gitActions.length === 0 && !onRunScript) {
+  if (!hasProjectActions && gitActions.length === 0 && !onRunScript) {
     return null;
   }
 
@@ -157,22 +207,46 @@ export function TreeContextMenu({
           New file
         </button>
       ) : null}
+      {onCreateDirectory ? (
+        <button
+          role="menuitem"
+          type="button"
+          onClick={() => {
+            context.close();
+            onCreateDirectory(newChildParentPath);
+          }}
+        >
+          <FolderPlus size={13} />
+          New folder
+        </button>
+      ) : null}
       {onStartRename ? (
         <button
           role="menuitem"
           type="button"
-          disabled={item.kind === "directory"}
           onClick={() => onStartRename(item.path)}
         >
           <Pencil size={13} />
           Rename
         </button>
       ) : null}
-      {onDeleteFile ? (
+      {itemKind === "directory" && onDeleteDirectory ? (
         <button
           role="menuitem"
           type="button"
-          disabled={item.kind === "directory"}
+          onClick={() => {
+            context.close();
+            onDeleteDirectory(item.path);
+          }}
+        >
+          <Trash2 size={13} />
+          Delete
+        </button>
+      ) : null}
+      {itemKind === "file" && onDeleteFile ? (
+        <button
+          role="menuitem"
+          type="button"
           onClick={() => {
             context.close();
             onDeleteFile(item.path);
@@ -180,6 +254,45 @@ export function TreeContextMenu({
         >
           <Trash2 size={13} />
           Delete
+        </button>
+      ) : null}
+      {onRevealPath ? (
+        <button
+          role="menuitem"
+          type="button"
+          onClick={() => {
+            context.close();
+            onRevealPath(item.path);
+          }}
+        >
+          <ExternalLink size={13} />
+          Reveal in OS
+        </button>
+      ) : null}
+      {onCopyRelativePath ? (
+        <button
+          role="menuitem"
+          type="button"
+          onClick={() => {
+            context.close();
+            onCopyRelativePath(item.path);
+          }}
+        >
+          <Copy size={13} />
+          Copy relative path
+        </button>
+      ) : null}
+      {onIgnorePath ? (
+        <button
+          role="menuitem"
+          type="button"
+          onClick={() => {
+            context.close();
+            onIgnorePath(item.path, itemKind);
+          }}
+        >
+          <EyeOff size={13} />
+          Ignore
         </button>
       ) : null}
     </div>

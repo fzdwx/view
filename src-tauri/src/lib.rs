@@ -40,20 +40,21 @@ use unicode_width::UnicodeWidthStr;
 
 mod clipboard_paste;
 mod code_search;
-mod git_commit_push;
 mod git_commit_details;
+mod git_commit_push;
 mod git_history_ops;
-mod git_tag;
 #[cfg(test)]
 #[path = "git_log_tracking_tests.rs"]
 mod git_log_tracking_tests;
 mod git_pathspec;
-mod git_restore;
 mod git_remote;
+mod git_restore;
 mod git_stash;
 mod git_status;
+mod git_tag;
 mod git_tracking;
 mod git_write;
+mod project_file_ops;
 mod run_targets;
 mod wsl;
 
@@ -734,12 +735,12 @@ impl TerminalSemanticState {
             return;
         };
         let percent = match kind {
-            TerminalProgressKind::Running | TerminalProgressKind::Error | TerminalProgressKind::Finished => {
-                parts
-                    .next()
-                    .and_then(|value| value.parse::<u8>().ok())
-                    .map(|value| value.min(100))
-            }
+            TerminalProgressKind::Running
+            | TerminalProgressKind::Error
+            | TerminalProgressKind::Finished => parts
+                .next()
+                .and_then(|value| value.parse::<u8>().ok())
+                .map(|value| value.min(100)),
             TerminalProgressKind::None | TerminalProgressKind::Indeterminate => None,
         };
         let mut status = self
@@ -7272,6 +7273,11 @@ pub fn run() {
             get_file_blame,
             save_file_content,
             create_project_file,
+            project_file_ops::create_project_directory,
+            project_file_ops::rename_project_path,
+            project_file_ops::delete_project_directory,
+            project_file_ops::reveal_project_path,
+            project_file_ops::append_gitignore_pattern,
             clipboard_paste::write_pasted_files,
             clipboard_paste::paste_clipboard_into_project,
             clipboard_paste::paste_project_files,
