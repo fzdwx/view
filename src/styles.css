@@ -4244,6 +4244,25 @@ body.is-resizing-y .rail-bottom-panels {
   font-size: 10px;
 }
 
+.branch-section-action {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  padding: 0;
+}
+
+.branch-section-action:hover {
+  border-color: var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
 .branch-head-row,
 .branch-row,
 .branch-folder-row {

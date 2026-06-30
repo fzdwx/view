@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Folder,
   GitBranch,
+  Plus,
   Search,
   Tag,
 } from "lucide-react";
@@ -27,7 +28,9 @@ import {
   measureElementByEstimate,
   observeElementRectDuringPanelResize,
 } from "../../lib/virtualizerMeasurement";
+import type { TagActions } from "../../hooks/useTagActions";
 import { BranchContextMenu } from "./BranchContextMenu";
+import { TagContextMenu, type TagContextAction } from "./TagContextMenu";
 
 const BRANCH_HEAD_ROW_ESTIMATE = 28;
 const BRANCH_SECTION_ROW_ESTIMATE = 28;
@@ -39,21 +42,32 @@ type BranchMenuState = {
   readonly top: number;
 };
 
+type TagMenuState = {
+  readonly left: number;
+  readonly tag: TagInfo;
+  readonly top: number;
+};
+
 export const BranchTree = memo(function BranchTree({
   branches,
   tags,
+  tagActions,
+  tagTargetRef,
   activeRef,
   onBranchAction,
   onSelect,
 }: {
   branches: BranchInfo[];
   tags: TagInfo[];
+  tagActions?: TagActions;
+  tagTargetRef?: string | null;
   activeRef: string | null;
   onBranchAction(action: BranchActionKind, branch: BranchInfo): void;
   onSelect(refName: string): void;
 }) {
   const [branchFilter, setBranchFilter] = useState("");
   const [branchMenu, setBranchMenu] = useState<BranchMenuState | null>(null);
+  const [tagMenu, setTagMenu] = useState<TagMenuState | null>(null);
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => new Set());
   const [collapsedBranchSections, setCollapsedBranchSections] = useState<
     Set<Exclude<RefSectionId, "tags">>
@@ -147,11 +161,14 @@ export const BranchTree = memo(function BranchTree({
     Math.abs((branchVirtualizer.scrollOffset ?? 0) - firstVisibleItem.start) < 12;
 
   useEffect(() => {
-    if (!branchMenu) {
+    if (!branchMenu && !tagMenu) {
       return;
     }
 
-    const closeMenu = () => setBranchMenu(null);
+    const closeMenu = () => {
+      setBranchMenu(null);
+      setTagMenu(null);
+    };
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
         closeMenu();
@@ -168,7 +185,7 @@ export const BranchTree = memo(function BranchTree({
       window.removeEventListener("scroll", closeMenu, true);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [branchMenu]);
+  }, [branchMenu, tagMenu]);
 
   useLayoutEffect(() => {
     scrollRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
@@ -202,9 +219,34 @@ export const BranchTree = memo(function BranchTree({
     });
   }
 
+  function openTagMenu(
+    event: ReactMouseEvent<HTMLButtonElement>,
+    tag: TagInfo,
+  ) {
+    if (!tagActions) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    setTagMenu({
+      tag,
+      left: event.clientX,
+      top: event.clientY,
+    });
+  }
+
   function executeBranchAction(action: BranchActionKind, branch: BranchInfo) {
     setBranchMenu(null);
     onBranchAction(action, branch);
+  }
+
+  function executeTagAction(action: TagContextAction, tag: TagInfo) {
+    setTagMenu(null);
+    if (action === "delete") {
+      void tagActions?.delete(tag);
+      return;
+    }
+    void tagActions?.push(tag);
   }
 
   function toggleFolder(folderKey: string) {
@@ -277,8 +319,11 @@ export const BranchTree = memo(function BranchTree({
                     activeRef={activeRef}
                     filtering={filtering}
                     row={row}
+                    tagActions={tagActions}
                     onBranchContextMenu={openBranchMenu}
+                    onCreateTag={() => void tagActions?.create(tagTargetRef ?? null)}
                     onSelect={onSelect}
+                    onTagContextMenu={openTagMenu}
                     onToggleFolder={toggleFolder}
                     onToggleSection={toggleBranchSection}
                   />
@@ -296,6 +341,14 @@ export const BranchTree = memo(function BranchTree({
           onAction={executeBranchAction}
         />
       ) : null}
+      {tagMenu ? (
+        <TagContextMenu
+          left={tagMenu.left}
+          tag={tagMenu.tag}
+          top={tagMenu.top}
+          onAction={executeTagAction}
+        />
+      ) : null}
     </div>
   );
 });
@@ -306,19 +359,28 @@ function BranchTreeRow({
   activeRef,
   filtering,
   row,
+  tagActions,
   onBranchContextMenu,
+  onCreateTag,
   onSelect,
+  onTagContextMenu,
   onToggleFolder,
   onToggleSection,
 }: {
   activeRef: string | null;
   filtering: boolean;
   row: VirtualRefRow;
+  tagActions?: TagActions;
   onBranchContextMenu(
     event: ReactMouseEvent<HTMLButtonElement>,
     branch: BranchInfo,
   ): void;
+  onCreateTag(): void;
   onSelect(refName: string): void;
+  onTagContextMenu(
+    event: ReactMouseEvent<HTMLButtonElement>,
+    tag: TagInfo,
+  ): void;
   onToggleFolder(folderKey: string): void;
   onToggleSection(section: Exclude<RefSectionId, "tags">): void;
 }) {
@@ -359,6 +421,20 @@ function BranchTreeRow({
           <ChevronDown size={14} />
           <span className="branch-section-title">{row.title}</span>
           <small className="branch-section-count">{row.count}</small>
+          {tagActions ? (
+            <button
+              type="button"
+              className="branch-section-action"
+              aria-label="Create tag"
+              title="Create tag"
+              onClick={(event) => {
+                event.stopPropagation();
+                onCreateTag();
+              }}
+            >
+              <Plus size={13} />
+            </button>
+          ) : null}
         </div>
       );
     case "folder":
@@ -396,6 +472,7 @@ function BranchTreeRow({
           className={row.tag.refName === activeRef ? "branch-row active" : "branch-row"}
           style={{ "--branch-depth": row.depth } as CSSProperties}
           onClick={() => onSelect(row.tag.refName)}
+          onContextMenu={(event) => onTagContextMenu(event, row.tag)}
         >
           <Tag size={13} />
           <span className="branch-row-label">{row.tag.name}</span>

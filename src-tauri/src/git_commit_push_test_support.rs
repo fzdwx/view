@@ -1,4 +1,6 @@
-use super::super::{CommitRequest, ResetHardToReflogRequest};
+#![allow(dead_code)]
+
+use crate::git_commit_push::{CommitRequest, ResetHardToReflogRequest};
 use std::env;
 use std::fs;
 use std::io::{ErrorKind, Read, Write};

@@ -308,6 +308,24 @@ export interface CreateStashRequest {
   readonly includeUntracked: boolean;
 }
 
+export interface CreateTagRequest {
+  readonly path: string;
+  readonly name: string;
+  readonly target: string;
+  readonly message: string;
+}
+
+export interface DeleteTagRequest {
+  readonly path: string;
+  readonly name: string;
+}
+
+export interface PushTagRequest {
+  readonly path: string;
+  readonly name: string;
+  readonly remote: string;
+}
+
 export interface GitWriteResponse {
   readonly summary: RepositorySummary;
   readonly files: TreeFile[];
@@ -760,6 +778,24 @@ export async function revertCommit(
   request: CommitHashRequest,
 ): Promise<GitWriteResponse> {
   return apiInvoke<GitWriteResponse>("revert_commit", { request });
+}
+
+export async function createTag(
+  request: CreateTagRequest,
+): Promise<GitWriteResponse> {
+  return apiInvoke<GitWriteResponse>("create_tag", { request });
+}
+
+export async function deleteTag(
+  request: DeleteTagRequest,
+): Promise<GitWriteResponse> {
+  return apiInvoke<GitWriteResponse>("delete_tag", { request });
+}
+
+export async function pushTag(
+  request: PushTagRequest,
+): Promise<GitWriteResponse> {
+  return apiInvoke<GitWriteResponse>("push_tag", { request });
 }
 
 export async function listStashes(path: string): Promise<StashListResponse> {

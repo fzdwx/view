@@ -14,6 +14,7 @@ import type {
 } from "../../lib/api";
 import type { WorktreeActions } from "../../hooks/useWorktreeActions";
 import type { StashActions } from "../../hooks/useStashActions";
+import type { TagActions } from "../../hooks/useTagActions";
 import type { BranchActionKind } from "../../lib/branchModels";
 import type { GitWriteActions } from "../../hooks/useGitWriteActions";
 import {
@@ -64,6 +65,7 @@ export interface GitPanelDataProps {
   readonly selectedCommit: CommitInfo | null;
   readonly selectedReflogEntry: ReflogEntry | null;
   readonly stashActions: StashActions;
+  readonly tagActions: TagActions;
   readonly worktreeActions: WorktreeActions;
   readonly onBranchAction: (
     action: BranchActionKind,
@@ -327,6 +329,7 @@ export const GitPanelBody = memo(function GitPanelBody({
   selectedCommit,
   selectedReflogEntry,
   stashActions,
+  tagActions,
   worktreeActions,
   onBranchAction,
   onChangeCommitFilter,
@@ -363,6 +366,8 @@ export const GitPanelBody = memo(function GitPanelBody({
                 <BranchTree
                   branches={payload.summary.branches}
                   tags={payload.summary.tags}
+                  tagActions={tagActions}
+                  tagTargetRef={selectedCommit?.hash ?? selectedBranchRef}
                   activeRef={selectedBranchRef}
                   onBranchAction={onBranchAction}
                   onSelect={onSelectBranch}

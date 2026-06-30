@@ -42,6 +42,7 @@ mod clipboard_paste;
 mod code_search;
 mod git_commit_push;
 mod git_history_ops;
+mod git_tag;
 #[cfg(test)]
 #[path = "git_log_tracking_tests.rs"]
 mod git_log_tracking_tests;
@@ -7300,6 +7301,9 @@ pub fn run() {
             git_commit_push::reset_hard_to_reflog,
             git_history_ops::cherry_pick_commit,
             git_history_ops::revert_commit,
+            git_tag::create_tag,
+            git_tag::delete_tag,
+            git_tag::push_tag,
             git_stash::list_stashes,
             git_stash::create_stash,
             git_stash::apply_stash,

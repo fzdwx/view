@@ -10,7 +10,8 @@ export type GitRepositoryWriteKind =
   | "reset"
   | "revert"
   | "skip"
-  | "stash";
+  | "stash"
+  | "tag";
 
 export type GitWriteOperation =
   | {
@@ -106,5 +107,7 @@ function repositoryActionLabel(kind: GitRepositoryWriteKind): string {
       return "skip";
     case "stash":
       return "stash";
+    case "tag":
+      return "tag";
   }
 }

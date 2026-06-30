@@ -42,6 +42,7 @@ import { useGitFileActions } from "./hooks/useGitFileActions";
 import { useGitWriteGuard } from "./hooks/useGitWriteGuard";
 import { useGitWriteActions } from "./hooks/useGitWriteActions";
 import { useStashActions } from "./hooks/useStashActions";
+import { useTagActions } from "./hooks/useTagActions";
 import { useWorktreeActions } from "./hooks/useWorktreeActions";
 import { usePreviewPanes } from "./hooks/usePreviewPanes";
 import { useProjectFileActions } from "./hooks/useProjectFileActions";
@@ -439,6 +440,13 @@ export function App() {
     repositoryPayload: payload,
     refreshProjectFileState,
     worktreeFiles: worktreeChangedFiles,
+  });
+  const tagActions = useTagActions({
+    activeProject,
+    gitWriteGuard,
+    hasGitRepository,
+    repositoryPayload: payload,
+    refreshProjectFileState,
   });
 
   // Reset the reflog selection when the project changes; the selector has no
@@ -983,6 +991,7 @@ export function App() {
       selectedCommit,
       selectedReflogEntry,
       stashActions,
+      tagActions,
       worktreeActions,
       onBranchAction: performBranchAction,
       onChangeCommitFilter: setCommitFilter,
@@ -1026,6 +1035,7 @@ export function App() {
       selectedCommit,
       selectedReflogEntry,
       stashActions,
+      tagActions,
       setReflogFilter,
       activeTreeGitFileActions,
       worktreeActions,
