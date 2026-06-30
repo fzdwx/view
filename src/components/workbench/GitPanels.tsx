@@ -12,6 +12,8 @@ import type {
   ReflogEntry,
   RepositoryPayload,
 } from "../../lib/api";
+import type { WorktreeActions } from "../../hooks/useWorktreeActions";
+import type { StashActions } from "../../hooks/useStashActions";
 import type { BranchActionKind } from "../../lib/branchModels";
 import type { GitWriteActions } from "../../hooks/useGitWriteActions";
 import {
@@ -24,7 +26,9 @@ import { LoadingRows } from "../LoadingRows";
 import type { TreeGitFileActions } from "../TreeContextMenu";
 import { BranchTree } from "../git/BranchTree";
 import { CommitInspector } from "../git/CommitInspector";
+import { StashList } from "../git/StashList";
 import { VirtualCommitList } from "../git/VirtualCommitList";
+import { WorktreeList } from "../git/WorktreeList";
 import { FragmentWithSplitter } from "./FragmentWithSplitter";
 import { GitPanelSlot } from "./GitPanelSlot";
 
@@ -39,6 +43,7 @@ export type GitAvailability = "loading" | "git" | "non-git";
 
 export interface GitPanelDataProps {
   readonly activeCommit: string | null;
+  readonly activeProjectPath: string | null;
   readonly activeReflogSelector: string | null;
   readonly changedFiles: RepositoryPayload["files"];
   readonly commitFiles: RepositoryPayload["files"];
@@ -58,6 +63,8 @@ export interface GitPanelDataProps {
   readonly selectedChangePath: string | null;
   readonly selectedCommit: CommitInfo | null;
   readonly selectedReflogEntry: ReflogEntry | null;
+  readonly stashActions: StashActions;
+  readonly worktreeActions: WorktreeActions;
   readonly onBranchAction: (
     action: BranchActionKind,
     branch: BranchInfo,
@@ -299,6 +306,7 @@ function gitPanelSizeVarName(key: GitPanelSizeVarKey): string {
 
 export const GitPanelBody = memo(function GitPanelBody({
   activeCommit,
+  activeProjectPath,
   activeReflogSelector,
   changedFiles,
   commitFilter,
@@ -318,6 +326,8 @@ export const GitPanelBody = memo(function GitPanelBody({
   selectedChangePath,
   selectedCommit,
   selectedReflogEntry,
+  stashActions,
+  worktreeActions,
   onBranchAction,
   onChangeCommitFilter,
   onChangeHistoryMode,
@@ -339,13 +349,26 @@ export const GitPanelBody = memo(function GitPanelBody({
       return (
         <section className="branch-panel">
           {payload ? (
-            <BranchTree
-              branches={payload.summary.branches}
-              tags={payload.summary.tags}
-              activeRef={selectedBranchRef}
-              onBranchAction={onBranchAction}
-              onSelect={onSelectBranch}
-            />
+            <div className="branch-panel-content">
+              <div className="repository-section-label">State</div>
+              <WorktreeList
+                actions={worktreeActions}
+                activePath={activeProjectPath}
+                sourceBranch={selectedBranch ?? currentBranch(payload)}
+                worktrees={payload.summary.worktrees}
+              />
+              <StashList actions={stashActions} />
+              <section className="repository-refs-panel" aria-label="Repository refs">
+                <div className="repository-section-label">Refs</div>
+                <BranchTree
+                  branches={payload.summary.branches}
+                  tags={payload.summary.tags}
+                  activeRef={selectedBranchRef}
+                  onBranchAction={onBranchAction}
+                  onSelect={onSelectBranch}
+                />
+              </section>
+            </div>
           ) : (
             <LoadingRows />
           )}
@@ -454,4 +477,8 @@ export function selectedGitRefName(
     payload.summary.tags.find((tag) => tag.refName === selectedBranchRef)?.name ??
     payload.summary.branch
   );
+}
+
+function currentBranch(payload: RepositoryPayload): BranchInfo | null {
+  return payload.summary.branches.find((branch) => branch.current) ?? null;
 }

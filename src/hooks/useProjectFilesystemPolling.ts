@@ -12,6 +12,11 @@ import {
   type PanelResizeIdleTaskHandle,
 } from "../lib/panelResizeInteraction";
 import { logPerf } from "../lib/performanceLog";
+import {
+  buildProjectStateRefreshPlan,
+  type ProjectQueryKey,
+  type ProjectStateRefreshPlan,
+} from "../lib/projectStateInvalidation";
 
 const PROJECT_STATE_POLL_INTERVAL_MS = 5000;
 const PROJECT_STATE_POLL_WARN_MS = 100;
@@ -129,12 +134,16 @@ async function refreshProjectStateQueries(
   const startedAt = performance.now();
   const nextFingerprint = await getProjectStateFingerprint(projectPath);
   const durationMs = performance.now() - startedAt;
-  let headChanged = true;
-  let summaryChanged = true;
-  let statusChanged = true;
+  const previousFingerprint = lastFingerprintRef?.current ?? null;
+  const plan = buildProjectStateRefreshPlan({
+    previous: previousFingerprint,
+    next: nextFingerprint,
+    projectPath,
+    activeCommit,
+  });
+
   if (lastFingerprintRef) {
-    const previousFingerprint = lastFingerprintRef.current;
-    if (previousFingerprint?.fingerprint === nextFingerprint.fingerprint) {
+    if (plan.result === "unchanged") {
       logPerf(
         "poll:project-state",
         durationMs,
@@ -143,7 +152,7 @@ async function refreshProjectStateQueries(
       );
       return "unchanged";
     }
-    if (previousFingerprint == null) {
+    if (plan.result === "primed") {
       lastFingerprintRef.set(nextFingerprint);
       logPerf(
         "poll:project-state",
@@ -162,13 +171,6 @@ async function refreshProjectStateQueries(
       );
       return "deferred-panel-resize";
     }
-    headChanged =
-      previousFingerprint.headFingerprint !== nextFingerprint.headFingerprint;
-    summaryChanged =
-      previousFingerprint.summaryFingerprint !==
-      nextFingerprint.summaryFingerprint;
-    statusChanged =
-      previousFingerprint.statusFingerprint !== nextFingerprint.statusFingerprint;
     lastFingerprintRef.set(nextFingerprint);
     logPerf(
       "poll:project-state",
@@ -176,53 +178,39 @@ async function refreshProjectStateQueries(
       {
         source,
         result: "changed",
-        headChanged,
-        summaryChanged,
-        statusChanged,
+        headChanged: plan.headChanged,
+        summaryChanged: plan.summaryChanged,
+        statusChanged: plan.statusChanged,
         activeCommit: Boolean(activeCommit),
+        invalidations: plan.invalidateKeys.length,
+        resets: plan.resetKeys.length,
       },
       { slowThresholdMs: PROJECT_STATE_POLL_WARN_MS },
     );
   }
 
-  const invalidations: Array<() => Promise<unknown>> = [];
-
-  if (headChanged || summaryChanged) {
-    invalidations.push(
-      () => queryClient.invalidateQueries({ queryKey: ["repository", projectPath] }),
-    );
-  }
-
-  if (headChanged || statusChanged) {
-    invalidations.push(
-      () => queryClient.invalidateQueries({ queryKey: ["project-files", projectPath] }),
-    );
-  }
-
-  if (!activeCommit && (headChanged || statusChanged)) {
-    invalidations.push(
-      () => queryClient.invalidateQueries({
-        queryKey: ["changed-files", projectPath, null],
-      }),
-    );
-  }
-
-  if (invalidations.length > 0) {
-    await runBackgroundInvalidationsAfterResizeIdle(invalidations);
+  if (hasRefreshOperations(plan)) {
+    await runBackgroundQueryRefreshAfterResizeIdle(queryClient, plan);
   }
   return "applied";
 }
 
-function runBackgroundInvalidationsAfterResizeIdle(
-  invalidations: readonly (() => Promise<unknown>)[],
+function hasRefreshOperations(plan: ProjectStateRefreshPlan): boolean {
+  return (
+    plan.cancelKeys.length > 0 ||
+    plan.invalidateKeys.length > 0 ||
+    plan.resetKeys.length > 0
+  );
+}
+
+function runBackgroundQueryRefreshAfterResizeIdle(
+  queryClient: QueryClient,
+  plan: ProjectStateRefreshPlan,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     runAfterPanelResizeIdle(
       () => {
-        void Promise.all(invalidations.map((invalidate) => invalidate())).then(
-          () => resolve(),
-          (error: unknown) => reject(error),
-        );
+        void refreshQueryPlan(queryClient, plan).then(resolve, reject);
       },
       {
         delayMs: BACKGROUND_INVALIDATION_AFTER_RESIZE_DELAY_MS,
@@ -231,4 +219,28 @@ function runBackgroundInvalidationsAfterResizeIdle(
       },
     );
   });
+}
+
+async function refreshQueryPlan(
+  queryClient: QueryClient,
+  plan: ProjectStateRefreshPlan,
+): Promise<void> {
+  await Promise.all(
+    plan.cancelKeys.map((queryKey) =>
+      queryClient.cancelQueries({ queryKey: tanstackQueryKey(queryKey) }),
+    ),
+  );
+
+  await Promise.all([
+    ...plan.invalidateKeys.map((queryKey) =>
+      queryClient.invalidateQueries({ queryKey: tanstackQueryKey(queryKey) }),
+    ),
+    ...plan.resetKeys.map((queryKey) =>
+      queryClient.resetQueries({ queryKey: tanstackQueryKey(queryKey) }),
+    ),
+  ]);
+}
+
+function tanstackQueryKey(queryKey: ProjectQueryKey) {
+  return queryKey;
 }

@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { isTauriRuntime } from "../lib/api";
 import type { PreviewMode } from "../lib/previewTabs";
 import {
+  activateProjectPath,
   type SavedProject,
   upsertProject,
 } from "../lib/projects";
@@ -30,6 +31,11 @@ export interface ProjectSelectionActions {
   readonly chooseRepository: () => Promise<void>;
   readonly removeProject: (projectId: string) => void;
   readonly selectProject: (project: SavedProject) => void;
+  readonly selectProjectPath: (
+    rootPath: string,
+    activePath: string,
+    action: string,
+  ) => boolean;
 }
 
 export function useProjectSelectionActions({
@@ -169,9 +175,42 @@ export function useProjectSelectionActions({
     ],
   );
 
+  const selectProjectPath = useCallback(
+    (rootPath: string, activePath: string, action: string) => {
+      if (
+        activeProject &&
+        activeProject.activePath !== activePath &&
+        !confirmDiscardProjectDrafts(activeProject.activePath, action)
+      ) {
+        return false;
+      }
+      if (activeProject && activeProject.activePath !== activePath) {
+        discardDraftsForProject(activeProject.activePath);
+      }
+
+      const next = activateProjectPath(projects, rootPath, activePath);
+      setProjects(next.projects);
+      setActiveProjectId(next.projectId);
+      setProjectSwitcherOpen(false);
+      resetProjectSelection();
+      return true;
+    },
+    [
+      activeProject,
+      confirmDiscardProjectDrafts,
+      discardDraftsForProject,
+      projects,
+      resetProjectSelection,
+      setActiveProjectId,
+      setProjectSwitcherOpen,
+      setProjects,
+    ],
+  );
+
   return {
     chooseRepository,
     removeProject,
     selectProject,
+    selectProjectPath,
   };
 }

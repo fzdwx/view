@@ -1,7 +1,16 @@
 import { useCallback, useRef, useState } from "react";
 
 export type GitFileActionKind = "restore" | "stage" | "unstage";
-export type GitRepositoryWriteKind = "commit" | "push" | "reset";
+export type GitRepositoryWriteKind =
+  | "abort"
+  | "cherryPick"
+  | "commit"
+  | "continue"
+  | "push"
+  | "reset"
+  | "revert"
+  | "skip"
+  | "stash";
 
 export type GitWriteOperation =
   | {
@@ -62,7 +71,7 @@ export function gitWriteOperationPendingTitle(
     case "file":
       return `A Git ${fileActionLabel(operation.kind)} action is already running for ${operation.path}.`;
     case "repository":
-      return `A Git ${operation.kind} is already running.`;
+      return `A Git ${repositoryActionLabel(operation.kind)} is already running.`;
   }
 }
 
@@ -74,5 +83,28 @@ function fileActionLabel(kind: GitFileActionKind): string {
       return "stage";
     case "unstage":
       return "unstage";
+  }
+}
+
+function repositoryActionLabel(kind: GitRepositoryWriteKind): string {
+  switch (kind) {
+    case "abort":
+      return "abort";
+    case "cherryPick":
+      return "cherry-pick";
+    case "commit":
+      return "commit";
+    case "continue":
+      return "continue";
+    case "push":
+      return "push";
+    case "reset":
+      return "reset";
+    case "revert":
+      return "revert";
+    case "skip":
+      return "skip";
+    case "stash":
+      return "stash";
   }
 }

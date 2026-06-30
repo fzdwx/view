@@ -21,7 +21,14 @@ import {
 } from "../lib/terminalGlyphs";
 import { terminalRunStyle } from "../lib/terminalRunStyle";
 import {
+  dispatchTerminalInternalLink,
+  terminalLinkSegments,
+  type TerminalInternalLink,
+  type TerminalNavigationContext,
+} from "../lib/terminalNavigation";
+import {
   DEFAULT_TERMINAL_CELL_METRICS,
+  type TerminalCommandStatus,
   type TerminalCursorStyle,
   type TerminalFrame,
   type TerminalGrapheme,
@@ -116,12 +123,33 @@ function renderTerminalRunContainer(
   style: CSSProperties,
   columns: number,
   children: ReactNode,
+  internalLink?: TerminalInternalLink,
 ) {
   const href = run.href?.trim();
   const styleWithWidth: CSSProperties = {
     ...style,
     width: `calc(${columns} * var(--terminal-cell-width, ${DEFAULT_TERMINAL_CELL_METRICS.width}px))`,
   };
+  if (internalLink) {
+    return (
+      <button
+        key={key}
+        type="button"
+        className="terminal-run terminal-internal-link"
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          dispatchTerminalInternalLink(internalLink);
+        }}
+        onMouseDown={(event) => event.stopPropagation()}
+        onMouseUp={(event) => event.stopPropagation()}
+        style={styleWithWidth}
+        title={terminalInternalLinkTitle(internalLink)}
+      >
+        {children}
+      </button>
+    );
+  }
   if (!href) {
     return (
       <span key={key} className="terminal-run" style={styleWithWidth}>
@@ -145,6 +173,13 @@ function renderTerminalRunContainer(
       {children}
     </a>
   );
+}
+
+function terminalInternalLinkTitle(link: TerminalInternalLink): string {
+  if (link.kind === "commit") {
+    return `Open commit ${link.hash}`;
+  }
+  return `Open ${link.path}:${link.lineNumber}`;
 }
 
 function splitTerminalGraphemes(text: string): string[] {
@@ -385,11 +420,12 @@ function TerminalSimpleCells({
   });
 }
 
-function renderRunWithCursor(
+function renderRunSegmentWithCursor(
   run: TerminalRun,
   row: number,
   startCol: number,
   frame: TerminalCursorFrame,
+  internalLink?: TerminalInternalLink,
 ) {
   const text = run.text || " ";
   const textColumns = terminalRunColumns(run, text);
@@ -415,6 +451,7 @@ function renderRunWithCursor(
         keyPrefix={`${startCol}`}
         text={text}
       />,
+      internalLink,
     );
   }
 
@@ -430,6 +467,7 @@ function renderRunWithCursor(
         cursorIndex={null}
         cursorShape={frame.cursorShape}
       />,
+      internalLink,
     );
   }
 
@@ -446,7 +484,50 @@ function renderRunWithCursor(
       cursorIndex={cursorIndex}
       cursorShape={frame.cursorShape}
     />,
+    internalLink,
   );
+}
+
+function renderRunWithCursor(
+  run: TerminalRun,
+  row: number,
+  startCol: number,
+  frame: TerminalCursorFrame,
+  navigationContext: TerminalNavigationContext,
+) {
+  if (run.href) {
+    return renderRunSegmentWithCursor(run, row, startCol, frame);
+  }
+
+  const segments = terminalLinkSegments(run.text, navigationContext);
+  if (segments.length === 1 && !segments[0]?.link) {
+    return renderRunSegmentWithCursor(run, row, startCol, frame);
+  }
+
+  let column = startCol;
+  return segments.map((segment) => {
+    const segmentRun = terminalRunSegment(run, segment.text);
+    const segmentStartCol = column;
+    column += terminalRunColumns(segmentRun, segment.text);
+    return renderRunSegmentWithCursor(
+      segmentRun,
+      row,
+      segmentStartCol,
+      frame,
+      segment.link,
+    );
+  });
+}
+
+function terminalRunSegment(run: TerminalRun, text: string): TerminalRun {
+  return {
+    ...run,
+    columns: undefined,
+    graphemes: undefined,
+    href: undefined,
+    simpleAscii: SIMPLE_TERMINAL_TEXT_PATTERN.test(text),
+    text,
+  };
 }
 
 interface TrailingCursorProps {
@@ -487,6 +568,7 @@ interface TerminalLineViewProps {
   readonly cursorShape: TerminalCursorStyle;
   readonly cursorVisible: boolean;
   readonly line: TerminalLine;
+  readonly navigationContext: TerminalNavigationContext;
   readonly row: number;
 }
 
@@ -497,6 +579,7 @@ const TerminalLineView = memo(
     cursorShape,
     cursorVisible,
     line,
+    navigationContext,
     row,
   }: TerminalLineViewProps) {
     let column = 0;
@@ -518,6 +601,7 @@ const TerminalLineView = memo(
             row,
             startColumn,
             frameCursor,
+            navigationContext,
           );
         })}
         <TrailingCursor row={row} frame={frameCursor} renderedColumns={column} />
@@ -527,7 +611,18 @@ const TerminalLineView = memo(
   areTerminalLinePropsEqual,
 );
 
-const TerminalRows = memo(function TerminalRows({ frame }: { frame: TerminalFrame }) {
+const TerminalRows = memo(function TerminalRows({
+  frame,
+  projectPath,
+}: {
+  readonly frame: TerminalFrame;
+  readonly projectPath: string;
+}) {
+  const navigationContext = {
+    cwd: frame.cwd,
+    projectPath,
+  } satisfies TerminalNavigationContext;
+
   return (
     <>
       {Array.from({ length: frame.rows }, (_, row) => {
@@ -540,6 +635,7 @@ const TerminalRows = memo(function TerminalRows({ frame }: { frame: TerminalFram
             cursorShape={frame.cursorShape}
             cursorVisible={frame.cursorVisible}
             line={terminalVisibleLineAt(frame, row)}
+            navigationContext={navigationContext}
             row={row}
           />
         );
@@ -585,7 +681,11 @@ function areTerminalLinePropsEqual(
     }
   }
 
-  return terminalLinesEqual(previous.line, next.line);
+  return (
+    previous.navigationContext.cwd === next.navigationContext.cwd &&
+    previous.navigationContext.projectPath === next.navigationContext.projectPath &&
+    terminalLinesEqual(previous.line, next.line)
+  );
 }
 
 function terminalLinesEqual(
@@ -714,9 +814,10 @@ export function TerminalSessionView({
       onMouseDown={() => screenRef.current?.focus({ preventScroll: true })}
     >
       <div className={bellActive ? "terminal-output terminal-bell-flash" : "terminal-output"}>
+        <TerminalCommandStatusBadge status={frame?.commandStatus ?? null} />
         {frame ? (
           <Profiler id="TerminalRows" onRender={onTerminalRender}>
-            <TerminalRows frame={frame} />
+            <TerminalRows frame={frame} projectPath={projectPath} />
           </Profiler>
         ) : null}
         {frame ? (
@@ -750,6 +851,40 @@ export function TerminalSessionView({
       ) : null}
     </div>
   );
+}
+
+function TerminalCommandStatusBadge({
+  status,
+}: {
+  readonly status: TerminalCommandStatus | null;
+}) {
+  if (!status) {
+    return null;
+  }
+
+  const label = terminalCommandStatusLabel(status);
+  return (
+    <div
+      className={`terminal-command-status terminal-command-status-${status.phase}`}
+      aria-label={`Terminal command status: ${label}`}
+      title={`Command ${label}`}
+    >
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function terminalCommandStatusLabel(status: TerminalCommandStatus): string {
+  switch (status.phase) {
+    case "finished":
+      return status.exitCode == null ? "Done" : `Exit ${status.exitCode}`;
+    case "input":
+      return "Input";
+    case "prompt":
+      return "Ready";
+    case "running":
+      return "Running";
+  }
 }
 
 function TerminalRenderStats({ frame }: { readonly frame: TerminalFrame }) {

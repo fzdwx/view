@@ -47,7 +47,37 @@ export const treeContentAlignmentCss = `
     -moz-osx-font-smoothing: auto;
   }
 
-  :host([data-view-panel-resizing='true']) [data-file-tree-sticky-overlay] {
+  :host([data-view-panel-resizing='true']) [data-file-tree-virtualized-scroll='true'],
+  :host([data-view-panel-resizing='true']) [data-file-tree-virtualized-list='true'],
+  :host([data-view-panel-resizing='true']) [data-file-tree-virtualized-sticky='true'],
+  :host([data-view-panel-resizing='true']) [data-type='item'] {
+    contain: layout paint style;
+  }
+
+  :host([data-view-panel-resizing='true']) [data-file-tree-virtualized-scroll='true'] {
+    overflow-anchor: none;
+  }
+
+  :host([data-view-panel-resizing='true']) [data-file-tree-virtualized-list='true'],
+  :host([data-view-panel-resizing='true']) [data-file-tree-virtualized-sticky='true'] {
+    pointer-events: none;
+  }
+
+  :host([data-view-panel-resizing='true']) [data-item-section='spacing'],
+  :host([data-view-panel-resizing='true']) [data-item-section='icon'],
+  :host([data-view-panel-resizing='true']) [data-item-section='content'],
+  :host([data-view-panel-resizing='true']) [data-item-section='decoration'],
+  :host([data-view-panel-resizing='true']) [data-item-section='git'],
+  :host([data-view-panel-resizing='true']) [data-item-section='action'],
+  :host([data-view-panel-resizing='true']) [data-truncate-container],
+  :host([data-view-panel-resizing='true']) [data-truncate-grid] {
+    contain: layout paint style;
+  }
+
+  :host([data-view-panel-resizing='true']) [data-file-tree-sticky-overlay],
+  :host([data-view-panel-resizing='true']) [data-type='context-menu-anchor'],
+  :host([data-view-panel-resizing='true']) [data-truncate-marker],
+  :host([data-view-panel-resizing='true']) [data-truncate-fade] {
     display: none !important;
   }
 

@@ -14,7 +14,6 @@ export interface UseRepositoryRemotePollingOptions {
   readonly activeProjectPath: string | null;
   readonly hasGitRepository: boolean;
   readonly refetchCommits: RefetchRepositoryData;
-  readonly refetchProjectFiles: RefetchRepositoryData;
   readonly refetchRepository: RefetchRepositoryData;
 }
 
@@ -22,7 +21,6 @@ export function useRepositoryRemotePolling({
   activeProjectPath,
   hasGitRepository,
   refetchCommits,
-  refetchProjectFiles,
   refetchRepository,
 }: UseRepositoryRemotePollingOptions): void {
   const remoteFetchInFlightRef = useRef(false);
@@ -43,7 +41,6 @@ export function useRepositoryRemotePolling({
           void Promise.all([
             refetchRepository(),
             refetchCommits(),
-            refetchProjectFiles(),
           ]).catch(reportRemoteRefreshError);
         },
         {
@@ -106,7 +103,6 @@ export function useRepositoryRemotePolling({
     activeProjectPath,
     hasGitRepository,
     refetchCommits,
-    refetchProjectFiles,
     refetchRepository,
   ]);
 }

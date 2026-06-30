@@ -41,6 +41,8 @@ import { useGitChangeActions } from "./hooks/useGitChangeActions";
 import { useGitFileActions } from "./hooks/useGitFileActions";
 import { useGitWriteGuard } from "./hooks/useGitWriteGuard";
 import { useGitWriteActions } from "./hooks/useGitWriteActions";
+import { useStashActions } from "./hooks/useStashActions";
+import { useWorktreeActions } from "./hooks/useWorktreeActions";
 import { usePreviewPanes } from "./hooks/usePreviewPanes";
 import { useProjectFileActions } from "./hooks/useProjectFileActions";
 import { useProjectFilesystemPolling } from "./hooks/useProjectFilesystemPolling";
@@ -92,6 +94,10 @@ import {
   dockTerminalTabToEditor,
   restoreTerminalTabToPanel,
 } from "./lib/terminalTabPlacement";
+import {
+  terminalInternalLinkEvent,
+  type TerminalInternalLinkEventDetail,
+} from "./lib/terminalNavigation";
 import type {
   RailItemId,
   RailLayout,
@@ -359,6 +365,7 @@ export function App() {
     chooseRepository,
     removeProject,
     selectProject,
+    selectProjectPath,
   } = useProjectSelectionActions({
     activeProject,
     activeProjectId,
@@ -417,6 +424,21 @@ export function App() {
     setActiveCommit,
     setSelectedChangePath,
     showDiffSelection,
+  });
+  const worktreeActions = useWorktreeActions({
+    activeProject,
+    hasGitRepository,
+    repositoryPayload: payload,
+    refreshProjectFileState,
+    selectProjectPath,
+  });
+  const stashActions = useStashActions({
+    activeProject,
+    gitWriteGuard,
+    hasGitRepository,
+    repositoryPayload: payload,
+    refreshProjectFileState,
+    worktreeFiles: worktreeChangedFiles,
   });
 
   // Reset the reflog selection when the project changes; the selector has no
@@ -782,7 +804,6 @@ export function App() {
     activeProjectPath,
     hasGitRepository,
     refetchCommits: commitsQuery.refetch,
-    refetchProjectFiles: projectFilesQuery.refetch,
     refetchRepository: repositoryQuery.refetch,
   });
   useProjectFilesystemPolling({
@@ -816,6 +837,47 @@ export function App() {
     },
     [showDiffSelection],
   );
+  const handleTerminalInternalLink = useEffectEvent((event: Event) => {
+    const detail = (event as CustomEvent<TerminalInternalLinkEventDetail>)
+      .detail;
+    const link = detail?.link;
+    if (!link || link.projectPath !== activeProjectPath) {
+      return;
+    }
+
+    if (link.kind === "file") {
+      openPreviewTab(
+        "file",
+        link.path,
+        link.lineNumber,
+        link.columnNumber ?? 0,
+      );
+      return;
+    }
+
+    const lowerHash = link.hash.toLowerCase();
+    const commit =
+      commits.find((entry) =>
+        entry.hash.toLowerCase().startsWith(lowerHash),
+      ) ?? null;
+    selectCommit(commit?.hash ?? link.hash);
+  });
+
+  useEffect(() => {
+    function handleTerminalInternalLinkEvent(event: Event) {
+      handleTerminalInternalLink(event);
+    }
+
+    window.addEventListener(
+      terminalInternalLinkEvent,
+      handleTerminalInternalLinkEvent,
+    );
+    return () =>
+      window.removeEventListener(
+        terminalInternalLinkEvent,
+        handleTerminalInternalLinkEvent,
+      );
+  }, []);
 
   const selectReflogEntry = useCallback(
     (entry: ReflogEntry) => {
@@ -900,6 +962,7 @@ export function App() {
   const gitPanelData = useMemo<GitPanelDataProps>(
     () => ({
       activeCommit,
+      activeProjectPath,
       activeReflogSelector,
       changedFiles,
       commitFiles: commitPanelFiles(worktreeChangedFiles),
@@ -919,6 +982,8 @@ export function App() {
       selectedChangePath,
       selectedCommit,
       selectedReflogEntry,
+      stashActions,
+      worktreeActions,
       onBranchAction: performBranchAction,
       onChangeCommitFilter: setCommitFilter,
       onChangeHistoryMode: changeHistoryMode,
@@ -933,6 +998,7 @@ export function App() {
     }),
     [
       activeCommit,
+      activeProjectPath,
       activeReflogSelector,
       changedFiles,
       changeHistoryMode,
@@ -959,8 +1025,10 @@ export function App() {
       selectedChangePath,
       selectedCommit,
       selectedReflogEntry,
+      stashActions,
       setReflogFilter,
       activeTreeGitFileActions,
+      worktreeActions,
       worktreeChangedFiles,
     ],
   );

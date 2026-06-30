@@ -7,9 +7,11 @@ import {
 const durableProjectStateQueryRoots = [
   "changed-files",
   "commits",
+  "git-operation-state",
   "project-files",
   "reflog",
   "repository",
+  "stashes",
 ] as const;
 
 const previewStateQueryRoots = [

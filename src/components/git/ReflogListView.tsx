@@ -1,4 +1,4 @@
-import type { CSSProperties, RefObject } from "react";
+import { useCallback, type CSSProperties, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { RotateCcw } from "lucide-react";
 import type { BranchInfo, ReflogEntry } from "../../lib/api";
@@ -49,6 +49,17 @@ export function ReflogListView({
   readonly onSelectWorkingTree: () => void;
   readonly onSetReflogMenu: (menu: ReflogMenu | null) => void;
 }) {
+  const openReflogMenu = useCallback(
+    (entry: ReflogEntry, left: number, top: number) => {
+      onSetReflogMenu({
+        entry,
+        left,
+        top,
+      });
+    },
+    [onSetReflogMenu],
+  );
+
   return (
     <div className="reflog-table" style={tableStyle}>
       <CommitListHeader
@@ -77,17 +88,8 @@ export function ReflogListView({
                 <ReflogRow
                   active={activeReflogSelector === entry.selector}
                   entry={entry}
-                  onClick={() => onSelectReflogEntry(entry)}
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    onSelectReflogEntry(entry);
-                    onSetReflogMenu({
-                      entry,
-                      left: event.clientX,
-                      top: event.clientY,
-                    });
-                  }}
+                  onOpenContextMenu={openReflogMenu}
+                  onSelectReflogEntry={onSelectReflogEntry}
                 />
               </div>
             );

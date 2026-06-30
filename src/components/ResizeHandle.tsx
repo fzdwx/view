@@ -7,6 +7,7 @@ import {
   dispatchPanelResizeStart,
 } from "../lib/panelResizeInteraction";
 import { isPerfLogEnabled, logPerf } from "../lib/performanceLog";
+import { resizeSessionPerfFields } from "../lib/resizeHandlePerf";
 
 export function ResizeHandle({
   axis,
@@ -109,17 +110,16 @@ export function ResizeHandle({
         logPerf(
           "resize:session",
           sessionMaxMs,
-          {
+          resizeSessionPerfFields({
             axis,
-            commitMs: Math.round(resizeStats.commitMs * 10) / 10,
+            className,
+            label,
+            commitMs: resizeStats.commitMs,
             frames: resizeStats.frames,
-            mode: "live",
             totalDelta,
-            avgFlushMs: Math.round(
-              (resizeStats.totalFlushMs / resizeStats.frames) * 10,
-            ) / 10,
-            maxRafWaitMs: Math.round(resizeStats.maxRafWaitMs * 10) / 10,
-          },
+            totalFlushMs: resizeStats.totalFlushMs,
+            maxRafWaitMs: resizeStats.maxRafWaitMs,
+          }),
           { slowThresholdMs: 8 },
         );
       }

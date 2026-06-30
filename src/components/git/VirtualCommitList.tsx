@@ -1,5 +1,14 @@
 import type { CSSProperties } from "react";
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { usePanelResizeDeferredValue } from "../../hooks/usePanelResizeDeferredValue";
 import { buildCommitGraph } from "../../lib/commitGraph";
@@ -11,7 +20,7 @@ import {
   measureElementByEstimate,
   observeElementRectDuringPanelResize,
 } from "../../lib/virtualizerMeasurement";
-import { CommitListView } from "./CommitListView";
+import { CommitListView, type CommitMenu } from "./CommitListView";
 import { HistoryEmptyView, HistoryLoadingView } from "./CommitListStateViews";
 import { ReflogListView, type ReflogMenu } from "./ReflogListView";
 import type { VirtualCommitListProps } from "./CommitListTypes";
@@ -43,6 +52,7 @@ export const VirtualCommitList = memo(function VirtualCommitList({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const lastScrolledCommitRef = useRef<string | null>(null);
   const lastScrolledReflogRef = useRef<string | null>(null);
+  const [commitMenu, setCommitMenu] = useState<CommitMenu | null>(null);
   const [reflogMenu, setReflogMenu] = useState<ReflogMenu | null>(null);
   const isReflogMode = historyMode === "reflog";
   const deferredCommits = usePanelResizeDeferredValue(commits);
@@ -116,15 +126,51 @@ export const VirtualCommitList = memo(function VirtualCommitList({
     [activeReflogSelector, deferredReflogEntries],
   );
 
-  useEffect(() => {
-    if (!reflogMenu) {
+  const closeHistoryMenus = useCallback(() => {
+    setCommitMenu(null);
+    setReflogMenu(null);
+  }, []);
+
+  const handleChangeCommitFilter = useCallback(
+    (nextFilter: string) => {
+      closeHistoryMenus();
+      onChangeFilter(nextFilter);
+    },
+    [closeHistoryMenus, onChangeFilter],
+  );
+
+  const handleChangeReflogFilter = useCallback(
+    (nextFilter: string) => {
+      closeHistoryMenus();
+      onChangeReflogFilter(nextFilter);
+    },
+    [closeHistoryMenus, onChangeReflogFilter],
+  );
+
+  const handleChangeHistoryMode = useCallback(
+    (mode: "commits" | "reflog") => {
+      closeHistoryMenus();
+      onChangeHistoryMode(mode);
+    },
+    [closeHistoryMenus, onChangeHistoryMode],
+  );
+
+  const closeHistoryMenusEvent = useEffectEvent(() => {
+    if (!commitMenu && !reflogMenu) {
       return;
     }
 
-    const closeMenu = () => setReflogMenu(null);
+    setCommitMenu(null);
+    setReflogMenu(null);
+  });
+
+  useEffect(() => {
+    const closeMenu = () => {
+      closeHistoryMenusEvent();
+    };
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
-        closeMenu();
+        closeHistoryMenusEvent();
       }
     };
 
@@ -138,7 +184,7 @@ export const VirtualCommitList = memo(function VirtualCommitList({
       window.removeEventListener("scroll", closeMenu, true);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [reflogMenu]);
+  }, []);
 
   useLayoutEffect(() => {
     scrollRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
@@ -197,8 +243,10 @@ export const VirtualCommitList = memo(function VirtualCommitList({
         historyMode={historyMode}
         isReflogMode={isReflogMode}
         tableStyle={tableStyle}
-        onChangeFilter={isReflogMode ? onChangeReflogFilter : onChangeFilter}
-        onChangeHistoryMode={onChangeHistoryMode}
+        onChangeFilter={
+          isReflogMode ? handleChangeReflogFilter : handleChangeCommitFilter
+        }
+        onChangeHistoryMode={handleChangeHistoryMode}
         onSelectWorkingTree={onSelectWorkingTree}
       />
     );
@@ -215,8 +263,8 @@ export const VirtualCommitList = memo(function VirtualCommitList({
         message="No commits match the current filter."
         tableClassName="commit-table"
         tableStyle={tableStyle}
-        onChangeFilter={onChangeFilter}
-        onChangeHistoryMode={onChangeHistoryMode}
+        onChangeFilter={handleChangeCommitFilter}
+        onChangeHistoryMode={handleChangeHistoryMode}
         onSelectWorkingTree={onSelectWorkingTree}
       />
     );
@@ -233,8 +281,8 @@ export const VirtualCommitList = memo(function VirtualCommitList({
         message="No reflog entries match the current filter."
         tableClassName="reflog-table"
         tableStyle={tableStyle}
-        onChangeFilter={onChangeReflogFilter}
-        onChangeHistoryMode={onChangeHistoryMode}
+        onChangeFilter={handleChangeReflogFilter}
+        onChangeHistoryMode={handleChangeHistoryMode}
         onSelectWorkingTree={onSelectWorkingTree}
       />
     );
@@ -253,8 +301,8 @@ export const VirtualCommitList = memo(function VirtualCommitList({
         scrollRef={scrollRef}
         tableStyle={tableStyle}
         virtualizer={reflogVirtualizer}
-        onChangeFilter={onChangeReflogFilter}
-        onChangeHistoryMode={onChangeHistoryMode}
+        onChangeFilter={handleChangeReflogFilter}
+        onChangeHistoryMode={handleChangeHistoryMode}
         onRestoreReflogEntry={onRestoreReflogEntry}
         onSelectReflogEntry={onSelectReflogEntry}
         onSelectWorkingTree={onSelectWorkingTree}
@@ -267,16 +315,18 @@ export const VirtualCommitList = memo(function VirtualCommitList({
     <CommitListView
       activeCommit={activeCommit}
       branch={branch}
+      commitMenu={commitMenu}
       filter={filter}
       gitWriteActions={gitWriteActions}
       graphRows={graphRows}
       scrollRef={scrollRef}
       tableStyle={tableStyle}
       virtualizer={commitVirtualizer}
-      onChangeFilter={onChangeFilter}
-      onChangeHistoryMode={onChangeHistoryMode}
+      onChangeFilter={handleChangeCommitFilter}
+      onChangeHistoryMode={handleChangeHistoryMode}
       onSelectCommit={onSelectCommit}
       onSelectWorkingTree={onSelectWorkingTree}
+      onSetCommitMenu={setCommitMenu}
     />
   );
 });

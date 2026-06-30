@@ -5,11 +5,19 @@ import {
   type Dispatch,
   type SetStateAction,
 } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
+  abortGitOperation,
+  cherryPickCommit,
+  continueGitOperation,
   createCommit,
+  getGitOperationState,
   resetHardToReflog,
   pushCurrentBranch,
+  revertCommit,
+  skipGitOperation,
   type BranchInfo,
+  type GitOperationState,
   type RepositoryPayload,
   type TreeFile,
 } from "../lib/api";
@@ -51,13 +59,22 @@ export interface GitWriteActions {
   readonly commitMessageHint: string | null;
   readonly commitMessage: string;
   readonly commitPending: boolean;
+  readonly cherryPickHistoryCommit: (hash: string) => Promise<boolean>;
   readonly commitStagedChanges: () => Promise<boolean>;
   readonly commitWarning: string | null;
   readonly conflictCount: number;
   readonly currentBranch: BranchInfo | null;
   readonly dirtyDraftCount: number;
   readonly gitWritePendingReason: string | null;
+  readonly gitOperationError: string | null;
+  readonly gitOperationPending: boolean;
+  readonly gitOperationState: GitOperationState | null;
   readonly pendingGitWriteAction: GitRepositoryWriteKind | null;
+  readonly historyOperationDisabledReason: string | null;
+  readonly historyOperationError: string | null;
+  readonly historyOperationPending: boolean;
+  readonly abortGitOperationInProgress: () => Promise<boolean>;
+  readonly continueGitOperationInProgress: () => Promise<boolean>;
   readonly pushCurrentBranchToUpstream: () => Promise<boolean>;
   readonly pushDisabledReason: string | null;
   readonly pushError: string | null;
@@ -66,7 +83,9 @@ export interface GitWriteActions {
   readonly resetError: string | null;
   readonly resetHardToReflogEntry: (selector: string) => Promise<boolean>;
   readonly resetPending: boolean;
+  readonly revertHistoryCommit: (hash: string) => Promise<boolean>;
   readonly setCommitMessage: Dispatch<SetStateAction<string>>;
+  readonly skipGitOperationInProgress: () => Promise<boolean>;
   readonly stagedCount: number;
 }
 
@@ -82,6 +101,9 @@ export function useGitWriteActions({
   const refreshProjectFileState = useProjectFileStateRefresh();
   const [commitMessage, setCommitMessage] = useState("");
   const [commitError, setCommitError] = useState<string | null>(null);
+  const [gitOperationError, setGitOperationError] = useState<string | null>(null);
+  const [historyOperationError, setHistoryOperationError] =
+    useState<string | null>(null);
   const [pushError, setPushError] = useState<string | null>(null);
   const [resetError, setResetError] = useState<string | null>(null);
   const { beginGitWrite, endGitWrite, pendingOperation } = gitWriteGuard;
@@ -89,6 +111,14 @@ export function useGitWriteActions({
     pendingOperation?.scope === "repository" ? pendingOperation.kind : null;
   const gitWritePendingReason =
     gitWriteOperationPendingTitle(pendingOperation);
+  const gitOperationQuery = useQuery({
+    queryKey: ["git-operation-state", activeProjectPath],
+    queryFn: () => getGitOperationState(requireActiveProjectPath(activeProjectPath)),
+    enabled: Boolean(activeProjectPath && hasGitRepository),
+    retry: false,
+  });
+  const gitOperationState =
+    gitOperationQuery.data?.kind ? gitOperationQuery.data : null;
 
   const stagedCount = useMemo(
     () => countStagedFiles(worktreeFiles),
@@ -132,7 +162,12 @@ export function useGitWriteActions({
     ? "Open a folder before resetting history."
     : !hasGitRepository
       ? "Open a Git repository before resetting history."
-    : gitWriteOperationPendingTitle(pendingOperation);
+      : gitWriteOperationPendingTitle(pendingOperation);
+  const historyOperationDisabledReason = !activeProjectPath
+    ? "Open a folder before editing history."
+    : !hasGitRepository
+      ? "Open a Git repository before editing history."
+      : gitWriteOperationPendingTitle(pendingOperation);
   const commitWarning = commitDirtyDraftWarning(dirtyDraftCount);
 
   const commitStagedChanges = useCallback(async (): Promise<boolean> => {
@@ -150,6 +185,7 @@ export function useGitWriteActions({
     }
 
     setCommitError(null);
+    setHistoryOperationError(null);
     setPushError(null);
     setResetError(null);
     let shouldRefresh = false;
@@ -209,6 +245,7 @@ export function useGitWriteActions({
     }
 
     setCommitError(null);
+    setHistoryOperationError(null);
     setPushError(null);
     setResetError(null);
     let shouldRefresh = false;
@@ -236,7 +273,9 @@ export function useGitWriteActions({
     refreshProjectFileState,
   ]);
 
-  const resetHardToReflogEntry = useCallback(async (selector: string): Promise<boolean> => {
+  const resetHardToReflogEntry = useCallback(async (
+    selector: string,
+  ): Promise<boolean> => {
     if (resetDisabledReason) {
       setResetError(resetDisabledReason);
       await showNativeMessage(resetDisabledReason, { kind: "warning" });
@@ -260,6 +299,7 @@ export function useGitWriteActions({
     }
 
     setCommitError(null);
+    setHistoryOperationError(null);
     setPushError(null);
     setResetError(null);
     let shouldRefresh = false;
@@ -302,9 +342,220 @@ export function useGitWriteActions({
     resetDisabledReason,
   ]);
 
+  const runHistoryCommitAction = useCallback(
+    async (
+      kind: "cherryPick" | "revert",
+      commit: string,
+      command: (request: {
+        readonly path: string;
+        readonly commit: string;
+      }) => Promise<unknown>,
+      confirmMessage: (commitLabel: string) => string,
+      okLabel: string,
+    ): Promise<boolean> => {
+      if (historyOperationDisabledReason) {
+        setHistoryOperationError(historyOperationDisabledReason);
+        await showNativeMessage(historyOperationDisabledReason, {
+          kind: "warning",
+        });
+        return false;
+      }
+
+      const normalizedCommit = commit.trim();
+      if (!normalizedCommit) {
+        const message = "Choose a commit before editing history.";
+        setHistoryOperationError(message);
+        await showNativeMessage(message, { kind: "warning" });
+        return false;
+      }
+
+      const operation = {
+        kind,
+        scope: "repository",
+      } satisfies GitWriteOperation;
+      if (!activeProjectPath || !beginGitWrite(operation)) {
+        return false;
+      }
+
+      setCommitError(null);
+      setGitOperationError(null);
+      setHistoryOperationError(null);
+      setPushError(null);
+      setResetError(null);
+      let shouldRefresh = false;
+
+      try {
+        const commitLabel = shortCommitLabel(normalizedCommit);
+        const confirmed = await confirmNativeDialog(confirmMessage(commitLabel), {
+          cancelLabel: "Cancel",
+          kind: "warning",
+          okLabel,
+        });
+        if (!confirmed) {
+          return false;
+        }
+
+        shouldRefresh = true;
+        await command({
+          path: activeProjectPath,
+          commit: normalizedCommit,
+        });
+        return true;
+      } catch (error) {
+        const message = errorMessage(error);
+        setHistoryOperationError(message);
+        await showNativeMessage(message, { kind: "error" });
+        return false;
+      } finally {
+        if (shouldRefresh) {
+          await refreshProjectFileState(activeProjectPath);
+        }
+        endGitWrite(operation);
+      }
+    },
+    [
+      activeProjectPath,
+      beginGitWrite,
+      endGitWrite,
+      historyOperationDisabledReason,
+      refreshProjectFileState,
+    ],
+  );
+
+  const cherryPickHistoryCommit = useCallback(
+    (hash: string) =>
+      runHistoryCommitAction(
+        "cherryPick",
+        hash,
+        cherryPickCommit,
+        (commitLabel) =>
+          `Cherry-pick ${commitLabel} onto the current branch?\n\nThis applies the selected commit. If it conflicts, resolve the files and use Continue or Abort.`,
+        "Cherry-pick",
+      ),
+    [runHistoryCommitAction],
+  );
+
+  const revertHistoryCommit = useCallback(
+    (hash: string) =>
+      runHistoryCommitAction(
+        "revert",
+        hash,
+        revertCommit,
+        (commitLabel) =>
+          `Revert ${commitLabel} on the current branch?\n\nThis creates a new commit that undoes the selected commit. If it conflicts, resolve the files and use Continue or Abort.`,
+        "Revert",
+      ),
+    [runHistoryCommitAction],
+  );
+
+  const runGitOperationAction = useCallback(
+    async (
+      kind: "abort" | "continue" | "skip",
+      command: (projectPath: string) => Promise<unknown>,
+      confirmMessage: string | null,
+    ): Promise<boolean> => {
+      if (!activeProjectPath) {
+        return false;
+      }
+      const state = gitOperationState;
+      if (!state) {
+        const message = "No merge, rebase, cherry-pick, or revert is in progress.";
+        setGitOperationError(message);
+        await showNativeMessage(message, { kind: "warning" });
+        return false;
+      }
+      if (kind === "skip" && !state.canSkip) {
+        const message = "This Git operation does not support skip.";
+        setGitOperationError(message);
+        await showNativeMessage(message, { kind: "warning" });
+        return false;
+      }
+      const operation = {
+        kind,
+        scope: "repository",
+      } satisfies GitWriteOperation;
+      if (!beginGitWrite(operation)) {
+        return false;
+      }
+
+      setCommitError(null);
+      setGitOperationError(null);
+      setHistoryOperationError(null);
+      setPushError(null);
+      setResetError(null);
+      let shouldRefresh = false;
+
+      try {
+        if (confirmMessage) {
+          const confirmed = await confirmNativeDialog(confirmMessage, {
+            cancelLabel: "Cancel",
+            kind: "warning",
+            okLabel: operationButtonLabel(kind),
+          });
+          if (!confirmed) {
+            return false;
+          }
+        }
+
+        shouldRefresh = true;
+        await command(activeProjectPath);
+        return true;
+      } catch (error) {
+        const message = errorMessage(error);
+        setGitOperationError(message);
+        await showNativeMessage(message, { kind: "error" });
+        return false;
+      } finally {
+        if (shouldRefresh) {
+          await refreshProjectFileState(activeProjectPath);
+        }
+        endGitWrite(operation);
+      }
+    },
+    [
+      activeProjectPath,
+      beginGitWrite,
+      endGitWrite,
+      gitOperationState,
+      refreshProjectFileState,
+    ],
+  );
+
+  const continueGitOperationInProgress = useCallback(
+    () =>
+      runGitOperationAction(
+        "continue",
+        continueGitOperation,
+        null,
+      ),
+    [runGitOperationAction],
+  );
+
+  const abortGitOperationInProgress = useCallback(
+    () =>
+      runGitOperationAction(
+        "abort",
+        abortGitOperation,
+        `Abort the in-progress ${gitOperationLabel(gitOperationState?.kind)}?`,
+      ),
+    [gitOperationState?.kind, runGitOperationAction],
+  );
+
+  const skipGitOperationInProgress = useCallback(
+    () =>
+      runGitOperationAction(
+        "skip",
+        skipGitOperation,
+        `Skip the current ${gitOperationLabel(gitOperationState?.kind)} step?`,
+      ),
+    [gitOperationState?.kind, runGitOperationAction],
+  );
+
   return {
+    abortGitOperationInProgress,
     canCommit: commitDisabledReason === null,
     canPush: pushDisabledReason === null,
+    cherryPickHistoryCommit,
     commitDisabledReason,
     commitError,
     commitMessageHint,
@@ -315,7 +566,19 @@ export function useGitWriteActions({
     conflictCount,
     currentBranch,
     dirtyDraftCount,
+    continueGitOperationInProgress,
+    gitOperationError,
+    gitOperationPending:
+      pendingGitWriteAction === "abort" ||
+      pendingGitWriteAction === "continue" ||
+      pendingGitWriteAction === "skip",
+    gitOperationState,
     gitWritePendingReason,
+    historyOperationDisabledReason,
+    historyOperationError,
+    historyOperationPending:
+      pendingGitWriteAction === "cherryPick" ||
+      pendingGitWriteAction === "revert",
     pendingGitWriteAction,
     pushCurrentBranchToUpstream,
     pushDisabledReason,
@@ -325,9 +588,49 @@ export function useGitWriteActions({
     resetError,
     resetHardToReflogEntry,
     resetPending: pendingGitWriteAction === "reset",
+    revertHistoryCommit,
     setCommitMessage,
+    skipGitOperationInProgress,
     stagedCount,
   };
+}
+
+function requireActiveProjectPath(path: string | null): string {
+  if (!path) {
+    throw new Error("Open a repository before inspecting Git operation state.");
+  }
+
+  return path;
+}
+
+function gitOperationLabel(kind: GitOperationState["kind"] | undefined): string {
+  switch (kind) {
+    case "cherryPick":
+      return "cherry-pick";
+    case "merge":
+      return "merge";
+    case "rebase":
+      return "rebase";
+    case "revert":
+      return "revert";
+    default:
+      return "Git operation";
+  }
+}
+
+function operationButtonLabel(kind: "abort" | "continue" | "skip"): string {
+  switch (kind) {
+    case "abort":
+      return "Abort";
+    case "continue":
+      return "Continue";
+    case "skip":
+      return "Skip";
+  }
+}
+
+function shortCommitLabel(hash: string): string {
+  return hash.length > 12 ? hash.slice(0, 12) : hash;
 }
 
 function errorMessage(error: unknown): string {

@@ -69,6 +69,32 @@ export interface RepositorySummary {
   tags: TagInfo[];
 }
 
+export interface WorktreeOperationResponse {
+  readonly summary: RepositorySummary;
+  readonly activePath: string | null;
+}
+
+export type GitOperationKind = "cherryPick" | "merge" | "rebase" | "revert";
+
+export interface GitOperationState {
+  readonly kind: GitOperationKind | null;
+  readonly conflictCount: number;
+  readonly canContinue: boolean;
+  readonly canAbort: boolean;
+  readonly canSkip: boolean;
+}
+
+export interface StashEntry {
+  readonly selector: string;
+  readonly hash: string;
+  readonly branch: string;
+  readonly message: string;
+}
+
+export interface StashListResponse {
+  readonly entries: StashEntry[];
+}
+
 export type CommitTrackingSide = "local" | "upstream";
 
 export interface CommitTrackingInfo {
@@ -264,6 +290,22 @@ export interface CommitRequest {
 export interface ResetHardToReflogRequest {
   readonly path: string;
   readonly selector: string;
+}
+
+export interface CommitHashRequest {
+  readonly path: string;
+  readonly commit: string;
+}
+
+export interface StashRequest {
+  readonly path: string;
+  readonly selector: string;
+}
+
+export interface CreateStashRequest {
+  readonly path: string;
+  readonly message: string;
+  readonly includeUntracked: boolean;
 }
 
 export interface GitWriteResponse {
@@ -595,6 +637,38 @@ export async function deleteBranch(
   return apiInvoke<void>("delete_branch", { path, refName, force });
 }
 
+export async function createWorktree(
+  path: string,
+  name: string,
+  startPoint: string,
+  branchName?: string | null,
+): Promise<WorktreeOperationResponse> {
+  return apiInvoke<WorktreeOperationResponse>("create_worktree", {
+    path,
+    name,
+    startPoint,
+    branchName: branchName ?? null,
+  });
+}
+
+export async function removeWorktree(
+  path: string,
+  worktreePath: string,
+  force: boolean,
+): Promise<WorktreeOperationResponse> {
+  return apiInvoke<WorktreeOperationResponse>("remove_worktree", {
+    path,
+    worktreePath,
+    force,
+  });
+}
+
+export async function pruneWorktrees(
+  path: string,
+): Promise<WorktreeOperationResponse> {
+  return apiInvoke<WorktreeOperationResponse>("prune_worktrees", { path });
+}
+
 export type PullMode = "merge" | "rebase";
 
 export async function pullCurrentBranch(
@@ -602,6 +676,30 @@ export async function pullCurrentBranch(
   mode: PullMode,
 ): Promise<void> {
   return apiInvoke<void>("pull_current_branch", { path, mode });
+}
+
+export async function getGitOperationState(
+  path: string,
+): Promise<GitOperationState> {
+  return apiInvoke<GitOperationState>("get_git_operation_state", { path });
+}
+
+export async function continueGitOperation(
+  path: string,
+): Promise<GitWriteResponse> {
+  return apiInvoke<GitWriteResponse>("continue_git_operation", { path });
+}
+
+export async function abortGitOperation(
+  path: string,
+): Promise<GitWriteResponse> {
+  return apiInvoke<GitWriteResponse>("abort_git_operation", { path });
+}
+
+export async function skipGitOperation(
+  path: string,
+): Promise<GitWriteResponse> {
+  return apiInvoke<GitWriteResponse>("skip_git_operation", { path });
 }
 
 export async function stageFiles(
@@ -650,6 +748,53 @@ export async function resetHardToReflog(
   request: ResetHardToReflogRequest,
 ): Promise<GitWriteResponse> {
   return apiInvoke<GitWriteResponse>("reset_hard_to_reflog", { request });
+}
+
+export async function cherryPickCommit(
+  request: CommitHashRequest,
+): Promise<GitWriteResponse> {
+  return apiInvoke<GitWriteResponse>("cherry_pick_commit", { request });
+}
+
+export async function revertCommit(
+  request: CommitHashRequest,
+): Promise<GitWriteResponse> {
+  return apiInvoke<GitWriteResponse>("revert_commit", { request });
+}
+
+export async function listStashes(path: string): Promise<StashListResponse> {
+  return apiInvoke<StashListResponse>("list_stashes", { path });
+}
+
+export async function createStash(
+  request: CreateStashRequest,
+): Promise<GitWriteResponse> {
+  return apiInvoke<GitWriteResponse>("create_stash", { request });
+}
+
+export async function applyStash(
+  request: StashRequest,
+): Promise<GitWriteResponse> {
+  return apiInvoke<GitWriteResponse>("apply_stash", { request });
+}
+
+export async function popStash(
+  request: StashRequest,
+): Promise<GitWriteResponse> {
+  return apiInvoke<GitWriteResponse>("pop_stash", { request });
+}
+
+export async function dropStash(
+  request: StashRequest,
+): Promise<GitWriteResponse> {
+  return apiInvoke<GitWriteResponse>("drop_stash", { request });
+}
+
+export async function getStashDiff(
+  path: string,
+  selector: string,
+): Promise<string> {
+  return apiInvoke<string>("get_stash_diff", { path, selector });
 }
 
 export async function terminalSpawn(

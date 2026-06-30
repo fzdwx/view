@@ -2,6 +2,7 @@ import type {
   TerminalCursorStyle,
   TerminalBell,
   TerminalClose,
+  TerminalCommandStatus,
   TerminalFrame,
   TerminalGrapheme,
   TerminalLine,
@@ -40,6 +41,8 @@ export function createTerminalErrorFrame(error: unknown): TerminalFrame {
     type: "frame",
     title: null,
     cwd: null,
+    oscCwd: null,
+    commandStatus: null,
     rows: 1,
     cols: 80,
     displayOffset: 0,
@@ -98,6 +101,8 @@ function parseFrame(value: Readonly<Record<string, unknown>>): TerminalFrame | n
     type: "frame",
     title: typeof value.title === "string" ? value.title : null,
     cwd: typeof value.cwd === "string" ? value.cwd : null,
+    oscCwd: typeof value.oscCwd === "string" ? value.oscCwd : null,
+    commandStatus: parseCommandStatus(value.commandStatus),
     rows: value.rows,
     cols: value.cols,
     displayOffset: value.displayOffset,
@@ -111,6 +116,19 @@ function parseFrame(value: Readonly<Record<string, unknown>>): TerminalFrame | n
     cursorShape: value.cursorShape,
     modes: parseModes(value.modes),
     lines,
+  };
+}
+
+function parseCommandStatus(value: unknown): TerminalCommandStatus | null {
+  if (!isRecord(value) || !isTerminalCommandPhase(value.phase)) {
+    return null;
+  }
+  if (value.exitCode != null && typeof value.exitCode !== "number") {
+    return null;
+  }
+  return {
+    phase: value.phase,
+    exitCode: value.exitCode ?? null,
   };
 }
 
@@ -201,6 +219,18 @@ function isTerminalCursorStyle(value: unknown): value is TerminalCursorStyle {
     case "block":
     case "hollowBlock":
     case "underline":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function isTerminalCommandPhase(value: unknown): value is TerminalCommandStatus["phase"] {
+  switch (value) {
+    case "finished":
+    case "input":
+    case "prompt":
+    case "running":
       return true;
     default:
       return false;

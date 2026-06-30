@@ -39,6 +39,13 @@ export interface TerminalModes {
   readonly altScreen: boolean;
 }
 
+export type TerminalCommandPhase = "finished" | "input" | "prompt" | "running";
+
+export interface TerminalCommandStatus {
+  readonly phase: TerminalCommandPhase;
+  readonly exitCode: number | null;
+}
+
 export interface TerminalCellMetrics {
   readonly width: number;
   readonly height: number;
@@ -48,6 +55,8 @@ export interface TerminalFrame {
   readonly type: "frame";
   readonly title: string | null;
   readonly cwd: string | null;
+  readonly oscCwd: string | null;
+  readonly commandStatus: TerminalCommandStatus | null;
   readonly rows: number;
   readonly cols: number;
   readonly displayOffset: number;

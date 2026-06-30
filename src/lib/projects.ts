@@ -53,3 +53,21 @@ export function upsertProject(
     },
   ];
 }
+
+export function activateProjectPath(
+  projects: SavedProject[],
+  rootPath: string,
+  activePath: string,
+): {
+  readonly projects: SavedProject[];
+  readonly projectId: string | null;
+} {
+  const nextProjects = upsertProject(projects, rootPath, activePath);
+  return {
+    projects: nextProjects,
+    projectId:
+      nextProjects.find((project) => project.rootPath === rootPath)?.id ??
+      nextProjects.at(-1)?.id ??
+      null,
+  };
+}

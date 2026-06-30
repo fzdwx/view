@@ -41,11 +41,13 @@ use unicode_width::UnicodeWidthStr;
 mod clipboard_paste;
 mod code_search;
 mod git_commit_push;
+mod git_history_ops;
 #[cfg(test)]
 #[path = "git_log_tracking_tests.rs"]
 mod git_log_tracking_tests;
 mod git_pathspec;
 mod git_restore;
+mod git_stash;
 mod git_status;
 mod git_tracking;
 mod git_write;
@@ -91,6 +93,32 @@ struct RepositorySummary {
     worktrees: Vec<WorktreeInfo>,
     branches: Vec<BranchInfo>,
     tags: Vec<TagInfo>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorktreeOperationResponse {
+    summary: RepositorySummary,
+    active_path: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum GitOperationKind {
+    CherryPick,
+    Merge,
+    Rebase,
+    Revert,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitOperationState {
+    kind: Option<GitOperationKind>,
+    conflict_count: usize,
+    can_continue: bool,
+    can_abort: bool,
+    can_skip: bool,
 }
 
 #[derive(Serialize)]
@@ -626,6 +654,139 @@ impl EventListener for TerminalEventProxy {
     }
 }
 
+impl TerminalSemanticState {
+    fn advance_output(&mut self, bytes: &[u8]) {
+        if bytes.is_empty() {
+            return;
+        }
+
+        let mut data = Vec::with_capacity(self.osc_buffer.len() + bytes.len());
+        data.extend_from_slice(&self.osc_buffer);
+        data.extend_from_slice(bytes);
+        self.osc_buffer.clear();
+
+        let mut cursor = 0;
+        while let Some(relative_start) = find_bytes(&data[cursor..], b"\x1b]") {
+            let start = cursor + relative_start;
+            let payload_start = start + 2;
+            let Some((payload_end, terminator_len)) = find_osc_terminator(&data[payload_start..])
+            else {
+                self.store_osc_remainder(&data[start..]);
+                return;
+            };
+            let payload_end = payload_start + payload_end;
+            self.apply_osc_payload(&data[payload_start..payload_end]);
+            cursor = payload_end + terminator_len;
+        }
+
+        if data.ends_with(b"\x1b") {
+            self.osc_buffer.push(b'\x1b');
+        }
+    }
+
+    fn store_osc_remainder(&mut self, remainder: &[u8]) {
+        if remainder.len() <= TERMINAL_OSC_BUFFER_LIMIT {
+            self.osc_buffer.extend_from_slice(remainder);
+        }
+    }
+
+    fn apply_osc_payload(&mut self, payload: &[u8]) {
+        let payload = String::from_utf8_lossy(payload);
+        if let Some(rest) = payload.strip_prefix("133;") {
+            self.apply_osc_133(rest);
+            return;
+        }
+
+        if let Some(url) = payload.strip_prefix("7;") {
+            if let Some(path) = parse_osc7_file_url(url) {
+                self.osc_cwd = Some(path);
+            }
+        }
+    }
+
+    fn apply_osc_133(&mut self, payload: &str) {
+        let mut parts = payload.split(';');
+        let marker = parts.next().unwrap_or_default();
+        let status = match marker {
+            "A" => TerminalCommandStatus {
+                phase: TerminalCommandPhase::Prompt,
+                exit_code: None,
+            },
+            "B" => TerminalCommandStatus {
+                phase: TerminalCommandPhase::Input,
+                exit_code: None,
+            },
+            "C" => TerminalCommandStatus {
+                phase: TerminalCommandPhase::Running,
+                exit_code: None,
+            },
+            "D" => TerminalCommandStatus {
+                phase: TerminalCommandPhase::Finished,
+                exit_code: parts.next().and_then(|value| value.parse::<i32>().ok()),
+            },
+            _ => return,
+        };
+        self.command_status = Some(status);
+    }
+}
+
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return None;
+    }
+
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+fn find_osc_terminator(bytes: &[u8]) -> Option<(usize, usize)> {
+    let bell = bytes.iter().position(|byte| *byte == b'\x07');
+    let st = find_bytes(bytes, b"\x1b\\");
+    match (bell, st) {
+        (Some(bell), Some(st)) if st < bell => Some((st, 2)),
+        (Some(bell), _) => Some((bell, 1)),
+        (None, Some(st)) => Some((st, 2)),
+        (None, None) => None,
+    }
+}
+
+fn parse_osc7_file_url(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("file://")?;
+    let path_start = rest.find('/')?;
+    percent_decode_utf8(&rest[path_start..])
+}
+
+fn percent_decode_utf8(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            let high = hex_value(bytes[index + 1]);
+            let low = hex_value(bytes[index + 2]);
+            if let (Some(high), Some(low)) = (high, low) {
+                decoded.push((high << 4) | low);
+                index += 3;
+                continue;
+            }
+        }
+        decoded.push(bytes[index]);
+        index += 1;
+    }
+
+    String::from_utf8(decoded).ok()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TerminalRunStyle {
@@ -679,6 +840,29 @@ struct TerminalFrameModes {
     alt_screen: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum TerminalCommandPhase {
+    Prompt,
+    Input,
+    Running,
+    Finished,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalCommandStatus {
+    phase: TerminalCommandPhase,
+    exit_code: Option<i32>,
+}
+
+#[derive(Default)]
+struct TerminalSemanticState {
+    command_status: Option<TerminalCommandStatus>,
+    osc_cwd: Option<String>,
+    osc_buffer: Vec<u8>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TerminalFrame {
@@ -687,6 +871,10 @@ struct TerminalFrame {
     title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    osc_cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    command_status: Option<TerminalCommandStatus>,
     rows: usize,
     cols: usize,
     display_offset: usize,
@@ -707,6 +895,7 @@ struct TerminalState {
 }
 
 const TERMINAL_SCROLLBACK_CONTEXT_LINES: usize = 96;
+const TERMINAL_OSC_BUFFER_LIMIT: usize = 8192;
 
 #[tauri::command]
 async fn default_start_path() -> Result<String, String> {
@@ -1330,6 +1519,42 @@ async fn create_branch(path: String, name: String, start_point: String) -> Resul
 }
 
 #[tauri::command]
+async fn create_worktree(
+    path: String,
+    name: String,
+    start_point: String,
+    branch_name: Option<String>,
+) -> Result<WorktreeOperationResponse, String> {
+    blocking_command("create_worktree", move || {
+        let root = repository_root(&path)?;
+        create_sibling_worktree(&root, &name, &start_point, branch_name.as_deref())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn remove_worktree(
+    path: String,
+    worktree_path: String,
+    force: bool,
+) -> Result<WorktreeOperationResponse, String> {
+    blocking_command("remove_worktree", move || {
+        let root = repository_root(&path)?;
+        remove_known_worktree(&root, &worktree_path, force)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn prune_worktrees(path: String) -> Result<WorktreeOperationResponse, String> {
+    blocking_command("prune_worktrees", move || {
+        let root = repository_root(&path)?;
+        prune_known_worktrees(&root)
+    })
+    .await
+}
+
+#[tauri::command]
 async fn rename_branch(path: String, ref_name: String, new_name: String) -> Result<(), String> {
     blocking_command("rename_branch", move || {
         let root = repository_root(&path)?;
@@ -1403,6 +1628,152 @@ async fn pull_current_branch(path: String, mode: String) -> Result<(), String> {
         Ok(())
     })
     .await
+}
+
+#[tauri::command]
+async fn get_git_operation_state(path: String) -> Result<GitOperationState, String> {
+    blocking_command("get_git_operation_state", move || {
+        let root = repository_root(&path)?;
+        git_operation_state_for_repo(&root)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn continue_git_operation(path: String) -> Result<git_write::GitWriteResponse, String> {
+    blocking_command("continue_git_operation", move || {
+        let root = repository_root(&path)?;
+        run_git_operation(&root, GitOperationAction::Continue)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn abort_git_operation(path: String) -> Result<git_write::GitWriteResponse, String> {
+    blocking_command("abort_git_operation", move || {
+        let root = repository_root(&path)?;
+        run_git_operation(&root, GitOperationAction::Abort)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn skip_git_operation(path: String) -> Result<git_write::GitWriteResponse, String> {
+    blocking_command("skip_git_operation", move || {
+        let root = repository_root(&path)?;
+        run_git_operation(&root, GitOperationAction::Skip)
+    })
+    .await
+}
+
+#[derive(Clone, Copy)]
+enum GitOperationAction {
+    Abort,
+    Continue,
+    Skip,
+}
+
+fn git_operation_state_for_repo(root: &Path) -> Result<GitOperationState, String> {
+    let kind = detect_git_operation_kind(root)?;
+    let conflict_count = worktree_changed_files(root)?
+        .iter()
+        .filter(|file| file.conflict)
+        .count();
+    let can_skip = matches!(
+        kind,
+        Some(GitOperationKind::CherryPick | GitOperationKind::Rebase | GitOperationKind::Revert)
+    );
+
+    Ok(GitOperationState {
+        kind,
+        conflict_count,
+        can_continue: kind.is_some(),
+        can_abort: kind.is_some(),
+        can_skip,
+    })
+}
+
+fn detect_git_operation_kind(root: &Path) -> Result<Option<GitOperationKind>, String> {
+    if git_internal_path(root, "rebase-merge")?.is_dir()
+        || git_internal_path(root, "rebase-apply")?.is_dir()
+    {
+        return Ok(Some(GitOperationKind::Rebase));
+    }
+    if git_internal_path(root, "MERGE_HEAD")?.is_file() {
+        return Ok(Some(GitOperationKind::Merge));
+    }
+    if git_internal_path(root, "CHERRY_PICK_HEAD")?.is_file() {
+        return Ok(Some(GitOperationKind::CherryPick));
+    }
+    if git_internal_path(root, "REVERT_HEAD")?.is_file() {
+        return Ok(Some(GitOperationKind::Revert));
+    }
+
+    Ok(None)
+}
+
+fn run_git_operation(
+    root: &Path,
+    action: GitOperationAction,
+) -> Result<git_write::GitWriteResponse, String> {
+    let state = git_operation_state_for_repo(root)?;
+    let kind = state
+        .kind
+        .ok_or_else(|| "No merge, rebase, cherry-pick, or revert is in progress".to_string())?;
+    if matches!(action, GitOperationAction::Skip) && !state.can_skip {
+        return Err("This Git operation does not support skip".to_string());
+    }
+
+    let args = git_operation_args(kind, action);
+    git_with_env(
+        root,
+        args,
+        &[
+            ("GIT_EDITOR", "true"),
+            ("GIT_SEQUENCE_EDITOR", "true"),
+            ("GIT_MERGE_AUTOEDIT", "no"),
+        ],
+    )?;
+    Ok(git_write::GitWriteResponse {
+        summary: repository_summary(root)?,
+        files: worktree_changed_files(root)?,
+    })
+}
+
+fn git_operation_args(
+    kind: GitOperationKind,
+    action: GitOperationAction,
+) -> &'static [&'static str] {
+    match (kind, action) {
+        (GitOperationKind::Merge, GitOperationAction::Abort) => &["merge", "--abort"],
+        (GitOperationKind::Merge, GitOperationAction::Continue) => &["merge", "--continue"],
+        (GitOperationKind::Merge, GitOperationAction::Skip) => &["merge", "--abort"],
+        (GitOperationKind::Rebase, GitOperationAction::Abort) => &["rebase", "--abort"],
+        (GitOperationKind::Rebase, GitOperationAction::Continue) => &["rebase", "--continue"],
+        (GitOperationKind::Rebase, GitOperationAction::Skip) => &["rebase", "--skip"],
+        (GitOperationKind::CherryPick, GitOperationAction::Abort) => &["cherry-pick", "--abort"],
+        (GitOperationKind::CherryPick, GitOperationAction::Continue) => {
+            &["cherry-pick", "--continue"]
+        }
+        (GitOperationKind::CherryPick, GitOperationAction::Skip) => &["cherry-pick", "--skip"],
+        (GitOperationKind::Revert, GitOperationAction::Abort) => &["revert", "--abort"],
+        (GitOperationKind::Revert, GitOperationAction::Continue) => &["revert", "--continue"],
+        (GitOperationKind::Revert, GitOperationAction::Skip) => &["revert", "--skip"],
+    }
+}
+
+fn git_internal_path(root: &Path, path: &str) -> Result<PathBuf, String> {
+    let output = git(root, &["rev-parse", "--git-path", path])?;
+    let value = output.trim();
+    if value.is_empty() {
+        return Err(format!("Git did not return a path for {path}"));
+    }
+    let git_path = PathBuf::from(value);
+    if git_path.is_absolute() {
+        Ok(git_path)
+    } else {
+        Ok(root.join(git_path))
+    }
 }
 
 #[tauri::command]
@@ -2074,6 +2445,130 @@ fn validate_branch_name(root: &Path, name: &str) -> Result<(), String> {
     }
     git(root, &["check-ref-format", "--branch", name])?;
     Ok(())
+}
+
+fn create_sibling_worktree(
+    root: &Path,
+    name: &str,
+    start_point: &str,
+    branch_name: Option<&str>,
+) -> Result<WorktreeOperationResponse, String> {
+    let target = sibling_worktree_path(root, name)?;
+    validate_branch_start_point(start_point)?;
+    let branch_name = branch_name
+        .map(str::trim)
+        .filter(|branch| !branch.is_empty())
+        .map(str::to_string);
+    if let Some(branch_name) = branch_name.as_deref() {
+        validate_branch_name(root, branch_name)?;
+    }
+
+    let target_path = target.to_string_lossy().to_string();
+    let mut args = vec!["worktree".to_string(), "add".to_string()];
+    if let Some(branch_name) = branch_name.as_deref() {
+        args.push("-b".to_string());
+        args.push(branch_name.to_string());
+    }
+    args.push(target_path.clone());
+    args.push(start_point.trim().to_string());
+    git_owned(root, &args)?;
+
+    Ok(WorktreeOperationResponse {
+        summary: repository_summary(root)?,
+        active_path: Some(target_path),
+    })
+}
+
+fn remove_known_worktree(
+    root: &Path,
+    worktree_path: &str,
+    force: bool,
+) -> Result<WorktreeOperationResponse, String> {
+    let known_path = resolve_known_non_active_worktree(root, worktree_path)?;
+    let known_path = known_path.to_string_lossy().to_string();
+    let mut args = vec!["worktree".to_string(), "remove".to_string()];
+    if force {
+        args.push("--force".to_string());
+    }
+    args.push(known_path);
+    git_owned(root, &args)?;
+
+    Ok(WorktreeOperationResponse {
+        summary: repository_summary(root)?,
+        active_path: None,
+    })
+}
+
+fn prune_known_worktrees(root: &Path) -> Result<WorktreeOperationResponse, String> {
+    git(root, &["worktree", "prune"])?;
+    Ok(WorktreeOperationResponse {
+        summary: repository_summary(root)?,
+        active_path: None,
+    })
+}
+
+fn sibling_worktree_path(root: &Path, name: &str) -> Result<PathBuf, String> {
+    let name = validate_sibling_worktree_name(name)?;
+    let root = root
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve repository root: {error}"))?;
+    let parent = root
+        .parent()
+        .ok_or_else(|| "Repository root has no parent directory".to_string())?;
+    let target = parent.join(name);
+    if target.exists() {
+        return Err("Worktree folder already exists".to_string());
+    }
+
+    Ok(target)
+}
+
+fn validate_sibling_worktree_name(name: &str) -> Result<String, String> {
+    let trimmed = name.trim().trim_matches('"').replace('\\', "/");
+    if trimmed.is_empty() {
+        return Err("Worktree name is required".to_string());
+    }
+    if trimmed == "."
+        || trimmed == ".."
+        || trimmed.contains('/')
+        || Path::new(&trimmed).is_absolute()
+    {
+        return Err("Worktree name must be a single folder name".to_string());
+    }
+    if trimmed.starts_with('-') {
+        return Err("Worktree name cannot start with -".to_string());
+    }
+    validate_cross_platform_path_part(&trimmed)?;
+
+    Ok(trimmed)
+}
+
+fn resolve_known_non_active_worktree(root: &Path, worktree_path: &str) -> Result<PathBuf, String> {
+    let active_root = root
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve active worktree: {error}"))?;
+    let requested = PathBuf::from(worktree_path.trim())
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve worktree path: {error}"))?;
+    if paths_equal(&requested, &active_root) {
+        return Err("Cannot remove the active worktree".to_string());
+    }
+
+    let worktrees = parse_worktrees(&git(root, &["worktree", "list", "--porcelain"])?);
+    for worktree in worktrees {
+        let known = PathBuf::from(worktree.path)
+            .canonicalize()
+            .map_err(|error| format!("Failed to resolve known worktree path: {error}"))?;
+        if paths_equal(&known, &requested) {
+            return Ok(known);
+        }
+    }
+
+    Err("Can only remove a known worktree".to_string())
+}
+
+fn paths_equal(left: &Path, right: &Path) -> bool {
+    path_starts_with(left, right) && path_starts_with(right, left)
 }
 
 fn checkout_branch_ref(root: &Path, ref_name: &str) -> Result<(), String> {
@@ -3397,14 +3892,35 @@ fn terminal_frame_with_cwd(
     title: Option<&str>,
     cwd: Option<&str>,
 ) -> Result<String, String> {
-    terminal_frame_with_context(term, title, cwd, false)
+    terminal_frame_with_context_and_semantics(term, title, cwd, false, None)
 }
 
+#[cfg(test)]
 fn terminal_frame_with_context(
     term: &Term<TerminalEventProxy>,
     title: Option<&str>,
     cwd: Option<&str>,
     include_scrollback_context: bool,
+) -> Result<String, String> {
+    terminal_frame_with_context_and_semantics(term, title, cwd, include_scrollback_context, None)
+}
+
+#[cfg(test)]
+fn terminal_frame_with_semantics(
+    term: &Term<TerminalEventProxy>,
+    title: Option<&str>,
+    cwd: Option<&str>,
+    semantics: &TerminalSemanticState,
+) -> Result<String, String> {
+    terminal_frame_with_context_and_semantics(term, title, cwd, false, Some(semantics))
+}
+
+fn terminal_frame_with_context_and_semantics(
+    term: &Term<TerminalEventProxy>,
+    title: Option<&str>,
+    cwd: Option<&str>,
+    include_scrollback_context: bool,
+    semantics: Option<&TerminalSemanticState>,
 ) -> Result<String, String> {
     let cursor_shape = term.cursor_style().shape;
     let grid = term.grid();
@@ -3487,10 +4003,14 @@ fn terminal_frame_with_context(
         });
     }
 
+    let osc_cwd = semantics.and_then(|state| state.osc_cwd.as_deref());
+    let frame_cwd = osc_cwd.or(cwd);
     serde_json::to_string(&TerminalFrame {
         message_type: "frame",
         title: title.map(str::to_string),
-        cwd: cwd.map(str::to_string),
+        cwd: frame_cwd.map(str::to_string),
+        osc_cwd: osc_cwd.map(str::to_string),
+        command_status: semantics.and_then(|state| state.command_status.clone()),
         rows,
         cols,
         display_offset: display_offset.max(0) as usize,
@@ -3881,6 +4401,7 @@ fn spawn_terminal_session_with_options(
         let mut processor = TerminalProcessor::<TerminalSyncHandler>::new();
         let mut title: Option<String> = None;
         let mut metadata = initial_terminal_metadata;
+        let mut semantics = TerminalSemanticState::default();
         let initial_display_title =
             terminal_display_title(&title_root, title.as_deref(), &metadata);
         if let Ok(frame) = terminal_frame_with_cwd(
@@ -3893,10 +4414,12 @@ fn spawn_terminal_session_with_options(
 
         let apply_event = |event: TerminalParserEvent,
                            term: &mut Term<TerminalEventProxy>,
-                           processor: &mut TerminalProcessor<TerminalSyncHandler>|
+                           processor: &mut TerminalProcessor<TerminalSyncHandler>,
+                           semantics: &mut TerminalSemanticState|
          -> bool {
             match event {
                 TerminalParserEvent::Output(bytes) => {
+                    semantics.advance_output(&bytes);
                     processor.advance(term, &bytes);
                     false
                 }
@@ -3919,9 +4442,11 @@ fn spawn_terminal_session_with_options(
             match parser_rx.recv_timeout(TERMINAL_SESSION_METADATA_POLL_INTERVAL) {
                 Ok(event) => {
                     terminal_changed = true;
-                    include_scrollback_context |= apply_event(event, &mut term, &mut processor);
+                    include_scrollback_context |=
+                        apply_event(event, &mut term, &mut processor, &mut semantics);
                     while let Ok(event) = parser_rx.try_recv() {
-                        include_scrollback_context |= apply_event(event, &mut term, &mut processor);
+                        include_scrollback_context |=
+                            apply_event(event, &mut term, &mut processor, &mut semantics);
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -3938,13 +4463,19 @@ fn spawn_terminal_session_with_options(
                 continue;
             }
 
-            let display_title = terminal_display_title(&title_root, title.as_deref(), &metadata);
+            let display_metadata = TerminalSessionMetadata {
+                command: metadata.command.clone(),
+                cwd: semantics.osc_cwd.clone().or_else(|| metadata.cwd.clone()),
+            };
+            let display_title =
+                terminal_display_title(&title_root, title.as_deref(), &display_metadata);
             include_scrollback_context |= term.grid().display_offset() > 0;
-            match terminal_frame_with_context(
+            match terminal_frame_with_context_and_semantics(
                 &term,
                 display_title.as_deref(),
                 metadata.cwd.as_deref(),
                 include_scrollback_context,
+                Some(&semantics),
             ) {
                 Ok(frame) => {
                     if reader_output_tx
@@ -4915,6 +5446,61 @@ mod tests {
         .expect("frame json");
 
         assert_eq!(frame["cwd"], "/tmp/view/packages/app");
+    }
+
+    #[test]
+    fn terminal_osc_semantics_tracks_command_boundaries() {
+        let mut semantics = TerminalSemanticState::default();
+
+        semantics.advance_output(b"\x1b]133;C\x07");
+        assert_eq!(
+            semantics.command_status,
+            Some(TerminalCommandStatus {
+                phase: TerminalCommandPhase::Running,
+                exit_code: None,
+            })
+        );
+
+        semantics.advance_output(b"\x1b]133;D;2\x07");
+        assert_eq!(
+            semantics.command_status,
+            Some(TerminalCommandStatus {
+                phase: TerminalCommandPhase::Finished,
+                exit_code: Some(2),
+            })
+        );
+    }
+
+    #[test]
+    fn terminal_osc_semantics_tracks_current_working_directory() {
+        let mut semantics = TerminalSemanticState::default();
+
+        semantics.advance_output(b"\x1b]7;file://host/tmp/view/packages%20app\x07");
+
+        assert_eq!(semantics.osc_cwd.as_deref(), Some("/tmp/view/packages app"));
+    }
+
+    #[test]
+    fn terminal_frame_exposes_osc_command_status_and_cwd() {
+        let (input_tx, _input_rx) = mpsc::channel::<Vec<u8>>();
+        let term = Term::new(
+            TerminalConfig::default(),
+            &TermSize::new(20, 6),
+            test_terminal_event_proxy(input_tx),
+        );
+        let mut semantics = TerminalSemanticState::default();
+        semantics.advance_output(b"\x1b]7;file://host/tmp/view\x07\x1b]133;C\x07");
+
+        let frame: serde_json::Value = serde_json::from_str(
+            &terminal_frame_with_semantics(&term, None, Some("/tmp/fallback"), &semantics)
+                .expect("terminal frame"),
+        )
+        .expect("frame json");
+
+        assert_eq!(frame["cwd"], "/tmp/view");
+        assert_eq!(frame["oscCwd"], "/tmp/view");
+        assert_eq!(frame["commandStatus"]["phase"], "running");
+        assert_eq!(frame["commandStatus"]["exitCode"], serde_json::Value::Null);
     }
 
     #[test]
@@ -6111,6 +6697,39 @@ mod tests {
     }
 
     #[test]
+    fn git_operation_state_reports_merge_conflict() {
+        let repo = create_basic_repo();
+        fs::write(repo.join("tracked.txt"), "base\n").expect("write base");
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-m", "base"]);
+
+        run_git(&repo, &["checkout", "-b", "feature"]);
+        fs::write(repo.join("tracked.txt"), "feature\n").expect("write feature");
+        run_git(&repo, &["commit", "-am", "feature"]);
+        run_git(&repo, &["checkout", "main"]);
+        fs::write(repo.join("tracked.txt"), "main\n").expect("write main");
+        run_git(&repo, &["commit", "-am", "main"]);
+
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(["merge", "feature"])
+            .output()
+            .expect("run conflicting merge");
+        assert!(!output.status.success());
+
+        let state = git_operation_state_for_repo(&repo).expect("operation state");
+        assert_eq!(state.kind, Some(GitOperationKind::Merge));
+        assert_eq!(state.conflict_count, 1);
+        assert!(state.can_continue);
+        assert!(state.can_abort);
+        assert!(!state.can_skip);
+
+        run_git(&repo, &["merge", "--abort"]);
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
     fn branch_tracking_counts_remote_ahead_of_current_branch() {
         let remote = create_basic_repo();
         fs::write(remote.join("base.txt"), "base\n").expect("write base");
@@ -6316,6 +6935,120 @@ mod tests {
         fs::remove_dir_all(repo).ok();
     }
 
+    #[test]
+    fn create_sibling_worktree_creates_new_branch_from_start_point() {
+        let repo = create_basic_repo();
+        write_repo_file(&repo, "README.md", "main\n");
+        run_git(&repo, &["add", "README.md"]);
+        run_git(&repo, &["commit", "-m", "initial"]);
+
+        let worktree_name = sibling_test_name(&repo, "feature-worktree");
+        let response = create_sibling_worktree(
+            &repo,
+            &worktree_name,
+            "refs/heads/main",
+            Some("feature/worktree"),
+        )
+        .expect("create sibling worktree");
+        let worktree_path = response.active_path.expect("created path");
+        let worktree = PathBuf::from(&worktree_path);
+
+        assert!(worktree.is_dir());
+        assert_eq!(
+            worktree.parent(),
+            repo.parent(),
+            "created worktree should be a sibling of the active repository"
+        );
+        assert_eq!(
+            run_git(&worktree, &["branch", "--show-current"]),
+            "feature/worktree"
+        );
+        assert!(response.summary.worktrees.iter().any(|entry| {
+            entry.path == worktree_path && entry.branch.as_deref() == Some("feature/worktree")
+        }));
+
+        run_git(&repo, &["worktree", "remove", "--force", &worktree_path]);
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn create_sibling_worktree_rejects_paths_instead_of_folder_names() {
+        let repo = create_basic_repo();
+        write_repo_file(&repo, "README.md", "main\n");
+        run_git(&repo, &["add", "README.md"]);
+        run_git(&repo, &["commit", "-m", "initial"]);
+
+        let error = match create_sibling_worktree(&repo, "../escape", "refs/heads/main", None) {
+            Ok(_) => panic!("escape path should fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("single folder name"));
+        assert!(!repo.parent().expect("repo parent").join("escape").exists());
+
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn remove_known_worktree_deletes_registered_non_active_worktree() {
+        let repo = create_basic_repo();
+        write_repo_file(&repo, "README.md", "main\n");
+        run_git(&repo, &["add", "README.md"]);
+        run_git(&repo, &["commit", "-m", "initial"]);
+
+        let worktree = repo
+            .parent()
+            .expect("repo parent")
+            .join(sibling_test_name(&repo, "remove-worktree"));
+        let worktree_path = worktree.to_string_lossy().to_string();
+        run_git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "remove-worktree",
+                &worktree_path,
+                "refs/heads/main",
+            ],
+        );
+
+        let response =
+            remove_known_worktree(&repo, &worktree_path, false).expect("remove worktree");
+
+        assert!(!worktree.exists());
+        assert!(!response
+            .summary
+            .worktrees
+            .iter()
+            .any(|entry| entry.path == worktree_path));
+        fs::remove_dir_all(repo).ok();
+    }
+
+    #[test]
+    fn remove_known_worktree_rejects_unknown_paths() {
+        let repo = create_basic_repo();
+        write_repo_file(&repo, "README.md", "main\n");
+        run_git(&repo, &["add", "README.md"]);
+        run_git(&repo, &["commit", "-m", "initial"]);
+
+        let unknown = repo
+            .parent()
+            .expect("repo parent")
+            .join(sibling_test_name(&repo, "unknown-worktree"));
+        fs::create_dir_all(&unknown).expect("create unknown path");
+
+        let error = match remove_known_worktree(&repo, &unknown.to_string_lossy(), false) {
+            Ok(_) => panic!("unknown path should fail"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("known worktree"));
+        assert!(unknown.exists());
+        fs::remove_dir_all(unknown).ok();
+        fs::remove_dir_all(repo).ok();
+    }
+
     fn create_basic_repo() -> PathBuf {
         let repo = unique_temp_repo_path();
         fs::create_dir_all(&repo).expect("create temp repo");
@@ -6338,6 +7071,13 @@ mod tests {
             .expect("system time")
             .as_nanos();
         env::temp_dir().join(format!("view-merge-test-{}-{nanos}", std::process::id()))
+    }
+
+    fn sibling_test_name(repo: &Path, suffix: &str) -> String {
+        format!(
+            "{}-{suffix}",
+            repo.file_name().expect("repo file name").to_string_lossy()
+        )
     }
 
     fn run_git(repo: &Path, args: &[&str]) -> String {
@@ -6444,12 +7184,27 @@ pub fn run() {
             fetch_remotes,
             checkout_branch,
             create_branch,
+            create_worktree,
+            remove_worktree,
+            prune_worktrees,
             rename_branch,
             delete_branch,
             pull_current_branch,
+            get_git_operation_state,
+            continue_git_operation,
+            abort_git_operation,
+            skip_git_operation,
             git_commit_push::create_commit,
             git_commit_push::push_current_branch,
             git_commit_push::reset_hard_to_reflog,
+            git_history_ops::cherry_pick_commit,
+            git_history_ops::revert_commit,
+            git_stash::list_stashes,
+            git_stash::create_stash,
+            git_stash::apply_stash,
+            git_stash::pop_stash,
+            git_stash::drop_stash,
+            git_stash::get_stash_diff,
             git_write::get_file_status_diff,
             git_write::apply_file_change,
             git_write::stage_files,

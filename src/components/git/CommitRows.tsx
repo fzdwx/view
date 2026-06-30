@@ -1,30 +1,51 @@
-import type { MouseEvent as ReactMouseEvent } from "react";
-import type { ReflogEntry } from "../../lib/api";
+import {
+  memo,
+  useCallback,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
+import type { CommitInfo, ReflogEntry } from "../../lib/api";
 import type { CommitGraphRow } from "../../lib/commitGraph";
 import { formatDate } from "../../lib/dateFormat";
 import { CommitGraph } from "./CommitGraph";
 import { CommitTrackingBadge } from "./CommitTrackingBadge";
 
-export function ReflogRow({
+export const ReflogRow = memo(function ReflogRow({
   active,
   entry,
-  onClick,
-  onContextMenu,
+  onOpenContextMenu,
+  onSelectReflogEntry,
 }: {
   readonly active: boolean;
   readonly entry: ReflogEntry;
-  readonly onClick: () => void;
-  readonly onContextMenu: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+  readonly onOpenContextMenu: (
+    entry: ReflogEntry,
+    left: number,
+    top: number,
+  ) => void;
+  readonly onSelectReflogEntry: (entry: ReflogEntry) => void;
 }) {
   const subject = reflogPrimaryText(entry);
+  const handleClick = useCallback(() => {
+    onSelectReflogEntry(entry);
+  }, [entry, onSelectReflogEntry]);
+  const handleContextMenu = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onSelectReflogEntry(entry);
+      onOpenContextMenu(entry, event.clientX, event.clientY);
+    },
+    [entry, onOpenContextMenu, onSelectReflogEntry],
+  );
 
   return (
     <button
       type="button"
       title={`${subject} (${entry.shortHash})`}
+      data-reflog-selector={entry.selector}
       className={active ? "reflog-row active" : "reflog-row"}
-      onClick={onClick}
-      onContextMenu={onContextMenu}
+      onClick={handleClick}
+      onContextMenu={handleContextMenu}
     >
       <span className="reflog-selector">{entry.selector}</span>
       <span className="commit-subject reflog-subject">
@@ -35,18 +56,38 @@ export function ReflogRow({
       <span className="commit-hash">{entry.shortHash}</span>
     </button>
   );
-}
+});
 
-export function CommitRow({
+ReflogRow.displayName = "ReflogRow";
+
+export const CommitRow = memo(function CommitRow({
   row,
   active,
-  onClick,
+  onOpenContextMenu,
+  onSelectCommit,
 }: {
   readonly row: CommitGraphRow;
   readonly active: boolean;
-  readonly onClick: () => void;
+  readonly onOpenContextMenu: (
+    commit: CommitInfo,
+    left: number,
+    top: number,
+  ) => void;
+  readonly onSelectCommit: (hash: string) => void;
 }) {
   const { commit } = row;
+  const handleClick = useCallback(() => {
+    onSelectCommit(commit.hash);
+  }, [commit.hash, onSelectCommit]);
+  const handleContextMenu = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onSelectCommit(commit.hash);
+      onOpenContextMenu(commit, event.clientX, event.clientY);
+    },
+    [commit, onOpenContextMenu, onSelectCommit],
+  );
   const className = [
     "commit-row",
     active ? "active" : null,
@@ -59,8 +100,10 @@ export function CommitRow({
     <button
       type="button"
       title={`${commit.subject} (${commit.shortHash})`}
+      data-commit-hash={commit.hash}
       className={className}
-      onClick={onClick}
+      onClick={handleClick}
+      onContextMenu={handleContextMenu}
     >
       <span className="commit-graph-cell">
         <CommitGraph row={row} />
@@ -74,7 +117,9 @@ export function CommitRow({
       <span className="commit-hash">{commit.shortHash}</span>
     </button>
   );
-}
+});
+
+CommitRow.displayName = "CommitRow";
 
 function reflogPrimaryText(entry: ReflogEntry): string {
   const subject = entry.subject.trim();

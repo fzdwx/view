@@ -12,6 +12,7 @@ import {
 import {
   terminalScrollDeltaForKey,
 } from "./terminalFrameWindow";
+import { shouldConfirmTerminalPaste } from "./terminalPasteProtection";
 import {
   MIN_TERMINAL_ROWS,
   type TerminalCellMetrics,
@@ -84,6 +85,12 @@ export function attachTerminalScreenHandlers(
   };
   const pasteText = (text: string) => {
     if (!text) {
+      return;
+    }
+    if (
+      shouldConfirmTerminalPaste(text) &&
+      !window.confirm(terminalPasteConfirmMessage(text))
+    ) {
       return;
     }
     const normalizedText = text.replace(/\r?\n/g, "\r");
@@ -255,6 +262,11 @@ export function attachTerminalScreenHandlers(
     }
     pendingWheelScrollDelta = 0;
   };
+}
+
+function terminalPasteConfirmMessage(text: string): string {
+  const lineCount = text.split(/\r\n|\r|\n/).length;
+  return `Paste ${lineCount} line(s), ${text.length} character(s) into the terminal?`;
 }
 
 function sendMouseEvent(

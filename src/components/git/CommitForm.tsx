@@ -1,13 +1,17 @@
 import { useMemo } from "react";
 import type { ChangeEvent } from "react";
 import {
+  AlertTriangle,
   GitBranch,
   GitCommitHorizontal,
+  GitMerge,
   Loader2,
   Minus,
   Plus,
+  SkipForward,
+  XCircle,
 } from "lucide-react";
-import type { TreeFile } from "../../lib/api";
+import type { GitOperationKind, TreeFile } from "../../lib/api";
 import {
   stageableFilePaths,
   unstageableFilePaths,
@@ -92,6 +96,7 @@ export function CommitForm({
         commitStagedChanges();
       }}
     >
+      <GitOperationBanner gitWriteActions={gitWriteActions} />
       <header className="commit-form-header">
         <div className="commit-form-branch">
           <GitBranch size={13} />
@@ -181,6 +186,103 @@ export function CommitForm({
       </footer>
     </form>
   );
+}
+
+function GitOperationBanner({
+  gitWriteActions,
+}: {
+  readonly gitWriteActions: GitWriteActions;
+}) {
+  const state = gitWriteActions.gitOperationState;
+  if (!state?.kind) {
+    return null;
+  }
+
+  const pending = gitWriteActions.gitOperationPending;
+  const pendingTitle = gitWriteActions.gitWritePendingReason;
+  const continueDisabled =
+    pending ||
+    Boolean(pendingTitle) ||
+    !state.canContinue ||
+    state.conflictCount > 0;
+  const abortDisabled = pending || Boolean(pendingTitle) || !state.canAbort;
+  const skipDisabled = pending || Boolean(pendingTitle) || !state.canSkip;
+  const continueTitle =
+    state.conflictCount > 0
+      ? "Resolve and stage conflicted files before continuing."
+      : pendingTitle ?? `Continue ${gitOperationLabel(state.kind)}`;
+
+  return (
+    <section className="git-operation-banner" aria-label="Git operation">
+      <div className="git-operation-banner-main">
+        <GitMerge size={14} />
+        <span>
+          {gitOperationLabel(state.kind)}
+          {state.conflictCount > 0 ? (
+            <strong>{state.conflictCount} conflicted</strong>
+          ) : (
+            <strong>ready</strong>
+          )}
+        </span>
+      </div>
+      <div className="git-operation-actions">
+        <button
+          type="button"
+          className="git-operation-button primary"
+          disabled={continueDisabled}
+          title={continueTitle}
+          onClick={() => {
+            void gitWriteActions.continueGitOperationInProgress();
+          }}
+        >
+          {pending ? <Loader2 className="spin" size={12} /> : <AlertTriangle size={12} />}
+          <span>Continue</span>
+        </button>
+        <button
+          type="button"
+          className="git-operation-button"
+          disabled={skipDisabled}
+          title={pendingTitle ?? `Skip ${gitOperationLabel(state.kind)}`}
+          onClick={() => {
+            void gitWriteActions.skipGitOperationInProgress();
+          }}
+        >
+          <SkipForward size={12} />
+          <span>Skip</span>
+        </button>
+        <button
+          type="button"
+          className="git-operation-button danger"
+          disabled={abortDisabled}
+          title={pendingTitle ?? `Abort ${gitOperationLabel(state.kind)}`}
+          onClick={() => {
+            void gitWriteActions.abortGitOperationInProgress();
+          }}
+        >
+          <XCircle size={12} />
+          <span>Abort</span>
+        </button>
+      </div>
+      {gitWriteActions.gitOperationError ? (
+        <span className="git-operation-error" role="alert">
+          {gitWriteActions.gitOperationError}
+        </span>
+      ) : null}
+    </section>
+  );
+}
+
+function gitOperationLabel(kind: GitOperationKind): string {
+  switch (kind) {
+    case "cherryPick":
+      return "cherry-pick";
+    case "merge":
+      return "merge";
+    case "rebase":
+      return "rebase";
+    case "revert":
+      return "revert";
+  }
 }
 
 function countUnstagedFiles(files: readonly TreeFile[]): number {

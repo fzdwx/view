@@ -133,7 +133,7 @@ export function railSideHasIcons(railLayout: RailLayout, side: RailSide): boolea
 export function gitPanelLabel(panelId: GitPanelId): string {
   switch (panelId) {
     case "branches":
-      return "Branches";
+      return "Repository";
     case "history":
       return "History";
     case "details":

@@ -3353,6 +3353,7 @@ body.is-resizing-y .rail-bottom-panels {
   height: 34px;
   min-height: 32px;
   width: 100%;
+  contain: layout style;
   will-change: transform;
 }
 
@@ -3387,6 +3388,7 @@ body.is-resizing-y .rail-bottom-panels {
   outline: 0;
   padding: 0;
   text-align: left;
+  contain: layout paint style;
   user-select: none;
 }
 
@@ -3455,6 +3457,7 @@ body.is-resizing-y .rail-bottom-panels {
   justify-items: start;
   border-right: 1px solid color-mix(in oklch, var(--line) 80%, transparent);
   background: var(--surface-sidebar);
+  contain: layout paint style;
   overflow: hidden;
 }
 
@@ -3500,6 +3503,7 @@ body.is-resizing-y .rail-bottom-panels {
   outline: 0;
   padding: 0;
   text-align: left;
+  contain: layout paint style;
   user-select: none;
 }
 
@@ -3733,8 +3737,398 @@ body.is-resizing-y .rail-bottom-panels {
 .branch-tree {
   display: grid;
   height: 100%;
+  min-height: 0;
   grid-template-rows: 42px minmax(0, 1fr);
   background: var(--surface-0);
+}
+
+.branch-panel-content {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  background: var(--surface-0);
+}
+
+.repository-refs-panel {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--surface-0);
+}
+
+.repository-section-label {
+  display: flex;
+  height: 22px;
+  align-items: center;
+  border-bottom: 1px solid color-mix(in oklch, var(--line) 74%, transparent);
+  background: color-mix(in oklch, var(--surface-sidebar) 86%, var(--surface-0));
+  color: var(--faint);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 0 8px;
+  text-transform: uppercase;
+}
+
+.worktree-list {
+  display: grid;
+  min-width: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-sidebar);
+  contain: layout paint style;
+}
+
+.worktree-list-header {
+  display: grid;
+  height: 30px;
+  grid-template-columns: minmax(0, 1fr) auto 24px 24px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+}
+
+.worktree-list-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.worktree-list-toggle,
+.stash-list-toggle {
+  display: grid;
+  height: 22px;
+  min-width: 0;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 4px 0 0;
+  text-align: left;
+}
+
+.worktree-list-toggle:hover,
+.worktree-list-toggle:focus-visible,
+.stash-list-toggle:hover,
+.stash-list-toggle:focus-visible {
+  background: var(--surface-2);
+  color: var(--ink);
+  outline: 0;
+}
+
+.worktree-list-toggle:hover .worktree-list-title,
+.worktree-list-toggle:focus-visible .worktree-list-title,
+.stash-list-toggle:hover .stash-list-title,
+.stash-list-toggle:focus-visible .stash-list-title {
+  color: var(--ink);
+}
+
+.worktree-list-count {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.worktree-icon-button,
+.worktree-remove-button {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.worktree-icon-button:hover:not(:disabled),
+.worktree-remove-button:hover:not(:disabled) {
+  border-color: var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.worktree-icon-button:disabled,
+.worktree-remove-button:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+.worktree-list-body {
+  display: grid;
+  max-height: 120px;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 6px 6px;
+  scrollbar-gutter: stable;
+}
+
+.worktree-row {
+  display: grid;
+  height: 28px;
+  min-height: 28px;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 2px;
+  contain: layout paint style;
+}
+
+.worktree-switch-button {
+  display: grid;
+  height: 26px;
+  min-width: 0;
+  grid-template-columns: 16px minmax(0, 1fr) minmax(0, auto);
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  padding: 0 6px;
+  text-align: left;
+}
+
+.worktree-switch-button:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.worktree-row.active .worktree-switch-button {
+  border-color: color-mix(in oklch, var(--accent) 32%, var(--line));
+  background: color-mix(in oklch, var(--accent) 12%, var(--surface-2));
+}
+
+.worktree-branch,
+.worktree-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-branch {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.worktree-path {
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.worktree-remove-button {
+  color: var(--faint);
+}
+
+.worktree-remove-button:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.stash-list {
+  display: grid;
+  min-width: 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-sidebar);
+  contain: layout paint style;
+}
+
+.stash-list-header {
+  display: grid;
+  height: 30px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+}
+
+.stash-list-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.stash-list-count {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.stash-primary-button {
+  display: inline-flex;
+  height: 22px;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 11px;
+  padding: 0 7px;
+}
+
+.stash-primary-button:hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--accent) 42%, var(--line));
+  background: color-mix(in oklch, var(--accent) 12%, var(--surface-2));
+}
+
+.stash-primary-button:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+.stash-list-body {
+  display: grid;
+  max-height: 112px;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 6px 6px;
+  scrollbar-gutter: stable;
+}
+
+.stash-row {
+  display: grid;
+  height: 32px;
+  min-height: 32px;
+  grid-template-columns: minmax(0, 1fr) 24px 24px 24px;
+  align-items: center;
+  gap: 2px;
+  contain: layout paint style;
+}
+
+.stash-select-button {
+  display: grid;
+  height: 30px;
+  min-width: 0;
+  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-rows: 15px 13px;
+  align-items: center;
+  column-gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  padding: 0 6px;
+  text-align: left;
+}
+
+.stash-select-button svg {
+  grid-row: 1 / span 2;
+}
+
+.stash-select-button:hover {
+  background: var(--surface-2);
+}
+
+.stash-row.active .stash-select-button {
+  border-color: color-mix(in oklch, var(--accent) 32%, var(--line));
+  background: color-mix(in oklch, var(--accent) 12%, var(--surface-2));
+}
+
+.stash-message,
+.stash-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stash-message {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.stash-meta {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.stash-icon-button {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.stash-icon-button:hover:not(:disabled) {
+  border-color: var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.stash-icon-button.danger:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.stash-icon-button:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+.stash-empty,
+.stash-error,
+.stash-diff-empty {
+  color: var(--muted);
+  font-size: 11px;
+  padding: 6px 8px;
+}
+
+.stash-error {
+  color: var(--danger);
+}
+
+.stash-diff-box {
+  min-width: 0;
+  border-top: 1px solid var(--line);
+  contain: layout paint style;
+}
+
+.stash-diff-header {
+  display: flex;
+  height: 24px;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 0 8px;
+}
+
+.stash-diff-preview {
+  max-height: 138px;
+  min-width: 0;
+  overflow: auto;
+  margin: 0;
+  border-top: 1px solid var(--line);
+  background: var(--surface-0);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.45;
+  padding: 8px;
+  text-rendering: auto;
+  white-space: pre;
 }
 
 .branch-scroll,
@@ -4138,7 +4532,7 @@ body.is-resizing-y .rail-bottom-panels {
 
 .commit-form {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
   height: 100%;
@@ -4147,6 +4541,98 @@ body.is-resizing-y .rail-bottom-panels {
   text-rendering: auto;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: auto;
+}
+
+.git-operation-banner {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid color-mix(in oklch, var(--warning) 38%, var(--line));
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--warning) 10%, var(--surface-1));
+  padding: 6px;
+}
+
+.git-operation-banner-main {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+  font-size: 12px;
+  text-transform: capitalize;
+}
+
+.git-operation-banner-main span {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-operation-banner-main strong {
+  color: var(--warning);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: none;
+}
+
+.git-operation-actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.git-operation-button {
+  display: inline-flex;
+  height: 22px;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 11px;
+  padding: 0 7px;
+  white-space: nowrap;
+}
+
+.git-operation-button:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--surface-3);
+  color: var(--ink);
+}
+
+.git-operation-button.primary:not(:disabled) {
+  border-color: color-mix(in oklch, var(--success) 40%, var(--line));
+  color: var(--success);
+}
+
+.git-operation-button.danger:not(:disabled) {
+  border-color: color-mix(in oklch, var(--danger) 36%, var(--line));
+  color: var(--danger);
+}
+
+.git-operation-button:disabled {
+  color: var(--faint);
+}
+
+.git-operation-error {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--danger);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .commit-form-header {
@@ -6036,6 +6522,43 @@ body.is-resizing-y .rail-bottom-panels {
   user-select: text;
 }
 
+.terminal-command-status {
+  position: absolute;
+  z-index: 2;
+  top: 5px;
+  right: 7px;
+  display: inline-flex;
+  max-width: 120px;
+  height: 18px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: color-mix(in oklch, var(--surface-0) 88%, transparent);
+  color: var(--muted);
+  font-family: var(--system-font);
+  font-size: 10px;
+  line-height: 1;
+  padding: 0 6px;
+  pointer-events: none;
+}
+
+.terminal-command-status span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-command-status-running {
+  border-color: color-mix(in oklch, var(--accent) 36%, var(--line));
+  color: var(--accent-strong);
+}
+
+.terminal-command-status-finished {
+  border-color: color-mix(in oklch, var(--success) 34%, var(--line));
+  color: var(--success);
+}
+
 .terminal-output ::selection {
   background: color-mix(in oklch, var(--accent) 38%, transparent);
   color: var(--ink);
@@ -6073,6 +6596,35 @@ body.is-resizing-y .rail-bottom-panels {
   white-space: pre;
   overflow: hidden;
   vertical-align: top;
+}
+
+body.is-resizing-x .terminal-screen,
+body.is-resizing-y .terminal-screen {
+  overflow-anchor: none;
+  pointer-events: none;
+}
+
+body.is-resizing-x .terminal-output,
+body.is-resizing-y .terminal-output,
+body.is-resizing-x .terminal-line,
+body.is-resizing-y .terminal-line,
+body.is-resizing-x .terminal-run,
+body.is-resizing-y .terminal-run,
+body.is-resizing-x .terminal-cell,
+body.is-resizing-y .terminal-cell {
+  contain: layout paint style;
+}
+
+body.is-resizing-x .terminal-cursor,
+body.is-resizing-y .terminal-cursor,
+body.is-resizing-x .terminal-bell-flash,
+body.is-resizing-y .terminal-bell-flash {
+  animation: none;
+}
+
+body.is-resizing-x .terminal-scrollback-button,
+body.is-resizing-y .terminal-scrollback-button {
+  display: none;
 }
 
 .terminal-box-cell {
@@ -6157,6 +6709,25 @@ body.is-resizing-y .rail-bottom-panels {
 .terminal-hyperlink:hover,
 .terminal-hyperlink:focus-visible {
   color: var(--accent-strong);
+}
+
+.terminal-internal-link {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklch, currentColor 68%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.terminal-internal-link:hover,
+.terminal-internal-link:focus-visible {
+  color: var(--accent-strong);
+  outline: 0;
 }
 
 .terminal-fg-black {

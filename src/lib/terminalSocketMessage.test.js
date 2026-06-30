@@ -28,6 +28,34 @@ describe("terminalSocketMessage", () => {
     });
   });
 
+  test("parses terminal OSC command status and cwd metadata", () => {
+    const message = parseTerminalSocketMessage(JSON.stringify({
+      type: "frame",
+      title: "shell",
+      cwd: "/repo",
+      oscCwd: "/repo",
+      commandStatus: { phase: "finished", exitCode: 2 },
+      rows: 1,
+      cols: 20,
+      displayOffset: 0,
+      lineOffset: 0,
+      historySize: 0,
+      cursorRow: 0,
+      cursorCol: 0,
+      cursorVisible: true,
+      cursorShape: "block",
+      modes: {},
+      lines: [{ cells: [] }],
+    }));
+
+    expect(message).toMatchObject({
+      type: "frame",
+      cwd: "/repo",
+      oscCwd: "/repo",
+      commandStatus: { phase: "finished", exitCode: 2 },
+    });
+  });
+
   test("defaults scrollback window fields for older terminal frames", () => {
     const message = parseTerminalSocketMessage(JSON.stringify({
       type: "frame",

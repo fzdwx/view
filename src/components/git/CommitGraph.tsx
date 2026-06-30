@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { memo } from "react";
 import type { CommitGraphRow } from "../../lib/commitGraph";
 import {
   COMMIT_GRAPH_LANE_GAP,
@@ -17,7 +18,11 @@ const graphColor = (colorKey: string) =>
     "--commit-graph-color": commitGraphColor(colorKey),
   }) as CSSProperties;
 
-export function CommitGraph({ row }: { row: CommitGraphRow }) {
+export const CommitGraph = memo(function CommitGraph({
+  row,
+}: {
+  readonly row: CommitGraphRow;
+}) {
   const width = getCommitGraphWidth(row.laneCount);
   const height = COMMIT_GRAPH_ROW_HEIGHT;
   const dotX = laneX(row.lane);
@@ -120,7 +125,9 @@ export function CommitGraph({ row }: { row: CommitGraphRow }) {
       </svg>
     </span>
   );
-}
+});
+
+CommitGraph.displayName = "CommitGraph";
 
 function commitGraphCurvePath(
   sourceX: number,

@@ -6,7 +6,6 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   type CommitInfo,
-  type FileBlameLine,
   type FileSearchResult,
   type GitStatus,
   type ReflogEntry,
@@ -14,8 +13,6 @@ import {
   type TreeFile,
   getChangedFiles,
   getCommits,
-  getFileBlame,
-  getFileDiff,
   getProjectFiles,
   getReflog,
   loadRepository,
@@ -24,38 +21,8 @@ import {
   searchSymbolReferences,
 } from "../lib/api";
 import type { CommandPanelMode } from "./useCommandPanel";
-import {
-  countDiffStats,
-  filterDiffFiles,
-  parseRepositoryDiff,
-  type ParsedRepositoryDiff,
-} from "../lib/diff";
-import { buildEditorGitMarkers } from "../lib/editorGitMarkers";
-import type { EditorGitMarker } from "../lib/editorTypes";
-import { isChangedFileStatus } from "../lib/gitStatus";
-import type { PreviewMode } from "../lib/previewTabs";
 import { requireQueryInput } from "../lib/queryInput";
 import { treeFilesSignature } from "../lib/treeFileIdentity";
-
-export interface LoadedFileDiff {
-  readonly rootPath: string;
-  readonly commit: string | null;
-  readonly filePath: string;
-  readonly diff: string;
-}
-
-export interface LoadedWorktreeFileDiff {
-  readonly rootPath: string;
-  readonly filePath: string;
-  readonly status: GitStatus;
-  readonly diff: string;
-}
-
-export interface LoadedFileBlame {
-  readonly rootPath: string;
-  readonly filePath: string;
-  readonly lines: FileBlameLine[];
-}
 
 export interface RepositoryProjectDataOptions {
   readonly activeBranchRef: string | null;
@@ -90,30 +57,6 @@ export interface RepositoryProjectData {
   readonly selectedProjectFile: TreeFile | null;
   readonly selectedProjectStatus: GitStatus | null;
   readonly worktreeChangedFiles: TreeFile[];
-}
-
-export interface RepositoryPreviewDataOptions {
-  readonly activeCommit: string | null;
-  readonly activeProjectPath: string | null;
-  readonly fileContentReady: boolean;
-  readonly hasGitRepository: boolean;
-  readonly previewMode: PreviewMode;
-  readonly selectedChangePath: string | null;
-  readonly selectedProjectPath: string | null;
-  readonly selectedProjectStatus: GitStatus | null;
-}
-
-export interface RepositoryPreviewData {
-  readonly currentFileBlame: FileBlameLine[];
-  readonly currentFileDiff: LoadedFileDiff | null;
-  readonly currentWorktreeFileDiff: string;
-  readonly diffStats: ReturnType<typeof countDiffStats>;
-  readonly editorGitMarkers: EditorGitMarker[];
-  readonly fileBlameQuery: UseQueryResult<LoadedFileBlame, Error>;
-  readonly fileDiffQuery: UseQueryResult<LoadedFileDiff, Error>;
-  readonly fileWorktreeDiffQuery: UseQueryResult<LoadedWorktreeFileDiff, Error>;
-  readonly parsedDiff: ParsedRepositoryDiff;
-  readonly visibleDiffFiles: ParsedRepositoryDiff["files"];
 }
 
 export function useRepositoryProjectData({
@@ -450,171 +393,5 @@ function reflogEntryToCommitInfo(entry: ReflogEntry): CommitInfo {
     date: entry.date,
     subject: entry.subject || entry.action,
     tracking: null,
-  };
-}
-
-export function useRepositoryPreviewData({
-  activeCommit,
-  activeProjectPath,
-  fileContentReady,
-  hasGitRepository,
-  previewMode,
-  selectedChangePath,
-  selectedProjectPath,
-  selectedProjectStatus,
-}: RepositoryPreviewDataOptions): RepositoryPreviewData {
-  const canLoadFilePreviewMetadata = Boolean(
-    hasGitRepository &&
-    activeProjectPath &&
-      selectedProjectPath &&
-      previewMode === "file" &&
-      fileContentReady,
-  );
-  // The whole query object is returned to consumers (App.tsx) that read many
-  // fields (data/isFetching/isError/refetch/isPlaceholderData), so it must be
-  // held as one value per the rule's own false-positive guidance.
-  // oxlint-disable-next-line react-doctor/query-destructure-result
-  const fileBlameQuery = useQuery({
-    queryKey: ["file-blame", activeProjectPath, selectedProjectPath],
-    queryFn: async () => {
-      const rootPath = requireQueryInput(activeProjectPath, "file blame path");
-      const filePath = requireQueryInput(
-        selectedProjectPath,
-        "file blame file path",
-      );
-
-      return {
-        rootPath,
-        filePath,
-        lines: await getFileBlame(rootPath, filePath),
-      };
-    },
-    enabled: canLoadFilePreviewMetadata,
-    placeholderData: keepPreviousData,
-    retry: false,
-  });
-
-  // The whole query object is returned to consumers (App.tsx) that read many
-  // fields (data/isFetching/isError/refetch/isPlaceholderData), so it must be
-  // held as one value per the rule's own false-positive guidance.
-  // oxlint-disable-next-line react-doctor/query-destructure-result
-  const fileDiffQuery = useQuery({
-    queryKey: [
-      "file-diff",
-      activeProjectPath,
-      activeCommit,
-      selectedChangePath,
-    ],
-    queryFn: async () => {
-      const rootPath = requireQueryInput(activeProjectPath, "file diff path");
-      const commit = activeCommit ?? null;
-      const filePath = requireQueryInput(
-        selectedChangePath,
-        "file diff file path",
-      );
-
-      return {
-        rootPath,
-        commit,
-        filePath,
-        diff: await getFileDiff(rootPath, filePath, commit),
-      };
-    },
-    enabled: Boolean(
-      hasGitRepository &&
-        activeProjectPath &&
-        selectedChangePath &&
-        previewMode === "diff",
-    ),
-    placeholderData: keepPreviousData,
-    retry: false,
-  });
-
-  // The whole query object is returned to consumers (App.tsx) that read many
-  // fields (data/isFetching/isError/refetch/isPlaceholderData), so it must be
-  // held as one value per the rule's own false-positive guidance.
-  // oxlint-disable-next-line react-doctor/query-destructure-result
-  const fileWorktreeDiffQuery = useQuery({
-    queryKey: [
-      "file-worktree-diff",
-      activeProjectPath,
-      selectedProjectPath,
-      selectedProjectStatus,
-    ],
-    queryFn: async () => {
-      const rootPath = requireQueryInput(
-        activeProjectPath,
-        "file worktree diff path",
-      );
-      const filePath = requireQueryInput(
-        selectedProjectPath,
-        "file worktree diff file path",
-      );
-      const status = requireQueryInput(
-        selectedProjectStatus,
-        "file worktree diff status",
-      );
-
-      return {
-        rootPath,
-        filePath,
-        status,
-        diff: await getFileDiff(rootPath, filePath, null),
-      };
-    },
-    enabled:
-      canLoadFilePreviewMetadata &&
-      Boolean(
-        selectedProjectStatus && isChangedFileStatus(selectedProjectStatus),
-      ),
-    placeholderData: keepPreviousData,
-    retry: false,
-  });
-
-  const currentFileDiff =
-    fileDiffQuery.data?.rootPath === activeProjectPath &&
-    fileDiffQuery.data?.commit === (activeCommit ?? null) &&
-    fileDiffQuery.data?.filePath === selectedChangePath
-      ? fileDiffQuery.data
-      : null;
-  const currentFileBlame =
-    fileBlameQuery.data?.rootPath === activeProjectPath &&
-    fileBlameQuery.data?.filePath === selectedProjectPath
-      ? fileBlameQuery.data.lines
-      : [];
-  const currentWorktreeFileDiff =
-    fileWorktreeDiffQuery.data?.rootPath === activeProjectPath &&
-    fileWorktreeDiffQuery.data?.filePath === selectedProjectPath &&
-    fileWorktreeDiffQuery.data?.status === selectedProjectStatus
-      ? fileWorktreeDiffQuery.data.diff
-      : "";
-  const editorGitMarkers = useMemo(
-    () => buildEditorGitMarkers(currentWorktreeFileDiff),
-    [currentWorktreeFileDiff],
-  );
-  const parsedDiff = useMemo(
-    () => parseRepositoryDiff(currentFileDiff?.diff ?? ""),
-    [currentFileDiff?.diff],
-  );
-  const visibleDiffFiles = useMemo(
-    () => filterDiffFiles(parsedDiff.files, selectedChangePath),
-    [parsedDiff.files, selectedChangePath],
-  );
-  const diffStats = useMemo(
-    () => countDiffStats(visibleDiffFiles),
-    [visibleDiffFiles],
-  );
-
-  return {
-    currentFileBlame,
-    currentFileDiff,
-    currentWorktreeFileDiff,
-    diffStats,
-    editorGitMarkers,
-    fileBlameQuery,
-    fileDiffQuery,
-    fileWorktreeDiffQuery,
-    parsedDiff,
-    visibleDiffFiles,
   };
 }
