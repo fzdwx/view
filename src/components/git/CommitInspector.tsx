@@ -1,8 +1,32 @@
-import { memo, useCallback, useLayoutEffect, useMemo, useRef } from "react";
-import { GitBranch, RotateCcw } from "lucide-react";
+import {
+  memo,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  type ReactNode,
+} from "react";
+import {
+  Copy,
+  GitBranch,
+  GitCompare,
+  GitFork,
+  RotateCcw,
+  ShieldCheck,
+  ShieldQuestionMark,
+  Tags,
+} from "lucide-react";
 import type { CommitInfo, ReflogEntry, RepositoryPayload } from "../../lib/api";
+import {
+  commitCompareLabel,
+  commitDetailsCopyText,
+  commitParentLabels,
+  commitRefLabel,
+  commitSignatureLabel,
+} from "../../lib/commitDetails";
 import { formatDate } from "../../lib/dateFormat";
 import { clamp } from "../../lib/numeric";
+import { useCommitDetails } from "../../hooks/useCommitDetails";
 import { ResizeHandle } from "../ResizeHandle";
 import { TreePanel } from "../TreePanel";
 import type { TreeGitFileActions } from "../TreeContextMenu";
@@ -14,6 +38,7 @@ const maxCommitDetailHeight = 360;
 
 export function CommitInspector({
   commit,
+  projectPath,
   branchName,
   detailHeight,
   files,
@@ -28,6 +53,7 @@ export function CommitInspector({
   onSelectPath,
 }: {
   commit: CommitInfo | null;
+  projectPath: string | null;
   branchName?: string;
   detailHeight: number;
   files: RepositoryPayload["files"];
@@ -127,6 +153,7 @@ export function CommitInspector({
         gitFileActions={gitFileActions}
         gitWriteActions={gitWriteActions}
         historyMode={historyMode}
+        projectPath={projectPath}
         selectedReflogEntry={selectedReflogEntry}
         showCommitForm={showCommitForm}
       />
@@ -165,6 +192,7 @@ const CommitDetails = memo(function CommitDetails({
   gitFileActions,
   gitWriteActions,
   historyMode,
+  projectPath,
   selectedReflogEntry,
   showCommitForm,
 }: {
@@ -174,9 +202,32 @@ const CommitDetails = memo(function CommitDetails({
   gitFileActions?: TreeGitFileActions;
   gitWriteActions: GitWriteActions;
   historyMode: "commits" | "reflog";
+  projectPath: string | null;
   selectedReflogEntry: ReflogEntry | null;
   showCommitForm: boolean;
 }) {
+  const { commitDetails, query: commitDetailsQuery } = useCommitDetails(
+    projectPath,
+    commit?.hash ?? null,
+  );
+  const handleCopyHash = useCallback(() => {
+    if (!commit) {
+      return;
+    }
+    const copyText = commitDetails
+      ? commitDetailsCopyText(commitDetails)
+      : commit.hash;
+    void navigator.clipboard?.writeText(copyText).catch(() => undefined);
+  }, [commit, commitDetails]);
+  const handleCopyCompareRange = useCallback(() => {
+    if (!commitDetails?.compareBase) {
+      return;
+    }
+    void navigator.clipboard
+      ?.writeText(`${commitDetails.compareBase}..${commitDetails.hash}`)
+      .catch(() => undefined);
+  }, [commitDetails]);
+
   if (!commit) {
     if (!showCommitForm) {
       return null;
@@ -197,13 +248,33 @@ const CommitDetails = memo(function CommitDetails({
   const fileCount = files.length;
   const showReflogRestore =
     historyMode === "reflog" && selectedReflogEntry !== null;
+  const parentLabels = commitParentLabels(
+    commitDetails?.parents ?? commit.parents,
+  );
+  const refs = commitDetails?.refs ?? [];
+  const compareLabel = commitDetails
+    ? commitCompareLabel(commitDetails)
+    : null;
+  const signatureLabel = commitDetails
+    ? commitSignatureLabel(commitDetails.signature)
+    : null;
+  const hasCommitBody = Boolean(commitDetails?.body.trim());
 
   return (
     <section className="commit-details-section">
       <div className="commit-detail-body">
         <div className="commit-detail-heading">
           <span className="commit-detail-subject">{commit.subject}</span>
-          <span className="commit-detail-hash mono-value">{commit.shortHash}</span>
+          <button
+            type="button"
+            className="commit-detail-hash commit-detail-hash-button mono-value"
+            title="Copy full commit hash"
+            aria-label="Copy full commit hash"
+            onClick={handleCopyHash}
+          >
+            <Copy size={12} />
+            <span>{commit.shortHash}</span>
+          </button>
         </div>
         <div className="commit-detail-meta">
           <span>{commit.author}</span>
@@ -230,9 +301,80 @@ const CommitDetails = memo(function CommitDetails({
         <div className="commit-detail-line muted">
           <span>{fileCount} changed {fileCount === 1 ? "file" : "files"}</span>
         </div>
+        {commitDetailsQuery.isError ? (
+          <div className="commit-detail-line muted">
+            <span>Commit details unavailable</span>
+          </div>
+        ) : commitDetailsQuery.isFetching && !commitDetails ? (
+          <div className="commit-detail-line muted">
+            <span>Loading commit details...</span>
+          </div>
+        ) : null}
+        {hasCommitBody ? (
+          <pre className="commit-detail-message">{commitDetails?.body}</pre>
+        ) : null}
+        {parentLabels.length > 0 ? (
+          <DetailChipRow icon={<GitFork size={13} />} label="Parents">
+            {parentLabels.map((parent) => (
+              <span key={parent} className="compact-detail-pill mono-value">
+                {parent}
+              </span>
+            ))}
+          </DetailChipRow>
+        ) : null}
+        {refs.length > 0 ? (
+          <DetailChipRow icon={<Tags size={13} />} label="Refs">
+            {refs.map((ref) => (
+              <span key={ref} className="compact-detail-chip mono-value">
+                <span>{commitRefLabel(ref)}</span>
+              </span>
+            ))}
+          </DetailChipRow>
+        ) : null}
+        {signatureLabel ? (
+          <div className="commit-detail-line muted">
+            {commitDetails?.signature.status === "valid" ? (
+              <ShieldCheck size={13} />
+            ) : (
+              <ShieldQuestionMark size={13} />
+            )}
+            <span>{signatureLabel}</span>
+          </div>
+        ) : null}
+        {compareLabel && commitDetails?.compareBase ? (
+          <button
+            type="button"
+            className="commit-detail-compare-button"
+            title="Copy compare range"
+            onClick={handleCopyCompareRange}
+          >
+            <GitCompare size={13} />
+            <span>{compareLabel}</span>
+          </button>
+        ) : null}
       </div>
     </section>
   );
 });
 
 CommitDetails.displayName = "CommitDetails";
+
+function DetailChipRow({
+  children,
+  icon,
+  label,
+}: {
+  readonly children: ReactNode;
+  readonly icon: ReactNode;
+  readonly label: string;
+}) {
+  return (
+    <div className="commit-detail-chip-row">
+      <span className="commit-detail-chip-row-label">
+        {icon}
+        <span>{label}</span>
+      </span>
+      <span className="commit-detail-chip-row-values">{children}</span>
+    </div>
+  );
+}

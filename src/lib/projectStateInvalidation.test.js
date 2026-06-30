@@ -58,6 +58,7 @@ describe("buildProjectStateRefreshPlan", () => {
     expect(plan.result).toBe("changed");
     expect(queryKeyNames(plan.invalidateKeys)).toEqual([
       "repository",
+      "commit-details",
       "commits",
       "reflog",
       "project-files",

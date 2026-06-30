@@ -129,6 +129,7 @@ export const WorkbenchRailSlotStack = memo(
               ) : (
                 <CommitInspector
                   commit={null}
+                  projectPath={activeProjectPath}
                   orientation={isBottomSlot ? "horizontal" : "vertical"}
                   showCommitForm
                   branchName={selectedGitRefName(

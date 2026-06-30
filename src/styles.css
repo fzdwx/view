@@ -4578,6 +4578,7 @@ body.is-resizing-y .rail-bottom-panels {
   display: inline-flex;
   height: 23px;
   align-items: center;
+  gap: 5px;
   border: 1px solid var(--line-strong);
   border-radius: 5px;
   background: var(--surface-2);
@@ -4585,6 +4586,15 @@ body.is-resizing-y .rail-bottom-panels {
   font-size: 11px;
   font-weight: 500;
   padding: 0 7px;
+}
+
+.commit-detail-hash-button {
+  cursor: pointer;
+}
+
+.commit-detail-hash-button:hover {
+  border-color: color-mix(in oklch, var(--accent) 40%, var(--line-strong));
+  color: var(--ink);
 }
 
 .commit-detail-meta {
@@ -4630,6 +4640,77 @@ body.is-resizing-y .rail-bottom-panels {
 .commit-detail-line strong {
   color: var(--ink);
   font-weight: 500;
+}
+
+.commit-detail-message {
+  min-width: 0;
+  max-height: 92px;
+  overflow: auto;
+  border: 1px solid color-mix(in oklch, var(--line) 82%, transparent);
+  border-radius: 5px;
+  background: var(--surface-0);
+  color: var(--muted);
+  font-family: var(--app-font-family);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+  padding: 8px 9px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.commit-detail-chip-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.commit-detail-chip-row-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.commit-detail-chip-row-values {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.commit-detail-compare-button {
+  display: inline-flex;
+  min-width: 0;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid color-mix(in oklch, var(--accent) 30%, var(--line));
+  border-radius: 5px;
+  background: color-mix(in oklch, var(--accent) 9%, var(--surface-0));
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 8px;
+}
+
+.commit-detail-compare-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commit-detail-compare-button:hover {
+  border-color: color-mix(in oklch, var(--accent) 55%, var(--line));
+  background: color-mix(in oklch, var(--accent) 14%, var(--surface-0));
 }
 
 .commit-reflog-meta {

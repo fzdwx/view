@@ -415,6 +415,7 @@ export const GitPanelBody = memo(function GitPanelBody({
         <CommitInspector
           branchName={selectedGitRefName(payload, selectedBranchRef)}
           commit={selectedCommit}
+          projectPath={activeProjectPath}
           files={changedFiles}
           gitFileActions={gitFileActions}
           gitWriteActions={gitWriteActions}

@@ -113,6 +113,22 @@ export interface CommitInfo {
   readonly tracking: CommitTrackingInfo | null;
 }
 
+export interface CommitSignature {
+  readonly status: "valid" | "unsigned" | "unknown" | string;
+  readonly summary: string;
+}
+
+export interface CommitDetails {
+  readonly hash: string;
+  readonly subject: string;
+  readonly body: string;
+  readonly message: string;
+  readonly parents: string[];
+  readonly refs: string[];
+  readonly signature: CommitSignature;
+  readonly compareBase: string | null;
+}
+
 export interface ReflogEntry {
   selector: string;
   hash: string;
@@ -297,6 +313,8 @@ export interface CommitHashRequest {
   readonly commit: string;
 }
 
+export interface GetCommitDetailsRequest extends CommitHashRequest {}
+
 export interface AmendCommitRequest {
   readonly path: string;
   readonly message?: string | null;
@@ -444,6 +462,12 @@ export async function getCommits(
     branch: branch ?? null,
     filter: filter ?? null,
   });
+}
+
+export async function getCommitDetails(
+  request: GetCommitDetailsRequest,
+): Promise<CommitDetails> {
+  return apiInvoke<CommitDetails>("get_commit_details", { request });
 }
 
 export async function getReflog(

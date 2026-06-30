@@ -6,6 +6,7 @@ import {
 
 const durableProjectStateQueryRoots = [
   "changed-files",
+  "commit-details",
   "commits",
   "git-operation-state",
   "project-files",

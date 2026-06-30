@@ -57,6 +57,7 @@ export function buildProjectStateRefreshPlan({
   }
 
   if (historyChanged) {
+    invalidateKeys.push(["commit-details", projectPath]);
     invalidateKeys.push(["commits", projectPath]);
     invalidateKeys.push(["reflog", projectPath]);
   }

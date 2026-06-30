@@ -41,6 +41,7 @@ use unicode_width::UnicodeWidthStr;
 mod clipboard_paste;
 mod code_search;
 mod git_commit_push;
+mod git_commit_details;
 mod git_history_ops;
 mod git_tag;
 #[cfg(test)]
@@ -7306,6 +7307,7 @@ pub fn run() {
             git_commit_push::create_commit,
             git_commit_push::push_current_branch,
             git_commit_push::reset_hard_to_reflog,
+            git_commit_details::get_commit_details,
             git_history_ops::cherry_pick_commit,
             git_history_ops::revert_commit,
             git_history_ops::amend_commit,
