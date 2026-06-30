@@ -1,6 +1,8 @@
 use super::{
-    cherry_pick_commit as async_cherry_pick_commit, revert_commit as async_revert_commit,
-    CommitHashRequest,
+    amend_commit as async_amend_commit, cherry_pick_commit as async_cherry_pick_commit,
+    fixup_commit as async_fixup_commit, reword_commit as async_reword_commit,
+    revert_commit as async_revert_commit, squash_commit as async_squash_commit,
+    AmendCommitRequest, CommitHashRequest, RewordCommitRequest,
 };
 use crate::git_write::GitWriteResponse;
 use std::fs;
@@ -16,10 +18,41 @@ fn revert_commit(request: CommitHashRequest) -> Result<GitWriteResponse, String>
     tauri::async_runtime::block_on(async_revert_commit(request))
 }
 
+fn amend_commit(request: AmendCommitRequest) -> Result<GitWriteResponse, String> {
+    tauri::async_runtime::block_on(async_amend_commit(request))
+}
+
+fn fixup_commit(request: CommitHashRequest) -> Result<GitWriteResponse, String> {
+    tauri::async_runtime::block_on(async_fixup_commit(request))
+}
+
+fn reword_commit(request: RewordCommitRequest) -> Result<GitWriteResponse, String> {
+    tauri::async_runtime::block_on(async_reword_commit(request))
+}
+
+fn squash_commit(request: CommitHashRequest) -> Result<GitWriteResponse, String> {
+    tauri::async_runtime::block_on(async_squash_commit(request))
+}
+
 fn commit_request(repo: &std::path::Path, commit: &str) -> CommitHashRequest {
     CommitHashRequest {
         path: repo.to_string_lossy().to_string(),
         commit: commit.to_string(),
+    }
+}
+
+fn amend_request(repo: &std::path::Path, message: Option<&str>) -> AmendCommitRequest {
+    AmendCommitRequest {
+        path: repo.to_string_lossy().to_string(),
+        message: message.map(str::to_string),
+    }
+}
+
+fn reword_request(repo: &std::path::Path, commit: &str, message: &str) -> RewordCommitRequest {
+    RewordCommitRequest {
+        path: repo.to_string_lossy().to_string(),
+        commit: commit.to_string(),
+        message: message.to_string(),
     }
 }
 
@@ -120,6 +153,55 @@ fn revert_commit_creates_inverse_commit_without_opening_editor() {
     assert!(git_head(repo.path()).starts_with(&response.summary.head));
     assert!(response.files.is_empty());
     assert!(run_git(repo.path(), &["log", "-1", "--pretty=%s"]).contains("Revert"));
+}
+
+#[test]
+fn amend_commit_commits_staged_changes_into_head() {
+    let repo = create_repo_with_tracked_file("history-amend");
+    fs::write(repo.path().join("tracked.txt"), "amended\n").expect("modify tracked");
+    run_git(repo.path(), &["add", "tracked.txt"]);
+
+    amend_commit(amend_request(repo.path(), Some("base amended"))).expect("amend");
+
+    assert_eq!(run_git(repo.path(), &["log", "--oneline"]).lines().count(), 1);
+    assert_eq!(run_git(repo.path(), &["log", "-1", "--pretty=%s"]), "base amended");
+    assert_eq!(run_git(repo.path(), &["show", "HEAD:tracked.txt"]), "amended");
+}
+
+#[test]
+fn fixup_commit_creates_fixup_commit_for_target() {
+    let repo = create_repo_with_tracked_file("history-fixup");
+    let target = git_head(repo.path());
+    fs::write(repo.path().join("tracked.txt"), "fixup\n").expect("modify tracked");
+    run_git(repo.path(), &["add", "tracked.txt"]);
+
+    fixup_commit(commit_request(repo.path(), &target)).expect("fixup");
+
+    assert!(run_git(repo.path(), &["log", "-1", "--pretty=%s"]).starts_with("fixup! base"));
+}
+
+#[test]
+fn reword_commit_updates_selected_commit_message() {
+    let repo = create_repo_with_tracked_file("history-reword");
+    let target = git_head(repo.path());
+
+    reword_commit(reword_request(repo.path(), &target, "renamed base")).expect("reword");
+
+    assert_eq!(run_git(repo.path(), &["log", "-1", "--pretty=%s"]), "renamed base");
+}
+
+#[test]
+fn squash_commit_squashes_head_into_parent() {
+    let repo = create_repo_with_tracked_file("history-squash");
+    fs::write(repo.path().join("second.txt"), "second\n").expect("write second");
+    run_git(repo.path(), &["add", "second.txt"]);
+    run_git(repo.path(), &["commit", "-m", "second"]);
+    let head = git_head(repo.path());
+
+    squash_commit(commit_request(repo.path(), &head)).expect("squash");
+
+    assert_eq!(run_git(repo.path(), &["log", "--oneline"]).lines().count(), 1);
+    assert_eq!(run_git(repo.path(), &["show", "HEAD:second.txt"]), "second");
 }
 
 #[test]

@@ -8,14 +8,19 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import {
   abortGitOperation,
+  amendCommit,
   cherryPickCommit,
   continueGitOperation,
   createCommit,
+  fixupCommit,
   getGitOperationState,
+  rewordCommit,
   resetHardToReflog,
   pushCurrentBranch,
   revertCommit,
+  squashCommit,
   skipGitOperation,
+  startInteractiveRebase,
   type BranchInfo,
   type GitOperationState,
   type RepositoryPayload,
@@ -29,6 +34,7 @@ import {
   forceWithLeaseConfirmation,
   publishBranchLabel,
 } from "../lib/remoteActions";
+import { commitEditConfirmation } from "../lib/commitEditActions";
 import {
   commitDirtyDraftWarning,
   commitDisabledReason as commitReason,
@@ -64,6 +70,7 @@ export interface GitWriteActions {
   readonly commitMessage: string;
   readonly commitPending: boolean;
   readonly cherryPickHistoryCommit: (hash: string) => Promise<boolean>;
+  readonly amendStagedChanges: () => Promise<boolean>;
   readonly commitStagedChanges: () => Promise<boolean>;
   readonly commitWarning: string | null;
   readonly conflictCount: number;
@@ -89,7 +96,11 @@ export interface GitWriteActions {
   readonly resetError: string | null;
   readonly resetHardToReflogEntry: (selector: string) => Promise<boolean>;
   readonly resetPending: boolean;
+  readonly fixupHistoryCommit: (hash: string) => Promise<boolean>;
+  readonly rewordHistoryCommit: (hash: string, currentSubject: string) => Promise<boolean>;
   readonly revertHistoryCommit: (hash: string) => Promise<boolean>;
+  readonly squashHistoryCommit: (hash: string) => Promise<boolean>;
+  readonly startInteractiveRebaseFrom: (base: string) => Promise<boolean>;
   readonly setCommitMessage: Dispatch<SetStateAction<string>>;
   readonly skipGitOperationInProgress: () => Promise<boolean>;
   readonly stagedCount: number;
@@ -507,7 +518,7 @@ export function useGitWriteActions({
 
   const runHistoryCommitAction = useCallback(
     async (
-      kind: "cherryPick" | "revert",
+      kind: "cherryPick" | "fixup" | "rebase" | "revert" | "squash",
       commit: string,
       command: (request: {
         readonly path: string;
@@ -609,6 +620,160 @@ export function useGitWriteActions({
         "Revert",
       ),
     [runHistoryCommitAction],
+  );
+
+  const fixupHistoryCommit = useCallback(
+    (hash: string) =>
+      runHistoryCommitAction(
+        "fixup",
+        hash,
+        fixupCommit,
+        (commitLabel) => commitEditConfirmation("fixup", commitLabel),
+        "Fixup",
+      ),
+    [runHistoryCommitAction],
+  );
+
+  const squashHistoryCommit = useCallback(
+    (hash: string) =>
+      runHistoryCommitAction(
+        "squash",
+        hash,
+        squashCommit,
+        (commitLabel) => commitEditConfirmation("squash", commitLabel),
+        "Squash",
+      ),
+    [runHistoryCommitAction],
+  );
+
+  const startInteractiveRebaseFrom = useCallback(
+    (base: string) =>
+      runHistoryCommitAction(
+        "rebase",
+        base,
+        ({ path, commit }) => startInteractiveRebase({ path, base: commit }),
+        (commitLabel) => commitEditConfirmation("rebase", commitLabel),
+        "Start rebase",
+      ),
+    [runHistoryCommitAction],
+  );
+
+  const amendStagedChanges = useCallback(async (): Promise<boolean> => {
+    if (historyOperationDisabledReason) {
+      setHistoryOperationError(historyOperationDisabledReason);
+      await showNativeMessage(historyOperationDisabledReason, { kind: "warning" });
+      return false;
+    }
+    const message = window.prompt("Amend commit message", "");
+    if (message === null) {
+      return false;
+    }
+    const confirmed = await confirmNativeDialog(
+      commitEditConfirmation("amend", "HEAD"),
+      {
+        cancelLabel: "Cancel",
+        kind: "warning",
+        okLabel: "Amend",
+      },
+    );
+    if (!confirmed) {
+      return false;
+    }
+    const operation = {
+      kind: "amend",
+      scope: "repository",
+    } satisfies GitWriteOperation;
+    if (!activeProjectPath || !beginGitWrite(operation)) {
+      return false;
+    }
+    setHistoryOperationError(null);
+    let shouldRefresh = false;
+    try {
+      shouldRefresh = true;
+      await amendCommit({
+        path: activeProjectPath,
+        message: message.trim() || null,
+      });
+      return true;
+    } catch (error) {
+      const errorText = errorMessage(error);
+      setHistoryOperationError(errorText);
+      await showNativeMessage(errorText, { kind: "error" });
+      return false;
+    } finally {
+      if (shouldRefresh) {
+        await refreshProjectFileState(activeProjectPath);
+      }
+      endGitWrite(operation);
+    }
+  }, [
+    activeProjectPath,
+    beginGitWrite,
+    endGitWrite,
+    historyOperationDisabledReason,
+    refreshProjectFileState,
+  ]);
+
+  const rewordHistoryCommit = useCallback(
+    async (hash: string, currentSubject: string): Promise<boolean> => {
+      if (historyOperationDisabledReason) {
+        setHistoryOperationError(historyOperationDisabledReason);
+        await showNativeMessage(historyOperationDisabledReason, { kind: "warning" });
+        return false;
+      }
+      const normalizedCommit = hash.trim();
+      const message = window.prompt("Reword commit", currentSubject);
+      if (!normalizedCommit || message === null || !message.trim()) {
+        return false;
+      }
+      const commitLabel = shortCommitLabel(normalizedCommit);
+      const confirmed = await confirmNativeDialog(
+        commitEditConfirmation("reword", commitLabel),
+        {
+          cancelLabel: "Cancel",
+          kind: "warning",
+          okLabel: "Reword",
+        },
+      );
+      if (!confirmed) {
+        return false;
+      }
+      const operation = {
+        kind: "reword",
+        scope: "repository",
+      } satisfies GitWriteOperation;
+      if (!activeProjectPath || !beginGitWrite(operation)) {
+        return false;
+      }
+      setHistoryOperationError(null);
+      let shouldRefresh = false;
+      try {
+        shouldRefresh = true;
+        await rewordCommit({
+          path: activeProjectPath,
+          commit: normalizedCommit,
+          message: message.trim(),
+        });
+        return true;
+      } catch (error) {
+        const errorText = errorMessage(error);
+        setHistoryOperationError(errorText);
+        await showNativeMessage(errorText, { kind: "error" });
+        return false;
+      } finally {
+        if (shouldRefresh) {
+          await refreshProjectFileState(activeProjectPath);
+        }
+        endGitWrite(operation);
+      }
+    },
+    [
+      activeProjectPath,
+      beginGitWrite,
+      endGitWrite,
+      historyOperationDisabledReason,
+      refreshProjectFileState,
+    ],
   );
 
   const runGitOperationAction = useCallback(
@@ -716,6 +881,7 @@ export function useGitWriteActions({
 
   return {
     abortGitOperationInProgress,
+    amendStagedChanges,
     canCommit: commitDisabledReason === null,
     canPush: pushDisabledReason === null,
     cherryPickHistoryCommit,
@@ -741,7 +907,12 @@ export function useGitWriteActions({
     historyOperationDisabledReason,
     historyOperationError,
     historyOperationPending:
+      pendingGitWriteAction === "amend" ||
       pendingGitWriteAction === "cherryPick" ||
+      pendingGitWriteAction === "fixup" ||
+      pendingGitWriteAction === "rebase" ||
+      pendingGitWriteAction === "reword" ||
+      pendingGitWriteAction === "squash" ||
       pendingGitWriteAction === "revert",
     pendingGitWriteAction,
     publishCurrentBranchToRemote,
@@ -753,7 +924,11 @@ export function useGitWriteActions({
     resetError,
     resetHardToReflogEntry,
     resetPending: pendingGitWriteAction === "reset",
+    fixupHistoryCommit,
+    rewordHistoryCommit,
     revertHistoryCommit,
+    squashHistoryCommit,
+    startInteractiveRebaseFrom,
     setCommitMessage,
     skipGitOperationInProgress,
     stagedCount,

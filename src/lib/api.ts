@@ -297,6 +297,22 @@ export interface CommitHashRequest {
   readonly commit: string;
 }
 
+export interface AmendCommitRequest {
+  readonly path: string;
+  readonly message?: string | null;
+}
+
+export interface RewordCommitRequest {
+  readonly path: string;
+  readonly commit: string;
+  readonly message: string;
+}
+
+export interface StartInteractiveRebaseRequest {
+  readonly path: string;
+  readonly base: string;
+}
+
 export interface StashRequest {
   readonly path: string;
   readonly selector: string;
@@ -833,6 +849,36 @@ export async function revertCommit(
   request: CommitHashRequest,
 ): Promise<GitWriteResponse> {
   return apiInvoke<GitWriteResponse>("revert_commit", { request });
+}
+
+export async function amendCommit(
+  request: AmendCommitRequest,
+): Promise<GitWriteResponse> {
+  return apiInvoke<GitWriteResponse>("amend_commit", { request });
+}
+
+export async function fixupCommit(
+  request: CommitHashRequest,
+): Promise<GitWriteResponse> {
+  return apiInvoke<GitWriteResponse>("fixup_commit", { request });
+}
+
+export async function rewordCommit(
+  request: RewordCommitRequest,
+): Promise<GitWriteResponse> {
+  return apiInvoke<GitWriteResponse>("reword_commit", { request });
+}
+
+export async function squashCommit(
+  request: CommitHashRequest,
+): Promise<GitWriteResponse> {
+  return apiInvoke<GitWriteResponse>("squash_commit", { request });
+}
+
+export async function startInteractiveRebase(
+  request: StartInteractiveRebaseRequest,
+): Promise<GitWriteResponse> {
+  return apiInvoke<GitWriteResponse>("start_interactive_rebase", { request });
 }
 
 export async function createTag(

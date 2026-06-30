@@ -3,14 +3,19 @@ import { useCallback, useRef, useState } from "react";
 export type GitFileActionKind = "restore" | "stage" | "unstage";
 export type GitRepositoryWriteKind =
   | "abort"
+  | "amend"
   | "cherryPick"
   | "commit"
   | "continue"
+  | "fixup"
   | "push"
+  | "rebase"
   | "remote"
   | "reset"
+  | "reword"
   | "revert"
   | "skip"
+  | "squash"
   | "stash"
   | "tag";
 
@@ -92,22 +97,32 @@ function repositoryActionLabel(kind: GitRepositoryWriteKind): string {
   switch (kind) {
     case "abort":
       return "abort";
+    case "amend":
+      return "amend";
     case "cherryPick":
       return "cherry-pick";
     case "commit":
       return "commit";
     case "continue":
       return "continue";
+    case "fixup":
+      return "fixup";
     case "push":
       return "push";
+    case "rebase":
+      return "rebase";
     case "remote":
       return "remote";
     case "reset":
       return "reset";
+    case "reword":
+      return "reword";
     case "revert":
       return "revert";
     case "skip":
       return "skip";
+    case "squash":
+      return "squash";
     case "stash":
       return "stash";
     case "tag":

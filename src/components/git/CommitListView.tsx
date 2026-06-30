@@ -1,6 +1,6 @@
 import { useCallback, type CSSProperties, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { GitCommitHorizontal, Undo2 } from "lucide-react";
+import { GitCommitHorizontal, ListTodo, PenLine, Scissors, Undo2, Wrench } from "lucide-react";
 import type { BranchInfo, CommitInfo } from "../../lib/api";
 import type { CommitGraphRow } from "../../lib/commitGraph";
 import type { GitWriteActions } from "../../hooks/useGitWriteActions";
@@ -109,9 +109,32 @@ export function CommitListView({
               commitMenu.commit.hash,
             );
           }}
+          onAmend={() => {
+            onSetCommitMenu(null);
+            void gitWriteActions.amendStagedChanges();
+          }}
+          onFixup={() => {
+            onSetCommitMenu(null);
+            void gitWriteActions.fixupHistoryCommit(commitMenu.commit.hash);
+          }}
+          onRebase={() => {
+            onSetCommitMenu(null);
+            void gitWriteActions.startInteractiveRebaseFrom(commitMenu.commit.hash);
+          }}
+          onReword={() => {
+            onSetCommitMenu(null);
+            void gitWriteActions.rewordHistoryCommit(
+              commitMenu.commit.hash,
+              commitMenu.commit.subject,
+            );
+          }}
           onRevert={() => {
             onSetCommitMenu(null);
             void gitWriteActions.revertHistoryCommit(commitMenu.commit.hash);
+          }}
+          onSquash={() => {
+            onSetCommitMenu(null);
+            void gitWriteActions.squashHistoryCommit(commitMenu.commit.hash);
           }}
         />
       ) : null}
@@ -126,7 +149,12 @@ function CommitContextMenu({
   left,
   top,
   onCherryPick,
+  onAmend,
+  onFixup,
+  onRebase,
+  onReword,
   onRevert,
+  onSquash,
 }: {
   readonly commit: CommitInfo;
   readonly disabled: boolean;
@@ -134,12 +162,17 @@ function CommitContextMenu({
   readonly left: number;
   readonly top: number;
   readonly onCherryPick: () => void;
+  readonly onAmend: () => void;
+  readonly onFixup: () => void;
+  readonly onRebase: () => void;
+  readonly onReword: () => void;
   readonly onRevert: () => void;
+  readonly onSquash: () => void;
 }) {
   const commitLabel = commit.shortHash || commit.hash.slice(0, 12);
   const menuStyle: CSSProperties = {
     left: clamp(left, 8, window.innerWidth - 228),
-    top: clamp(top, 8, window.innerHeight - 148),
+    top: clamp(top, 8, window.innerHeight - 292),
   };
 
   return createPortal(
@@ -151,6 +184,56 @@ function CommitContextMenu({
       onClick={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
     >
+      <button
+        type="button"
+        role="menuitem"
+        disabled={disabled}
+        title={disabledReason ?? "Amend HEAD with staged changes"}
+        onClick={onAmend}
+      >
+        <PenLine size={13} />
+        <span>Amend HEAD</span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        disabled={disabled}
+        title={disabledReason ?? `Fixup ${commitLabel}`}
+        onClick={onFixup}
+      >
+        <Wrench size={13} />
+        <span>{`Fixup ${commitLabel}`}</span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        disabled={disabled}
+        title={disabledReason ?? `Reword ${commitLabel}`}
+        onClick={onReword}
+      >
+        <PenLine size={13} />
+        <span>{`Reword ${commitLabel}`}</span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        disabled={disabled}
+        title={disabledReason ?? `Squash ${commitLabel}`}
+        onClick={onSquash}
+      >
+        <Scissors size={13} />
+        <span>{`Squash ${commitLabel}`}</span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        disabled={disabled}
+        title={disabledReason ?? `Interactive rebase from ${commitLabel}`}
+        onClick={onRebase}
+      >
+        <ListTodo size={13} />
+        <span>{`Rebase from ${commitLabel}`}</span>
+      </button>
       <button
         type="button"
         role="menuitem"
