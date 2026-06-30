@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import { GitBranch, PenLine, Plus, Trash2 } from "lucide-react";
+import { GitBranch, Link2, PenLine, Plus, Trash2 } from "lucide-react";
 import type { BranchInfo } from "../../lib/api";
 import type { BranchActionKind } from "../../lib/branchModels";
 import { clamp } from "../../lib/numeric";
@@ -19,7 +19,7 @@ export function BranchContextMenu({
   const isLocal = branch.branchType === "local";
   const menuStyle: CSSProperties = {
     left: clamp(left, 8, window.innerWidth - 216),
-    top: clamp(top, 8, window.innerHeight - 154),
+    top: clamp(top, 8, window.innerHeight - 212),
   };
 
   return createPortal(
@@ -51,12 +51,31 @@ export function BranchContextMenu({
       <button
         type="button"
         role="menuitem"
+        disabled={!isLocal}
+        onClick={() => onAction("setUpstream", branch)}
+      >
+        <Link2 size={13} />
+        <span>Set upstream</span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
         className="danger"
         disabled={!isLocal || branch.current}
         onClick={() => onAction("delete", branch)}
       >
         <Trash2 size={13} />
         <span>Delete</span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className="danger"
+        disabled={isLocal}
+        onClick={() => onAction("deleteRemote", branch)}
+      >
+        <Trash2 size={13} />
+        <span>Delete remote branch</span>
       </button>
     </div>,
     document.body,

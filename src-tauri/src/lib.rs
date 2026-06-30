@@ -48,6 +48,7 @@ mod git_tag;
 mod git_log_tracking_tests;
 mod git_pathspec;
 mod git_restore;
+mod git_remote;
 mod git_stash;
 mod git_status;
 mod git_tracking;
@@ -7284,6 +7285,12 @@ pub fn run() {
             search_editor_text,
             replace_editor_text,
             fetch_remotes,
+            git_remote::list_remotes,
+            git_remote::add_remote,
+            git_remote::rename_remote,
+            git_remote::remove_remote,
+            git_remote::set_branch_upstream,
+            git_remote::delete_remote_branch,
             checkout_branch,
             create_branch,
             create_worktree,

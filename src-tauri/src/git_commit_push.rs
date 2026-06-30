@@ -29,6 +29,16 @@ pub(crate) struct ResetHardToReflogRequest {
     pub(crate) selector: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PushCurrentBranchRequest {
+    pub(crate) path: String,
+    pub(crate) remote: Option<String>,
+    pub(crate) branch: Option<String>,
+    pub(crate) set_upstream: bool,
+    pub(crate) force_with_lease: bool,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CommitWriteResponse {
@@ -67,24 +77,26 @@ pub(crate) async fn create_commit(request: CommitRequest) -> Result<CommitWriteR
 }
 
 #[tauri::command]
-pub(crate) async fn push_current_branch(path: String) -> Result<GitWriteResponse, String> {
+pub(crate) async fn push_current_branch(
+    request: PushCurrentBranchRequest,
+) -> Result<GitWriteResponse, String> {
     blocking_command("push_current_branch", move || {
-        let root = repository_root(&path)?;
-        let target = resolve_push_target(&root)?;
-        validate_push_state(&root, &target)?;
+        let root = repository_root(&request.path)?;
+        let target = resolve_push_target(&root, &request)?;
+        validate_push_state(&root, &target, request.force_with_lease)?;
 
         let refspec = format!("HEAD:{}", target.merge_ref);
-        git_with_env_stdout_on_error(
-            &root,
-            &[
-                "push",
-                "--porcelain",
-                target.remote.as_str(),
-                refspec.as_str(),
-            ],
-            NONINTERACTIVE_GIT_ENV,
-        )
-        .map_err(map_push_error)?;
+        let mut args = vec!["push", "--porcelain"];
+        if request.force_with_lease {
+            args.push("--force-with-lease");
+        }
+        if target.set_upstream {
+            args.push("--set-upstream");
+        }
+        args.push(target.remote.as_str());
+        args.push(refspec.as_str());
+        git_with_env_stdout_on_error(&root, &args, NONINTERACTIVE_GIT_ENV)
+            .map_err(map_push_error)?;
         verify_remote_ref_matches_head(&root, &target)?;
 
         git_write_response(&root)
@@ -119,10 +131,37 @@ struct PushTarget {
     remote: String,
     merge_ref: String,
     upstream_ref: String,
+    set_upstream: bool,
 }
 
-fn resolve_push_target(root: &Path) -> Result<PushTarget, String> {
+fn resolve_push_target(
+    root: &Path,
+    request: &PushCurrentBranchRequest,
+) -> Result<PushTarget, String> {
     let branch = current_local_branch(root)?;
+    if request.set_upstream || request.remote.is_some() || request.branch.is_some() {
+        let remote = normalize_remote_name(
+            request
+                .remote
+                .as_deref()
+                .ok_or_else(|| "Choose a remote before publishing this branch".to_string())?,
+        )?;
+        git(root, &["remote", "get-url", remote.as_str()])
+            .map_err(|_| format!("Remote {remote} does not exist"))?;
+        let remote_branch = normalize_push_branch_name(
+            request.branch.as_deref().unwrap_or(branch.as_str()),
+        )?;
+        let merge_ref = format!("refs/heads/{remote_branch}");
+        let upstream_ref = format!("refs/remotes/{remote}/{remote_branch}");
+        return Ok(PushTarget {
+            branch,
+            remote,
+            merge_ref,
+            upstream_ref,
+            set_upstream: request.set_upstream,
+        });
+    }
+
     let missing = format!("No upstream is configured for branch {branch}");
     let remote_key = format!("branch.{branch}.remote");
     let merge_key = format!("branch.{branch}.merge");
@@ -139,6 +178,7 @@ fn resolve_push_target(root: &Path) -> Result<PushTarget, String> {
         remote,
         merge_ref,
         upstream_ref,
+        set_upstream: false,
     })
 }
 
@@ -158,8 +198,18 @@ fn git_config_value(root: &Path, key: &str, missing: &str) -> Result<String, Str
     }
 }
 
-fn validate_push_state(root: &Path, target: &PushTarget) -> Result<(), String> {
-    let (ahead, behind) = rev_list_ahead_behind(root, &target.upstream_ref)?;
+fn validate_push_state(
+    root: &Path,
+    target: &PushTarget,
+    force_with_lease: bool,
+) -> Result<(), String> {
+    let (ahead, behind) = if remote_ref_exists(root, &target.upstream_ref) {
+        rev_list_ahead_behind(root, &target.upstream_ref)?
+    } else if target.set_upstream {
+        (1, 0)
+    } else {
+        return Err(format!("Configured upstream {} was not found", target.upstream_ref));
+    };
     if ahead == 0 && behind == 0 {
         return Err(format!(
             "Branch {} has no local commits to push",
@@ -172,7 +222,7 @@ fn validate_push_state(root: &Path, target: &PushTarget) -> Result<(), String> {
             target.branch
         ));
     }
-    if ahead > 0 && behind > 0 {
+    if ahead > 0 && behind > 0 && !force_with_lease {
         return Err(format!(
             "Branch {} has diverged from its upstream; pull or rebase before pushing",
             target.branch
@@ -180,6 +230,10 @@ fn validate_push_state(root: &Path, target: &PushTarget) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn remote_ref_exists(root: &Path, upstream_ref: &str) -> bool {
+    git(root, &["rev-parse", "--verify", "--quiet", upstream_ref]).is_ok()
 }
 
 fn rev_list_ahead_behind(root: &Path, upstream_ref: &str) -> Result<(usize, usize), String> {
@@ -230,6 +284,35 @@ fn remote_hash_for_ref(output: &str, expected_ref: &str) -> Option<String> {
 
 fn git_trim(root: &Path, args: &[&str]) -> Result<String, String> {
     Ok(git(root, args)?.trim().to_string())
+}
+
+fn normalize_remote_name(remote: &str) -> Result<String, String> {
+    let trimmed = remote.trim();
+    if trimmed.is_empty() {
+        return Err("Remote name cannot be empty".to_string());
+    }
+    if trimmed.contains('\0') {
+        return Err("Remote name cannot contain NUL bytes".to_string());
+    }
+    if trimmed.starts_with('-') || trimmed.chars().any(char::is_whitespace) {
+        return Err(format!("Invalid remote name {trimmed}"));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn normalize_push_branch_name(branch: &str) -> Result<String, String> {
+    let trimmed = branch
+        .trim()
+        .strip_prefix("refs/heads/")
+        .unwrap_or(branch.trim());
+    if trimmed.is_empty() {
+        return Err("Remote branch name cannot be empty".to_string());
+    }
+    if trimmed.contains('\0') || trimmed.starts_with('-') || trimmed.chars().any(char::is_whitespace)
+    {
+        return Err(format!("Invalid remote branch name {trimmed}"));
+    }
+    Ok(trimmed.to_string())
 }
 
 fn normalize_reflog_selector(selector: &str) -> Result<String, String> {

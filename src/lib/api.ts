@@ -326,6 +326,52 @@ export interface PushTagRequest {
   readonly remote: string;
 }
 
+export interface RemoteInfo {
+  readonly name: string;
+  readonly url: string;
+  readonly pushUrl: string;
+}
+
+export interface ListRemotesResponse {
+  readonly remotes: RemoteInfo[];
+}
+
+export interface AddRemoteRequest {
+  readonly path: string;
+  readonly name: string;
+  readonly url: string;
+}
+
+export interface RenameRemoteRequest {
+  readonly path: string;
+  readonly name: string;
+  readonly newName: string;
+}
+
+export interface RemoteWriteRequest {
+  readonly path: string;
+  readonly name: string;
+}
+
+export interface SetBranchUpstreamRequest {
+  readonly path: string;
+  readonly branch: string;
+  readonly upstream: string;
+}
+
+export interface DeleteRemoteBranchRequest {
+  readonly path: string;
+  readonly remote: string;
+  readonly branch: string;
+}
+
+export interface PushCurrentBranchOptions {
+  readonly remote?: string | null;
+  readonly branch?: string | null;
+  readonly setUpstream?: boolean;
+  readonly forceWithLease?: boolean;
+}
+
 export interface GitWriteResponse {
   readonly summary: RepositorySummary;
   readonly files: TreeFile[];
@@ -758,8 +804,17 @@ export async function createCommit(
 
 export async function pushCurrentBranch(
   path: string,
+  options: PushCurrentBranchOptions = {},
 ): Promise<GitWriteResponse> {
-  return apiInvoke<GitWriteResponse>("push_current_branch", { path });
+  return apiInvoke<GitWriteResponse>("push_current_branch", {
+    request: {
+      path,
+      remote: options.remote ?? null,
+      branch: options.branch ?? null,
+      setUpstream: options.setUpstream === true,
+      forceWithLease: options.forceWithLease === true,
+    },
+  });
 }
 
 export async function resetHardToReflog(
@@ -796,6 +851,40 @@ export async function pushTag(
   request: PushTagRequest,
 ): Promise<GitWriteResponse> {
   return apiInvoke<GitWriteResponse>("push_tag", { request });
+}
+
+export async function listRemotes(path: string): Promise<ListRemotesResponse> {
+  return apiInvoke<ListRemotesResponse>("list_remotes", { path });
+}
+
+export async function addRemote(
+  request: AddRemoteRequest,
+): Promise<GitWriteResponse> {
+  return apiInvoke<GitWriteResponse>("add_remote", { request });
+}
+
+export async function renameRemote(
+  request: RenameRemoteRequest,
+): Promise<GitWriteResponse> {
+  return apiInvoke<GitWriteResponse>("rename_remote", { request });
+}
+
+export async function removeRemote(
+  request: RemoteWriteRequest,
+): Promise<GitWriteResponse> {
+  return apiInvoke<GitWriteResponse>("remove_remote", { request });
+}
+
+export async function setBranchUpstream(
+  request: SetBranchUpstreamRequest,
+): Promise<GitWriteResponse> {
+  return apiInvoke<GitWriteResponse>("set_branch_upstream", { request });
+}
+
+export async function deleteRemoteBranch(
+  request: DeleteRemoteBranchRequest,
+): Promise<GitWriteResponse> {
+  return apiInvoke<GitWriteResponse>("delete_remote_branch", { request });
 }
 
 export async function listStashes(path: string): Promise<StashListResponse> {

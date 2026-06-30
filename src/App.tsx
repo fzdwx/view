@@ -41,6 +41,7 @@ import { useGitChangeActions } from "./hooks/useGitChangeActions";
 import { useGitFileActions } from "./hooks/useGitFileActions";
 import { useGitWriteGuard } from "./hooks/useGitWriteGuard";
 import { useGitWriteActions } from "./hooks/useGitWriteActions";
+import { useRemoteActions } from "./hooks/useRemoteActions";
 import { useStashActions } from "./hooks/useStashActions";
 import { useTagActions } from "./hooks/useTagActions";
 import { useWorktreeActions } from "./hooks/useWorktreeActions";
@@ -446,6 +447,12 @@ export function App() {
     gitWriteGuard,
     hasGitRepository,
     repositoryPayload: payload,
+    refreshProjectFileState,
+  });
+  const remoteActions = useRemoteActions({
+    activeProject,
+    gitWriteGuard,
+    hasGitRepository,
     refreshProjectFileState,
   });
 
@@ -985,6 +992,7 @@ export function App() {
       reflogEntries,
       reflogFilter,
       reflogLoading: reflogQuery.isLoading,
+      remoteActions,
       selectedBranch,
       selectedBranchRef,
       selectedChangePath,
@@ -1023,6 +1031,7 @@ export function App() {
       reflogEntries,
       reflogFilter,
       reflogQuery.isLoading,
+      remoteActions,
       resizeCommitInfo,
       restoreReflogEntry,
       selectBranchRef,

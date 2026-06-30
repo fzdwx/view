@@ -7,6 +7,7 @@ export type GitRepositoryWriteKind =
   | "commit"
   | "continue"
   | "push"
+  | "remote"
   | "reset"
   | "revert"
   | "skip"
@@ -99,6 +100,8 @@ function repositoryActionLabel(kind: GitRepositoryWriteKind): string {
       return "continue";
     case "push":
       return "push";
+    case "remote":
+      return "remote";
     case "reset":
       return "reset";
     case "revert":

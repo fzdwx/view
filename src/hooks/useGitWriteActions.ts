@@ -26,6 +26,10 @@ import type { EditorDraft } from "../lib/editorTypes";
 import { confirmNativeDialog, showNativeMessage } from "../lib/nativeDialogs";
 import type { SavedProject } from "../lib/projects";
 import {
+  forceWithLeaseConfirmation,
+  publishBranchLabel,
+} from "../lib/remoteActions";
+import {
   commitDirtyDraftWarning,
   commitDisabledReason as commitReason,
   commitMessageLint,
@@ -75,6 +79,8 @@ export interface GitWriteActions {
   readonly historyOperationPending: boolean;
   readonly abortGitOperationInProgress: () => Promise<boolean>;
   readonly continueGitOperationInProgress: () => Promise<boolean>;
+  readonly forcePushCurrentBranchWithLease: () => Promise<boolean>;
+  readonly publishCurrentBranchToRemote: () => Promise<boolean>;
   readonly pushCurrentBranchToUpstream: () => Promise<boolean>;
   readonly pushDisabledReason: string | null;
   readonly pushError: string | null;
@@ -139,6 +145,10 @@ export function useGitWriteActions({
     () =>
       currentRepositoryBranch(repositoryPayload?.summary.branches),
     [repositoryPayload?.summary.branches],
+  );
+  const defaultRemoteName = useMemo(
+    () => defaultRemoteForBranch(currentBranch, repositoryPayload),
+    [currentBranch, repositoryPayload],
   );
   const trimmedCommitMessage = commitMessage.trim();
   const hasNulByte = commitMessage.includes("\0");
@@ -270,6 +280,159 @@ export function useGitWriteActions({
     beginGitWrite,
     endGitWrite,
     pushDisabledReason,
+    refreshProjectFileState,
+  ]);
+
+  const publishCurrentBranchToRemote = useCallback(async (): Promise<boolean> => {
+    if (!activeProjectPath || !currentBranch?.current || currentBranch.branchType !== "local") {
+      const message = "Checkout a local branch before publishing.";
+      setPushError(message);
+      await showNativeMessage(message, { kind: "warning" });
+      return false;
+    }
+    const pendingReason = gitWriteOperationPendingTitle(pendingOperation);
+    if (pendingReason) {
+      setPushError(pendingReason);
+      await showNativeMessage(pendingReason, { kind: "warning" });
+      return false;
+    }
+    const remote = window.prompt("Publish to remote", defaultRemoteName);
+    if (remote === null) {
+      return false;
+    }
+    const remoteBranch = window.prompt("Remote branch", currentBranch.name);
+    if (remoteBranch === null) {
+      return false;
+    }
+    const normalizedRemote = remote.trim();
+    const normalizedBranch = remoteBranch.trim();
+    if (!normalizedRemote || !normalizedBranch) {
+      const message = "Enter a remote and branch before publishing.";
+      setPushError(message);
+      await showNativeMessage(message, { kind: "warning" });
+      return false;
+    }
+    const confirmed = await confirmNativeDialog(
+      publishBranchLabel(currentBranch.name, normalizedRemote, normalizedBranch),
+      {
+        cancelLabel: "Cancel",
+        kind: "info",
+        okLabel: "Publish",
+      },
+    );
+    if (!confirmed) {
+      return false;
+    }
+
+    const operation = {
+      kind: "push",
+      scope: "repository",
+    } satisfies GitWriteOperation;
+    if (!beginGitWrite(operation)) {
+      return false;
+    }
+
+    setCommitError(null);
+    setHistoryOperationError(null);
+    setPushError(null);
+    setResetError(null);
+    let shouldRefresh = false;
+
+    try {
+      shouldRefresh = true;
+      await pushCurrentBranch(activeProjectPath, {
+        remote: normalizedRemote,
+        branch: normalizedBranch,
+        setUpstream: true,
+      });
+      return true;
+    } catch (error) {
+      const message = errorMessage(error);
+      setPushError(message);
+      await showNativeMessage(message, { kind: "error" });
+      return false;
+    } finally {
+      if (shouldRefresh) {
+        await refreshProjectFileState(activeProjectPath);
+      }
+      endGitWrite(operation);
+    }
+  }, [
+    activeProjectPath,
+    beginGitWrite,
+    currentBranch,
+    defaultRemoteName,
+    endGitWrite,
+    pendingOperation,
+    refreshProjectFileState,
+  ]);
+
+  const forcePushCurrentBranchWithLease = useCallback(async (): Promise<boolean> => {
+    if (!activeProjectPath || !currentBranch?.current || currentBranch.branchType !== "local") {
+      const message = "Checkout a local branch before force pushing.";
+      setPushError(message);
+      await showNativeMessage(message, { kind: "warning" });
+      return false;
+    }
+    if (!currentBranch.upstream) {
+      const message = "Configure an upstream before force pushing.";
+      setPushError(message);
+      await showNativeMessage(message, { kind: "warning" });
+      return false;
+    }
+    const pendingReason = gitWriteOperationPendingTitle(pendingOperation);
+    if (pendingReason) {
+      setPushError(pendingReason);
+      await showNativeMessage(pendingReason, { kind: "warning" });
+      return false;
+    }
+    const confirmed = await confirmNativeDialog(
+      forceWithLeaseConfirmation(currentBranch.name, currentBranch.upstream),
+      {
+        cancelLabel: "Cancel",
+        kind: "warning",
+        okLabel: "Force with lease",
+      },
+    );
+    if (!confirmed) {
+      return false;
+    }
+
+    const operation = {
+      kind: "push",
+      scope: "repository",
+    } satisfies GitWriteOperation;
+    if (!beginGitWrite(operation)) {
+      return false;
+    }
+
+    setCommitError(null);
+    setHistoryOperationError(null);
+    setPushError(null);
+    setResetError(null);
+    let shouldRefresh = false;
+
+    try {
+      shouldRefresh = true;
+      await pushCurrentBranch(activeProjectPath, { forceWithLease: true });
+      return true;
+    } catch (error) {
+      const message = errorMessage(error);
+      setPushError(message);
+      await showNativeMessage(message, { kind: "error" });
+      return false;
+    } finally {
+      if (shouldRefresh) {
+        await refreshProjectFileState(activeProjectPath);
+      }
+      endGitWrite(operation);
+    }
+  }, [
+    activeProjectPath,
+    beginGitWrite,
+    currentBranch,
+    endGitWrite,
+    pendingOperation,
     refreshProjectFileState,
   ]);
 
@@ -567,6 +730,7 @@ export function useGitWriteActions({
     currentBranch,
     dirtyDraftCount,
     continueGitOperationInProgress,
+    forcePushCurrentBranchWithLease,
     gitOperationError,
     gitOperationPending:
       pendingGitWriteAction === "abort" ||
@@ -580,6 +744,7 @@ export function useGitWriteActions({
       pendingGitWriteAction === "cherryPick" ||
       pendingGitWriteAction === "revert",
     pendingGitWriteAction,
+    publishCurrentBranchToRemote,
     pushCurrentBranchToUpstream,
     pushDisabledReason,
     pushError,
@@ -631,6 +796,28 @@ function operationButtonLabel(kind: "abort" | "continue" | "skip"): string {
 
 function shortCommitLabel(hash: string): string {
   return hash.length > 12 ? hash.slice(0, 12) : hash;
+}
+
+function defaultRemoteForBranch(
+  branch: BranchInfo | null,
+  payload: RepositoryPayload | undefined,
+): string {
+  const upstreamRemote = branch?.upstream
+    ?.replace(/^refs\/remotes\//, "")
+    .split("/")[0];
+  if (upstreamRemote) {
+    return upstreamRemote;
+  }
+  for (const candidate of payload?.summary.branches ?? []) {
+    if (candidate.branchType !== "remote") {
+      continue;
+    }
+    const [remote] = candidate.name.split("/");
+    if (remote) {
+      return remote;
+    }
+  }
+  return "origin";
 }
 
 function errorMessage(error: unknown): string {

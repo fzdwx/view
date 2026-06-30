@@ -15,6 +15,7 @@ import type {
 import type { WorktreeActions } from "../../hooks/useWorktreeActions";
 import type { StashActions } from "../../hooks/useStashActions";
 import type { TagActions } from "../../hooks/useTagActions";
+import type { RemoteActions } from "../../hooks/useRemoteActions";
 import type { BranchActionKind } from "../../lib/branchModels";
 import type { GitWriteActions } from "../../hooks/useGitWriteActions";
 import {
@@ -28,6 +29,7 @@ import type { TreeGitFileActions } from "../TreeContextMenu";
 import { BranchTree } from "../git/BranchTree";
 import { CommitInspector } from "../git/CommitInspector";
 import { StashList } from "../git/StashList";
+import { RemoteManager } from "../git/RemoteManager";
 import { VirtualCommitList } from "../git/VirtualCommitList";
 import { WorktreeList } from "../git/WorktreeList";
 import { FragmentWithSplitter } from "./FragmentWithSplitter";
@@ -59,6 +61,7 @@ export interface GitPanelDataProps {
   readonly reflogEntries: ReflogEntry[];
   readonly reflogFilter: string;
   readonly reflogLoading: boolean;
+  readonly remoteActions: RemoteActions;
   readonly selectedBranch: BranchInfo | null;
   readonly selectedBranchRef: string | null;
   readonly selectedChangePath: string | null;
@@ -323,6 +326,7 @@ export const GitPanelBody = memo(function GitPanelBody({
   reflogEntries,
   reflogFilter,
   reflogLoading,
+  remoteActions,
   selectedBranch,
   selectedBranchRef,
   selectedChangePath,
@@ -363,6 +367,7 @@ export const GitPanelBody = memo(function GitPanelBody({
               <StashList actions={stashActions} />
               <section className="repository-refs-panel" aria-label="Repository refs">
                 <div className="repository-section-label">Refs</div>
+                <RemoteManager actions={remoteActions} />
                 <BranchTree
                   branches={payload.summary.branches}
                   tags={payload.summary.tags}

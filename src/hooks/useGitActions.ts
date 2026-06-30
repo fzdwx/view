@@ -11,9 +11,11 @@ import {
   checkoutBranch,
   createBranch,
   deleteBranch,
+  deleteRemoteBranch,
   isTauriRuntime,
   pullCurrentBranch,
   renameBranch,
+  setBranchUpstream,
 } from "../lib/api";
 import {
   type BranchActionKind,
@@ -21,6 +23,7 @@ import {
 } from "../lib/branchModels";
 import { confirmNativeDialog, showNativeMessage } from "../lib/nativeDialogs";
 import type { SavedProject } from "../lib/projects";
+import { normalizeRemoteBranchName } from "../lib/remoteActions";
 
 type RefetchQuery = () => Promise<unknown>;
 
@@ -231,6 +234,63 @@ export function useGitActions({
               }
               await deleteBranch(activeProject.activePath, branch.refName, true);
             }
+            if (activeBranchRef === branch.refName) {
+              setActiveBranchRef(null);
+            }
+            await refreshProjectFileState(activeProject.activePath);
+            return;
+          }
+          case "setUpstream": {
+            if (branch.branchType !== "local") {
+              await showNativeMessage("Only local branches can track upstreams.", {
+                kind: "warning",
+              });
+              return;
+            }
+            const upstream = window.prompt(
+              `Set upstream for ${branchLabel}`,
+              branch.upstream?.replace(/^refs\/remotes\//, "") ?? `origin/${branch.name}`,
+            );
+            if (!upstream?.trim()) {
+              return;
+            }
+            await setBranchUpstream({
+              path: activeProject.activePath,
+              branch: branch.name,
+              upstream: upstream.trim(),
+            });
+            await refreshProjectFileState(activeProject.activePath);
+            return;
+          }
+          case "deleteRemote": {
+            if (branch.branchType !== "remote") {
+              await showNativeMessage("Only remote branches can be deleted here.", {
+                kind: "warning",
+              });
+              return;
+            }
+            const [remoteName] = branch.name.split("/");
+            const remoteBranch = normalizeRemoteBranchName(branch.name);
+            if (!remoteName || !remoteBranch) {
+              await showNativeMessage("Remote branch name is invalid.", {
+                kind: "warning",
+              });
+              return;
+            }
+            if (
+              !(await confirmNativeDialog(`Delete remote branch ${branch.name}?`, {
+                cancelLabel: "Cancel",
+                kind: "warning",
+                okLabel: "Delete",
+              }))
+            ) {
+              return;
+            }
+            await deleteRemoteBranch({
+              path: activeProject.activePath,
+              remote: remoteName,
+              branch: remoteBranch,
+            });
             if (activeBranchRef === branch.refName) {
               setActiveBranchRef(null);
             }

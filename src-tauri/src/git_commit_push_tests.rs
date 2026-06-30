@@ -1,7 +1,7 @@
 use super::{
     create_commit as async_create_commit, push_current_branch as async_push_current_branch,
     reset_hard_to_reflog as async_reset_hard_to_reflog, CommitRequest, CommitWriteResponse,
-    ResetHardToReflogRequest,
+    PushCurrentBranchRequest, ResetHardToReflogRequest,
 };
 use crate::git_write::GitWriteResponse;
 use std::fs;
@@ -20,7 +20,21 @@ fn create_commit(request: CommitRequest) -> Result<CommitWriteResponse, String> 
 }
 
 fn push_current_branch(path: String) -> Result<GitWriteResponse, String> {
-    tauri::async_runtime::block_on(async_push_current_branch(path))
+    tauri::async_runtime::block_on(async_push_current_branch(
+        PushCurrentBranchRequest {
+            path,
+            remote: None,
+            branch: None,
+            set_upstream: false,
+            force_with_lease: false,
+        },
+    ))
+}
+
+fn push_current_branch_request(
+    request: PushCurrentBranchRequest,
+) -> Result<GitWriteResponse, String> {
+    tauri::async_runtime::block_on(async_push_current_branch(request))
 }
 
 fn reset_hard_to_reflog(request: ResetHardToReflogRequest) -> Result<GitWriteResponse, String> {
@@ -254,6 +268,31 @@ fn push_rejects_missing_upstream() {
 }
 
 #[test]
+fn push_publishes_branch_and_sets_upstream_when_requested() {
+    let (_seed, remote, clone) = create_clone_with_local_bare_remote();
+    run_git(clone.path(), &["config", "--unset", "branch.main.remote"]);
+    run_git(clone.path(), &["config", "--unset", "branch.main.merge"]);
+    fs::write(clone.path().join("tracked.txt"), "publish\n").expect("modify tracked");
+    run_git(clone.path(), &["add", "tracked.txt"]);
+    let commit = create_commit(commit_request(clone.path(), "publish branch")).expect("commit");
+
+    push_current_branch_request(PushCurrentBranchRequest {
+        path: clone.path_string(),
+        remote: Some("origin".to_string()),
+        branch: Some("main".to_string()),
+        set_upstream: true,
+        force_with_lease: false,
+    })
+    .expect("publish branch");
+
+    assert_eq!(run_git_dir(remote.path(), &["rev-parse", "refs/heads/main"]), commit.hash);
+    assert_eq!(
+        run_git(clone.path(), &["rev-parse", "--symbolic-full-name", "@{upstream}"]),
+        "refs/remotes/origin/main"
+    );
+}
+
+#[test]
 fn push_rejects_when_branch_has_no_local_commits() {
     // Given: the current branch matches its configured upstream.
     let (_seed, _remote, clone) = create_clone_with_local_bare_remote();
@@ -311,6 +350,39 @@ fn push_rejects_diverged_branch() {
         local.hash
     ));
     assert!(error.contains("diverged from its upstream"));
+}
+
+#[test]
+fn push_force_with_lease_allows_diverged_branch_only_when_explicit() {
+    let (_seed, remote, clone) = create_clone_with_local_bare_remote();
+    fs::write(clone.path().join("tracked.txt"), "local advanced\n").expect("modify tracked");
+    run_git(clone.path(), &["add", "tracked.txt"]);
+    let local = create_commit(commit_request(clone.path(), "local advance")).expect("commit");
+    advance_remote(&remote, "remote advanced\n");
+    run_git(clone.path(), &["fetch", "origin"]);
+
+    let rejected = match push_current_branch_request(PushCurrentBranchRequest {
+        path: clone.path_string(),
+        remote: None,
+        branch: None,
+        set_upstream: false,
+        force_with_lease: false,
+    }) {
+        Ok(_) => panic!("diverged branch without force-with-lease should be rejected"),
+        Err(error) => error,
+    };
+    assert!(rejected.contains("diverged from its upstream"));
+
+    push_current_branch_request(PushCurrentBranchRequest {
+        path: clone.path_string(),
+        remote: None,
+        branch: None,
+        set_upstream: false,
+        force_with_lease: true,
+    })
+    .expect("force-with-lease push");
+
+    assert_eq!(run_git_dir(remote.path(), &["rev-parse", "refs/heads/main"]), local.hash);
 }
 
 #[test]

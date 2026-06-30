@@ -14,12 +14,24 @@ export function PushAffordance({
   const availability = pushAvailability(displayedBranch, gitWriteActions);
   const buttonLabel = gitWriteActions.pushPending
     ? "Pushing"
+    : availability.action === "publish"
+      ? "Publish"
+      : availability.action === "force"
+        ? "Force"
     : availability.aheadCount > 0
       ? `Push ${availability.aheadCount}`
       : "Push";
 
   function handlePush() {
     if (!availability.canPush) {
+      return;
+    }
+    if (availability.action === "publish") {
+      void gitWriteActions.publishCurrentBranchToRemote();
+      return;
+    }
+    if (availability.action === "force") {
+      void gitWriteActions.forcePushCurrentBranchWithLease();
       return;
     }
     void gitWriteActions.pushCurrentBranchToUpstream();
@@ -56,6 +68,7 @@ export function PushAffordance({
 }
 
 interface PushAvailability {
+  readonly action: "force" | "publish" | "push" | null;
   readonly aheadCount: number;
   readonly canPush: boolean;
   readonly title: string;
@@ -71,6 +84,7 @@ function pushAvailability(
   if (gitWriteActions.pushPending) {
     return {
       aheadCount,
+      action: null,
       canPush: false,
       title: "Pushing current branch to upstream.",
     };
@@ -78,6 +92,7 @@ function pushAvailability(
   if (gitWriteActions.gitWritePendingReason) {
     return {
       aheadCount,
+      action: null,
       canPush: false,
       title: gitWriteActions.gitWritePendingReason,
     };
@@ -85,6 +100,7 @@ function pushAvailability(
   if (!isDisplayedCurrentLocalBranch(displayedBranch, currentBranch)) {
     return {
       aheadCount: 0,
+      action: null,
       canPush: false,
       title: displayedBranchBlockedReason(
         displayedBranch,
@@ -96,13 +112,35 @@ function pushAvailability(
   if (gitWriteActions.canPush && displayedBranch?.upstream) {
     return {
       aheadCount,
+      action: "push",
       canPush: true,
       title: `Push ${aheadCount} commit${aheadCount === 1 ? "" : "s"} from ${displayedBranch.name} to ${displayedBranch.upstream}.`,
+    };
+  }
+  if (displayedBranch && !displayedBranch.upstream) {
+    return {
+      aheadCount,
+      action: "publish",
+      canPush: true,
+      title: `Publish ${displayedBranch.name} and set its upstream.`,
+    };
+  }
+  if (
+    displayedBranch?.upstream &&
+    (displayedBranch.ahead ?? 0) > 0 &&
+    (displayedBranch.behind ?? 0) > 0
+  ) {
+    return {
+      aheadCount,
+      action: "force",
+      canPush: true,
+      title: `Force push ${displayedBranch.name} to ${displayedBranch.upstream} with lease.`,
     };
   }
 
   return {
     aheadCount,
+    action: null,
     canPush: false,
     title: pushBlockedReason(displayedBranch, gitWriteActions.pushDisabledReason),
   };

@@ -4263,6 +4263,97 @@ body.is-resizing-y .rail-bottom-panels {
   color: var(--ink);
 }
 
+.remote-manager {
+  display: grid;
+  gap: 2px;
+  border-bottom: 1px solid var(--line);
+  padding: 0 0 6px;
+}
+
+.remote-manager-header,
+.remote-row {
+  display: grid;
+  min-width: 0;
+  align-items: center;
+}
+
+.remote-manager-header {
+  grid-template-columns: minmax(0, 1fr) auto;
+  height: 26px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 0 5px;
+}
+
+.remote-row {
+  grid-template-columns: 16px minmax(48px, auto) minmax(0, 1fr) 20px 20px;
+  gap: 5px;
+  min-height: 26px;
+  border-radius: 5px;
+  color: var(--ink);
+  font-size: 12px;
+  padding: 0 5px;
+}
+
+.remote-row.muted {
+  grid-template-columns: 16px minmax(0, 1fr);
+  color: var(--muted);
+}
+
+.remote-row:hover {
+  background: var(--surface-2);
+}
+
+.remote-name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-url {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-row-button {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  padding: 0;
+}
+
+.remote-row-button:hover:not(:disabled) {
+  background: var(--surface-3);
+  color: var(--ink);
+}
+
+.remote-row-button.danger:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.remote-manager-error {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--danger);
+  font-size: 11px;
+  padding: 2px 5px 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .branch-head-row,
 .branch-row,
 .branch-folder-row {
