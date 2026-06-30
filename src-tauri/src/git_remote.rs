@@ -69,7 +69,11 @@ pub(crate) async fn list_remotes(path: String) -> Result<ListRemotesResponse, St
         let root = repository_root(&path)?;
         let output = git(&root, &["remote"])?;
         let mut remotes = Vec::new();
-        for name in output.lines().map(str::trim).filter(|name| !name.is_empty()) {
+        for name in output
+            .lines()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        {
             let url = git(&root, &["remote", "get-url", name])?.trim().to_string();
             let push_url = git(&root, &["remote", "get-url", "--push", name])?
                 .trim()
@@ -91,8 +95,7 @@ pub(crate) async fn add_remote(request: AddRemoteRequest) -> Result<GitWriteResp
         let root = repository_root(&request.path)?;
         let name = normalize_remote_name(&request.name)?;
         let url = normalize_remote_url(&request.url)?;
-        git(&root, &["remote", "add", name.as_str(), url.as_str()])
-            .map_err(map_remote_error)?;
+        git(&root, &["remote", "add", name.as_str(), url.as_str()]).map_err(map_remote_error)?;
         git_write_response(&root)
     })
     .await
@@ -106,17 +109,18 @@ pub(crate) async fn rename_remote(
         let root = repository_root(&request.path)?;
         let name = normalize_remote_name(&request.name)?;
         let new_name = normalize_remote_name(&request.new_name)?;
-        git(&root, &["remote", "rename", name.as_str(), new_name.as_str()])
-            .map_err(map_remote_error)?;
+        git(
+            &root,
+            &["remote", "rename", name.as_str(), new_name.as_str()],
+        )
+        .map_err(map_remote_error)?;
         git_write_response(&root)
     })
     .await
 }
 
 #[tauri::command]
-pub(crate) async fn remove_remote(
-    request: RemoteWriteRequest,
-) -> Result<GitWriteResponse, String> {
+pub(crate) async fn remove_remote(request: RemoteWriteRequest) -> Result<GitWriteResponse, String> {
     blocking_command("remove_remote", move || {
         let root = repository_root(&request.path)?;
         let name = normalize_remote_name(&request.name)?;
@@ -195,11 +199,16 @@ fn normalize_remote_url(url: &str) -> Result<String, String> {
 }
 
 fn normalize_local_branch_name(branch: &str) -> Result<String, String> {
-    let trimmed = branch.trim().strip_prefix("refs/heads/").unwrap_or(branch.trim());
+    let trimmed = branch
+        .trim()
+        .strip_prefix("refs/heads/")
+        .unwrap_or(branch.trim());
     if trimmed.is_empty() {
         return Err("Branch name cannot be empty".to_string());
     }
-    if trimmed.contains('\0') || trimmed.starts_with('-') || trimmed.chars().any(char::is_whitespace)
+    if trimmed.contains('\0')
+        || trimmed.starts_with('-')
+        || trimmed.chars().any(char::is_whitespace)
     {
         return Err(format!("Invalid branch name {trimmed}"));
     }
@@ -214,7 +223,9 @@ fn normalize_upstream_name(upstream: &str) -> Result<String, String> {
     if trimmed.is_empty() || !trimmed.contains('/') {
         return Err("Upstream must include a remote and branch".to_string());
     }
-    if trimmed.contains('\0') || trimmed.starts_with('-') || trimmed.chars().any(char::is_whitespace)
+    if trimmed.contains('\0')
+        || trimmed.starts_with('-')
+        || trimmed.chars().any(char::is_whitespace)
     {
         return Err(format!("Invalid upstream {trimmed}"));
     }

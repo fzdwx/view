@@ -148,9 +148,8 @@ fn resolve_push_target(
         )?;
         git(root, &["remote", "get-url", remote.as_str()])
             .map_err(|_| format!("Remote {remote} does not exist"))?;
-        let remote_branch = normalize_push_branch_name(
-            request.branch.as_deref().unwrap_or(branch.as_str()),
-        )?;
+        let remote_branch =
+            normalize_push_branch_name(request.branch.as_deref().unwrap_or(branch.as_str()))?;
         let merge_ref = format!("refs/heads/{remote_branch}");
         let upstream_ref = format!("refs/remotes/{remote}/{remote_branch}");
         return Ok(PushTarget {
@@ -208,7 +207,10 @@ fn validate_push_state(
     } else if target.set_upstream {
         (1, 0)
     } else {
-        return Err(format!("Configured upstream {} was not found", target.upstream_ref));
+        return Err(format!(
+            "Configured upstream {} was not found",
+            target.upstream_ref
+        ));
     };
     if ahead == 0 && behind == 0 {
         return Err(format!(
@@ -308,7 +310,9 @@ fn normalize_push_branch_name(branch: &str) -> Result<String, String> {
     if trimmed.is_empty() {
         return Err("Remote branch name cannot be empty".to_string());
     }
-    if trimmed.contains('\0') || trimmed.starts_with('-') || trimmed.chars().any(char::is_whitespace)
+    if trimmed.contains('\0')
+        || trimmed.starts_with('-')
+        || trimmed.chars().any(char::is_whitespace)
     {
         return Err(format!("Invalid remote branch name {trimmed}"));
     }

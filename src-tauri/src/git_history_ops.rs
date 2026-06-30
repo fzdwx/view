@@ -33,10 +33,8 @@ pub(crate) struct StartInteractiveRebaseRequest {
     pub(crate) base: String,
 }
 
-const NONINTERACTIVE_HISTORY_ENV: &[(&str, &str)] = &[
-    ("GIT_EDITOR", "true"),
-    ("GIT_MERGE_AUTOEDIT", "no"),
-];
+const NONINTERACTIVE_HISTORY_ENV: &[(&str, &str)] =
+    &[("GIT_EDITOR", "true"), ("GIT_MERGE_AUTOEDIT", "no")];
 
 #[tauri::command]
 pub(crate) async fn cherry_pick_commit(
@@ -77,7 +75,11 @@ pub(crate) async fn amend_commit(request: AmendCommitRequest) -> Result<GitWrite
     blocking_command("amend_commit", move || {
         let root = repository_root(&request.path)?;
         let mut args = vec!["commit", "--amend"];
-        let message = request.message.as_deref().map(str::trim).unwrap_or_default();
+        let message = request
+            .message
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or_default();
         if message.is_empty() {
             args.push("--no-edit");
         } else {
@@ -144,8 +146,12 @@ pub(crate) async fn squash_commit(request: CommitHashRequest) -> Result<GitWrite
         ensure_commit_is_head(&root, &commit, "squash")?;
         git(&root, &["rev-parse", "--verify", "HEAD^"])
             .map_err(|_| "Cannot squash the root commit into a parent".to_string())?;
-        git_with_env(&root, &["reset", "--soft", "HEAD^"], NONINTERACTIVE_HISTORY_ENV)
-            .map_err(|error| map_history_operation_error("squash", error))?;
+        git_with_env(
+            &root,
+            &["reset", "--soft", "HEAD^"],
+            NONINTERACTIVE_HISTORY_ENV,
+        )
+        .map_err(|error| map_history_operation_error("squash", error))?;
         git_with_env(
             &root,
             &["commit", "--amend", "--no-edit"],
@@ -203,7 +209,9 @@ fn resolve_rebase_base(root: &Path, base: &str) -> Result<String, String> {
     if trimmed.is_empty() {
         return Err("Rebase base is required".to_string());
     }
-    if trimmed.contains('\0') || trimmed.starts_with('-') || trimmed.chars().any(char::is_whitespace)
+    if trimmed.contains('\0')
+        || trimmed.starts_with('-')
+        || trimmed.chars().any(char::is_whitespace)
     {
         return Err("Rebase base must be a single revision".to_string());
     }
@@ -221,7 +229,9 @@ fn ensure_commit_is_head(root: &Path, commit: &str, operation: &str) -> Result<(
     if head == commit {
         Ok(())
     } else {
-        Err(format!("Can only {operation} HEAD in this lightweight history editor"))
+        Err(format!(
+            "Can only {operation} HEAD in this lightweight history editor"
+        ))
     }
 }
 

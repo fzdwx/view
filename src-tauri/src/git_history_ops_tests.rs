@@ -1,8 +1,8 @@
 use super::{
     amend_commit as async_amend_commit, cherry_pick_commit as async_cherry_pick_commit,
-    fixup_commit as async_fixup_commit, reword_commit as async_reword_commit,
-    revert_commit as async_revert_commit, squash_commit as async_squash_commit,
-    AmendCommitRequest, CommitHashRequest, RewordCommitRequest,
+    fixup_commit as async_fixup_commit, revert_commit as async_revert_commit,
+    reword_commit as async_reword_commit, squash_commit as async_squash_commit, AmendCommitRequest,
+    CommitHashRequest, RewordCommitRequest,
 };
 use crate::git_write::GitWriteResponse;
 use std::fs;
@@ -78,10 +78,7 @@ fn create_repo_with_tracked_file(prefix: &str) -> TempRepo {
         .expect("clock")
         .as_nanos();
     let repo = TempRepo {
-        path: std::env::temp_dir().join(format!(
-            "view-{prefix}-{}-{nanos}",
-            std::process::id()
-        )),
+        path: std::env::temp_dir().join(format!("view-{prefix}-{}-{nanos}", std::process::id())),
     };
     fs::create_dir_all(repo.path()).expect("create temp repo");
     run_git(repo.path(), &["init", "--initial-branch=main"]);
@@ -163,9 +160,18 @@ fn amend_commit_commits_staged_changes_into_head() {
 
     amend_commit(amend_request(repo.path(), Some("base amended"))).expect("amend");
 
-    assert_eq!(run_git(repo.path(), &["log", "--oneline"]).lines().count(), 1);
-    assert_eq!(run_git(repo.path(), &["log", "-1", "--pretty=%s"]), "base amended");
-    assert_eq!(run_git(repo.path(), &["show", "HEAD:tracked.txt"]), "amended");
+    assert_eq!(
+        run_git(repo.path(), &["log", "--oneline"]).lines().count(),
+        1
+    );
+    assert_eq!(
+        run_git(repo.path(), &["log", "-1", "--pretty=%s"]),
+        "base amended"
+    );
+    assert_eq!(
+        run_git(repo.path(), &["show", "HEAD:tracked.txt"]),
+        "amended"
+    );
 }
 
 #[test]
@@ -187,7 +193,10 @@ fn reword_commit_updates_selected_commit_message() {
 
     reword_commit(reword_request(repo.path(), &target, "renamed base")).expect("reword");
 
-    assert_eq!(run_git(repo.path(), &["log", "-1", "--pretty=%s"]), "renamed base");
+    assert_eq!(
+        run_git(repo.path(), &["log", "-1", "--pretty=%s"]),
+        "renamed base"
+    );
 }
 
 #[test]
@@ -200,7 +209,10 @@ fn squash_commit_squashes_head_into_parent() {
 
     squash_commit(commit_request(repo.path(), &head)).expect("squash");
 
-    assert_eq!(run_git(repo.path(), &["log", "--oneline"]).lines().count(), 1);
+    assert_eq!(
+        run_git(repo.path(), &["log", "--oneline"]).lines().count(),
+        1
+    );
     assert_eq!(run_git(repo.path(), &["show", "HEAD:second.txt"]), "second");
 }
 

@@ -81,7 +81,10 @@ fn set_branch_upstream_configures_tracking_ref() {
     .expect("set upstream");
 
     assert_eq!(
-        run_git(clone.path(), &["rev-parse", "--symbolic-full-name", "@{upstream}"]),
+        run_git(
+            clone.path(),
+            &["rev-parse", "--symbolic-full-name", "@{upstream}"]
+        ),
         "refs/remotes/origin/main"
     );
 }
@@ -90,9 +93,15 @@ fn set_branch_upstream_configures_tracking_ref() {
 fn delete_remote_branch_removes_remote_ref() {
     let (_seed, remote, clone) = create_clone_with_local_bare_remote();
     run_git(clone.path(), &["checkout", "-b", "feature/delete-remote"]);
-    run_git(clone.path(), &["push", "-u", "origin", "feature/delete-remote"]);
+    run_git(
+        clone.path(),
+        &["push", "-u", "origin", "feature/delete-remote"],
+    );
     assert_eq!(
-        run_git_dir(remote.path(), &["rev-parse", "refs/heads/feature/delete-remote"]),
+        run_git_dir(
+            remote.path(),
+            &["rev-parse", "refs/heads/feature/delete-remote"]
+        ),
         run_git(clone.path(), &["rev-parse", "HEAD"])
     );
 
@@ -103,5 +112,9 @@ fn delete_remote_branch_removes_remote_ref() {
     })
     .expect("delete remote branch");
 
-    assert!(run_git_dir(remote.path(), &["branch", "--list", "feature/delete-remote"]).is_empty());
+    assert!(run_git_dir(
+        remote.path(),
+        &["branch", "--list", "feature/delete-remote"]
+    )
+    .is_empty());
 }

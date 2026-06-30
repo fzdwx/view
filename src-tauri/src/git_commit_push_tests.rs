@@ -20,15 +20,13 @@ fn create_commit(request: CommitRequest) -> Result<CommitWriteResponse, String> 
 }
 
 fn push_current_branch(path: String) -> Result<GitWriteResponse, String> {
-    tauri::async_runtime::block_on(async_push_current_branch(
-        PushCurrentBranchRequest {
-            path,
-            remote: None,
-            branch: None,
-            set_upstream: false,
-            force_with_lease: false,
-        },
-    ))
+    tauri::async_runtime::block_on(async_push_current_branch(PushCurrentBranchRequest {
+        path,
+        remote: None,
+        branch: None,
+        set_upstream: false,
+        force_with_lease: false,
+    }))
 }
 
 fn push_current_branch_request(
@@ -285,9 +283,15 @@ fn push_publishes_branch_and_sets_upstream_when_requested() {
     })
     .expect("publish branch");
 
-    assert_eq!(run_git_dir(remote.path(), &["rev-parse", "refs/heads/main"]), commit.hash);
     assert_eq!(
-        run_git(clone.path(), &["rev-parse", "--symbolic-full-name", "@{upstream}"]),
+        run_git_dir(remote.path(), &["rev-parse", "refs/heads/main"]),
+        commit.hash
+    );
+    assert_eq!(
+        run_git(
+            clone.path(),
+            &["rev-parse", "--symbolic-full-name", "@{upstream}"]
+        ),
         "refs/remotes/origin/main"
     );
 }
@@ -382,7 +386,10 @@ fn push_force_with_lease_allows_diverged_branch_only_when_explicit() {
     })
     .expect("force-with-lease push");
 
-    assert_eq!(run_git_dir(remote.path(), &["rev-parse", "refs/heads/main"]), local.hash);
+    assert_eq!(
+        run_git_dir(remote.path(), &["rev-parse", "refs/heads/main"]),
+        local.hash
+    );
 }
 
 #[test]

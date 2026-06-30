@@ -24,7 +24,13 @@ fn commit_details_include_full_message_parents_refs_and_unsigned_status() {
     run_git(repo.path(), &["add", "tracked.txt"]);
     run_git(
         repo.path(),
-        &["commit", "-m", "subject line", "-m", "body line one\nbody line two"],
+        &[
+            "commit",
+            "-m",
+            "subject line",
+            "-m",
+            "body line one\nbody line two",
+        ],
     );
     run_git(repo.path(), &["tag", "v-details"]);
     let head = run_git(repo.path(), &["rev-parse", "HEAD"]);
@@ -36,7 +42,13 @@ fn commit_details_include_full_message_parents_refs_and_unsigned_status() {
     assert_eq!(details.subject, "subject line");
     assert!(details.body.contains("body line one"));
     assert_eq!(details.parents, vec![parent]);
-    assert!(details.refs.iter().any(|name| name == "refs/tags/v-details"));
+    assert!(details
+        .refs
+        .iter()
+        .any(|name| name == "refs/tags/v-details"));
     assert_eq!(details.signature.status, "unsigned");
-    assert_eq!(details.compare_base.as_deref(), details.parents.first().map(String::as_str));
+    assert_eq!(
+        details.compare_base.as_deref(),
+        details.parents.first().map(String::as_str)
+    );
 }

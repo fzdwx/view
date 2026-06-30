@@ -74,7 +74,9 @@ fn resolve_commit(root: &std::path::Path, commit: &str) -> Result<String, String
     if trimmed.is_empty() {
         return Err("Commit is required".to_string());
     }
-    if trimmed.contains('\0') || trimmed.starts_with('-') || trimmed.chars().any(char::is_whitespace)
+    if trimmed.contains('\0')
+        || trimmed.starts_with('-')
+        || trimmed.chars().any(char::is_whitespace)
     {
         return Err("Commit must be a single revision".to_string());
     }

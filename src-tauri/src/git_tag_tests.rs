@@ -1,6 +1,6 @@
 use super::{
-    create_tag as async_create_tag, delete_tag as async_delete_tag,
-    push_tag as async_push_tag, CreateTagRequest, DeleteTagRequest, PushTagRequest,
+    create_tag as async_create_tag, delete_tag as async_delete_tag, push_tag as async_push_tag,
+    CreateTagRequest, DeleteTagRequest, PushTagRequest,
 };
 use crate::git_write::GitWriteResponse;
 
@@ -91,8 +91,7 @@ fn create_tag_rejects_invalid_names_and_nul_bytes() {
 #[test]
 fn delete_local_tag() {
     let repo = create_repo_with_tracked_file("tag-delete");
-    create_tag(create_tag_request(repo.path(), "v1.2.0", "HEAD", ""))
-        .expect("create tag");
+    create_tag(create_tag_request(repo.path(), "v1.2.0", "HEAD", "")).expect("create tag");
 
     let response = delete_tag(DeleteTagRequest {
         path: repo.path_string(),
@@ -107,8 +106,7 @@ fn delete_local_tag() {
 #[test]
 fn push_tag_to_configured_remote() {
     let (_seed, remote, clone) = create_clone_with_local_bare_remote();
-    create_tag(create_tag_request(clone.path(), "v2.0.0", "HEAD", ""))
-        .expect("create tag");
+    create_tag(create_tag_request(clone.path(), "v2.0.0", "HEAD", "")).expect("create tag");
 
     push_tag(PushTagRequest {
         path: clone.path_string(),
